@@ -39,11 +39,8 @@ COPY --from=builder /app/dist ./dist
 # Salin backend server
 COPY server/ ./server/
 
-# Siapkan direktori persistensi data JSON dan atur hak akses untuk non-root user
-RUN mkdir -p /app/server/data && chown -R node:node /app
-
-# Gunakan non-root user untuk keamanan maksimal di server Ubuntu
-USER node
+# Siapkan direktori persistensi data JSON
+RUN mkdir -p /app/server/data && chmod -R 777 /app/server/data
 
 # Expose port aplikasi
 EXPOSE 5172

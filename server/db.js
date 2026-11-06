@@ -28,7 +28,7 @@ function writeJson(file, data) {
   try {
     fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    console.error(`Error writing ${file}:`, err);
+    console.error(`[DB WARNING] Gagal menulis ke ${file} (${err.code || err.message}). Pastikan folder server/data memiliki izin write (chmod 777 server/data).`);
   }
 }
 
@@ -152,8 +152,14 @@ function verifyPassword(password, storedHash) {
 // MANAJEMEN USER & SSO
 // ==========================================
 
+let inMemoryUsers = null;
+
 function getAllUsers() {
-  return readJson(USERS_FILE, []);
+  if (inMemoryUsers !== null) {
+    return inMemoryUsers;
+  }
+  inMemoryUsers = readJson(USERS_FILE, []);
+  return inMemoryUsers;
 }
 
 function findUserByUsername(username) {
@@ -196,6 +202,7 @@ function registerUser({ username, password, name }) {
   };
 
   users.push(newUser);
+  inMemoryUsers = users;
   writeJson(USERS_FILE, users);
 
   // Buat sesi login otomatis
@@ -312,8 +319,14 @@ function sanitizeUser(u) {
 // SESSION MANAGEMENT (TOKEN)
 // ==========================================
 
+let inMemorySessions = null;
+
 function getSessions() {
-  return readJson(SESSIONS_FILE, {});
+  if (inMemorySessions !== null) {
+    return inMemorySessions;
+  }
+  inMemorySessions = readJson(SESSIONS_FILE, {});
+  return inMemorySessions;
 }
 
 function createSession(userId) {
@@ -324,6 +337,7 @@ function createSession(userId) {
     createdAt: Date.now(),
     expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 hari
   };
+  inMemorySessions = sessions;
   writeJson(SESSIONS_FILE, sessions);
   return token;
 }
@@ -336,6 +350,7 @@ function getUserByToken(token) {
 
   if (Date.now() > session.expiresAt) {
     delete sessions[token];
+    inMemorySessions = sessions;
     writeJson(SESSIONS_FILE, sessions);
     return null;
   }

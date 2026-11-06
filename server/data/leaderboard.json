@@ -40,93 +40,13 @@
     "authType": "seed"
   },
   {
-    "userId": "user_088d0488-12ab-4a8e-b279-bd72a969ba48",
-    "username": "seliron",
-    "name": "seliron",
-    "avatar": "🎯",
-    "wins": 1,
-    "matchesPlayed": 7,
-    "points": 55,
-    "authType": "player"
-  },
-  {
-    "userId": "bot_ckmutpm",
-    "username": "Bot Hijau",
-    "name": "Bot Hijau",
-    "avatar": "🤖",
-    "wins": 6,
-    "matchesPlayed": 7,
-    "points": 155,
-    "authType": "bot"
-  },
-  {
-    "userId": "user_a54f98e4-679b-4eb2-9b7e-493039125acf",
-    "username": "loremepsum",
-    "name": "loremepsum",
+    "userId": "user_da2351a4-2e8d-4a4b-b3ed-abeae06b9260",
+    "username": "prod_tester",
+    "name": "Tester",
     "avatar": "🎯",
     "wins": 0,
     "matchesPlayed": 0,
     "points": 0,
     "authType": "password"
-  },
-  {
-    "userId": "user_goog_057b2704-c3b1-4c6b-8761-8d265b67a403",
-    "username": "jakplayer_509",
-    "name": "jakplayer_509",
-    "avatar": "https://lh3.googleusercontent.com/a/default-user",
-    "wins": 0,
-    "matchesPlayed": 1,
-    "points": 5,
-    "authType": "google"
-  },
-  {
-    "userId": "user_04d2e4a6-aa3c-41b8-9a7a-d744c2218962",
-    "username": "rajaharem",
-    "name": "rajaharem",
-    "avatar": "🎯",
-    "wins": 1,
-    "matchesPlayed": 1,
-    "points": 25,
-    "authType": "password"
-  },
-  {
-    "userId": "user_b3d3ecec-5575-4922-9bcb-b0038fc0e8bb",
-    "username": "idan",
-    "name": "idan",
-    "avatar": "🎯",
-    "wins": 0,
-    "matchesPlayed": 0,
-    "points": 0,
-    "authType": "password"
-  },
-  {
-    "userId": "user_goog_2620e459-fbdc-4734-8aa5-db869fb910ea",
-    "username": "jakplayer_468",
-    "name": "jakplayer_468",
-    "avatar": "https://lh3.googleusercontent.com/a/default-user",
-    "wins": 0,
-    "matchesPlayed": 0,
-    "points": 0,
-    "authType": "google"
-  },
-  {
-    "userId": "user_goog_80f51fac-072e-4fa8-9d6b-2415856373e3",
-    "username": "syahidan1",
-    "name": "Syahidan",
-    "avatar": "🎲",
-    "wins": 0,
-    "matchesPlayed": 0,
-    "points": 0,
-    "authType": "google"
-  },
-  {
-    "userId": "user_goog_8cd288bd-6895-486d-82c4-86cf38656bf8",
-    "username": "syahidandev",
-    "name": "Syahidan",
-    "avatar": "https://lh3.googleusercontent.com/a/default-user",
-    "wins": 0,
-    "matchesPlayed": 0,
-    "points": 0,
-    "authType": "google"
   }
 ]

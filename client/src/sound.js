@@ -734,6 +734,88 @@ class SoundManager {
       bell.stop(n.time + (n.dur * 0.55) + 0.02);
     });
   }
+
+  // Suara notifikasi chat baru: Nada pop-ping manis & renyah saat pesan baru diterima
+  playChatNotification() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    // 2-tone melodic bubble pop: B5 (987.77 Hz) -> E6 (1318.51 Hz)
+    const tones = [
+      { freq: 987.77, time: now, dur: 0.12, gain: 0.22 },
+      { freq: 1318.51, time: now + 0.07, dur: 0.22, gain: 0.28 }
+    ];
+
+    tones.forEach(t => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(t.freq, t.time);
+
+      gain.gain.setValueAtTime(0.001, t.time);
+      gain.gain.linearRampToValueAtTime(t.gain, t.time + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t.time + t.dur);
+
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(t.time);
+      osc.stop(t.time + t.dur + 0.01);
+
+      // Sentuhan sparkle subtle
+      const sparkle = ctx.createOscillator();
+      const sparkleGain = ctx.createGain();
+      sparkle.type = 'triangle';
+      sparkle.frequency.setValueAtTime(t.freq * 2, t.time);
+
+      sparkleGain.gain.setValueAtTime(0.001, t.time);
+      sparkleGain.gain.linearRampToValueAtTime(t.gain * 0.2, t.time + 0.008);
+      sparkleGain.gain.exponentialRampToValueAtTime(0.001, t.time + (t.dur * 0.6));
+
+      sparkle.connect(sparkleGain);
+      sparkleGain.connect(dest);
+      sparkle.start(t.time);
+      sparkle.stop(t.time + (t.dur * 0.6) + 0.01);
+    });
+  }
+
+  // Suara pembelian di Toko / Shop: Koin emas & chimes berkilau (B5 -> D#6 -> F#6)
+  playShopPurchase() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const coinNotes = [
+      { freq: 987.77, time: now, dur: 0.12, gain: 0.2 },
+      { freq: 1244.51, time: now + 0.06, dur: 0.15, gain: 0.25 },
+      { freq: 1479.98, time: now + 0.12, dur: 0.32, gain: 0.3 }
+    ];
+
+    coinNotes.forEach(n => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(n.freq, n.time);
+
+      gain.gain.setValueAtTime(0.001, n.time);
+      gain.gain.linearRampToValueAtTime(n.gain, n.time + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, n.time + n.dur);
+
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(n.time);
+      osc.stop(n.time + n.dur + 0.02);
+    });
+  }
 }
 
 export const sound = new SoundManager();

@@ -303,15 +303,47 @@ function loginWithGoogle({ googleId, email, name, picture, chosenUsername }) {
   };
 }
 
+// ==========================================
+// TOKO / SHOP JAKLUDO
+// ==========================================
+
+const SHOP_ITEMS = {
+  blackholeShield: {
+    id: 'blackholeShield',
+    name: 'Blackhole Shield',
+    icon: '🛡️',
+    price: 100,
+    type: 'passive',
+    description: 'Melindungi bidak dari sedotan Blackhole. Otomatis aktif saat menginjak petak Blackhole sehingga bidakmu tidak kembali ke markas.'
+  },
+  forceReturn: {
+    id: 'forceReturn',
+    name: 'Force Return',
+    icon: '⚡',
+    price: 100,
+    type: 'active',
+    description: 'Kemampuan eliminasi langsung instan. Aktif ketika kamu sudah berhasil menginjak bidak lawan sebanyak 3 kali.'
+  }
+};
+
 function sanitizeUser(u) {
   if (!u) return null;
+  const board = readJson(LEADERBOARD_FILE, []);
+  const entry = board.find(b => (u.id && b.userId === u.id) || (u.username && b.username.toLowerCase() === u.username.toLowerCase()));
+  const points = entry ? (entry.points || 0) : 0;
+
   return {
     id: u.id,
     username: u.username,
     name: u.name,
     avatar: u.avatar,
     email: u.email,
-    authType: u.authType
+    authType: u.authType,
+    points,
+    inventory: {
+      blackholeShield: (u.inventory && u.inventory.blackholeShield) || 0,
+      forceReturn: (u.inventory && u.inventory.forceReturn) || 0
+    }
   };
 }
 
@@ -364,7 +396,7 @@ function getUserByToken(token) {
 
 function ensureLeaderboardEntry(user) {
   const board = readJson(LEADERBOARD_FILE, []);
-  const existing = board.find(b => b.userId === user.id || b.username.toLowerCase() === user.username.toLowerCase());
+  let existing = board.find(b => b.userId === user.id || b.username.toLowerCase() === user.username.toLowerCase());
   if (!existing) {
     board.push({
       userId: user.id,
@@ -373,9 +405,12 @@ function ensureLeaderboardEntry(user) {
       avatar: user.avatar || '🎲',
       wins: 0,
       matchesPlayed: 0,
-      points: 0,
+      points: 200, // Bonus starter 200 poin untuk belanja di Toko!
       authType: user.authType
     });
+    writeJson(LEADERBOARD_FILE, board);
+  } else if (!existing.points || existing.points === 0) {
+    existing.points = 200; // Bonus selamat datang
     writeJson(LEADERBOARD_FILE, board);
   }
 }
@@ -452,6 +487,86 @@ function getLeaderboard() {
   return ranked;
 }
 
+// Pembelian item dari Shop/Store
+function buyShopItem({ userId, username, itemType }) {
+  const item = SHOP_ITEMS[itemType];
+  if (!item) {
+    return { error: 'Item toko tidak valid.' };
+  }
+
+  const users = getAllUsers();
+  let user = null;
+  if (userId) {
+    user = users.find(u => u.id === userId);
+  }
+  if (!user && username) {
+    user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  }
+  if (!user) {
+    return { error: 'Pengguna tidak ditemukan.' };
+  }
+
+  const board = readJson(LEADERBOARD_FILE, []);
+  let entry = board.find(b => (user.id && b.userId === user.id) || b.username.toLowerCase() === user.username.toLowerCase());
+  if (!entry) {
+    entry = {
+      userId: user.id,
+      username: user.username,
+      name: user.name,
+      avatar: user.avatar || '🎯',
+      wins: 0,
+      matchesPlayed: 0,
+      points: 200,
+      authType: user.authType
+    };
+    board.push(entry);
+  }
+
+  const currentPoints = entry.points || 0;
+  if (currentPoints < item.price) {
+    return { error: `Poin tidak mencukupi. Diperlukan ${item.price} poin, kamu memiliki ${currentPoints} poin.` };
+  }
+
+  // Kurangi saldo poin user
+  entry.points = currentPoints - item.price;
+  writeJson(LEADERBOARD_FILE, board);
+
+  // Tambah item ke inventaris user
+  if (!user.inventory) {
+    user.inventory = { blackholeShield: 0, forceReturn: 0 };
+  }
+  user.inventory[itemType] = (user.inventory[itemType] || 0) + 1;
+  writeJson(USERS_FILE, users);
+
+  return {
+    success: true,
+    item,
+    points: entry.points,
+    inventory: user.inventory,
+    user: sanitizeUser(user)
+  };
+}
+
+// Penggunaan item di dalam permainan
+function consumeUserItem({ userId, username, itemType }) {
+  if (!itemType) return false;
+  const users = getAllUsers();
+  let user = null;
+  if (userId) {
+    user = users.find(u => u.id === userId);
+  }
+  if (!user && username) {
+    user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  }
+  if (!user || !user.inventory || !user.inventory[itemType] || user.inventory[itemType] <= 0) {
+    return false;
+  }
+
+  user.inventory[itemType] -= 1;
+  writeJson(USERS_FILE, users);
+  return true;
+}
+
 // Cek apakah username tertentu adalah Ludo King saat ini
 function checkIsLudoKing(username) {
   if (!username) return false;
@@ -472,6 +587,9 @@ module.exports = {
   recordMatchResult,
   getLeaderboard,
   checkIsLudoKing,
-  sanitizeUser
+  sanitizeUser,
+  SHOP_ITEMS,
+  buyShopItem,
+  consumeUserItem
 };
 

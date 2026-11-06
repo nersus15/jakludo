@@ -6,6 +6,7 @@ import LudoBoard from './LudoBoard';
 import AuthModal from './AuthModal';
 import LeaderboardModal from './LeaderboardModal';
 import AudioSettingsModal from './AudioSettingsModal';
+import ShopModal from './ShopModal';
 import { sound } from './sound';
 import { triggerConfetti } from './confetti';
 import { COLORS, COLOR_OFFSETS, SAFE_TRACK_INDICES, COLOR_INFO } from './boardConstants';
@@ -31,12 +32,83 @@ function App() {
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const [showShopModal, setShowShopModal] = useState(false);
+  const [forceReturnTargeting, setForceReturnTargeting] = useState(false);
+  const [itemNotice, setItemNotice] = useState(null);
+  const lastShieldProtectIdRef = useRef(null);
+  const lastForceReturnUseIdRef = useRef(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [authToken, setAuthToken] = useState(localStorage.getItem('jakplayer_token') || localStorage.getItem('joybit_token') || '');
   const [activeSessionRoom, setActiveSessionRoom] = useState(localStorage.getItem('jakplayer_active_room') || localStorage.getItem('joybit_active_room') || '');
   const [sidebarTab, setSidebarTab] = useState('score');
   const [memberNotification, setMemberNotification] = useState(null);
   const hasTriggeredWin = useRef(false);
+
+  // Fitur Chat Realtime & Skill Unlock Alert
+  const [skillUnlockNotice, setSkillUnlockNotice] = useState(null);
+  const lastSkillUnlockIdRef = useRef(null);
+  const [chatInput, setChatInput] = useState('');
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [unreadChats, setUnreadChats] = useState(0);
+  const [chatToast, setChatToast] = useState(null);
+  const chatToastTimerRef = useRef(null);
+  const chatEndRef = useRef(null);
+  const mobileChatEndRef = useRef(null);
+  const prevChatLenRef = useRef(0);
+
+  // Status Jaringan, Ping & Indikator Loading Reconnect
+  const [ping, setPing] = useState(null);
+  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isSlowNetwork, setIsSlowNetwork] = useState(false);
+
+  // PWA Install Prompt State & Listener
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstall = e => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+      setIsInstalled(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    sound.playClick();
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choiceResult = await deferredPrompt.userChoice;
+      if (choiceResult && choiceResult.outcome === 'accepted') {
+        setIsInstalled(true);
+      }
+      setDeferredPrompt(null);
+    } else {
+      const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+      if (isIos) {
+        setShowIosInstallGuide(true);
+      } else {
+        alert('Untuk memasang JakLudo di perangkatmu, klik menu browser (titik tiga) lalu pilih "Instal Aplikasi" atau "Tambahkan ke Layar Utama".');
+      }
+    }
+  };
 
   // Verifikasi sesi login saat pertama kali dimuat
   useEffect(() => {
@@ -168,6 +240,145 @@ function App() {
     };
   }, [socket, playerId]);
 
+  // Monitoring Kualitas Jaringan, Latensi (Ping), & Indikator Sinyal Realtime
+  useEffect(() => {
+    const onConnect = () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+    };
+    const onDisconnect = () => {
+      setIsConnected(false);
+      setIsReconnecting(true);
+    };
+    const onConnectError = () => {
+      setIsConnected(false);
+      setIsReconnecting(true);
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
+
+    if (socket.io) {
+      socket.io.on('reconnect_attempt', () => setIsReconnecting(true));
+      socket.io.on('reconnect', () => {
+        setIsConnected(true);
+        setIsReconnecting(false);
+      });
+    }
+
+    // Ping periodik setiap 3 detik
+    const pingTimer = setInterval(() => {
+      if (socket.connected) {
+        const clientSentTime = Date.now();
+        socket.emit('network:ping', clientSentTime, (serverSentTime) => {
+          const latency = Math.max(1, Date.now() - clientSentTime);
+          setPing(latency);
+          setIsSlowNetwork(latency > 250);
+        });
+      }
+    }, 3000);
+
+    // Initial ping
+    if (socket.connected) {
+      socket.emit('network:ping', Date.now(), (st) => {
+        setPing(Math.max(1, Date.now() - st));
+      });
+    }
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
+      clearInterval(pingTimer);
+    };
+  }, [socket]);
+
+  // Peringatan ke pemain lain saat ada user yang mengaktifkan Skill Eliminasi
+  useEffect(() => {
+    if (room?.lastSkillUnlock && room.lastSkillUnlock.id !== lastSkillUnlockIdRef.current) {
+      lastSkillUnlockIdRef.current = room.lastSkillUnlock.id;
+      const isMe = room.lastSkillUnlock.playerId === playerId;
+      setSkillUnlockNotice({
+        ...room.lastSkillUnlock,
+        isMe
+      });
+      sound.playThunderSkill();
+      const timer = setTimeout(() => {
+        setSkillUnlockNotice(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [room?.lastSkillUnlock, playerId]);
+
+  // Alert visual & audio saat Blackhole Shield aktif atau Force Return dieksekusi
+  useEffect(() => {
+    if (room?.lastShieldProtect && room.lastShieldProtect.id !== lastShieldProtectIdRef.current) {
+      lastShieldProtectIdRef.current = room.lastShieldProtect.id;
+      setItemNotice({
+        type: 'shield',
+        icon: '🛡️',
+        title: 'PERISAI BLACKHOLE AKTIF!',
+        text: `Bidak milik ${room.lastShieldProtect.playerName} terlindungi dan terselamatkan dari Black Hole!`
+      });
+      sound.playJoinNotification();
+      const timer = setTimeout(() => setItemNotice(null), 5500);
+      return () => clearTimeout(timer);
+    }
+  }, [room?.lastShieldProtect]);
+
+  useEffect(() => {
+    if (room?.lastForceReturnUse && room.lastForceReturnUse.id !== lastForceReturnUseIdRef.current) {
+      lastForceReturnUseIdRef.current = room.lastForceReturnUse.id;
+      setItemNotice({
+        type: 'forceReturn',
+        icon: '⚡',
+        title: 'FORCE RETURN DIEKSEKUSI!',
+        text: `${room.lastForceReturnUse.attackerName} melancarkan eliminasi langsung terhadap bidak ${room.lastForceReturnUse.defenderName}!`
+      });
+      sound.playThunderSkill();
+      const timer = setTimeout(() => setItemNotice(null), 5500);
+      return () => clearTimeout(timer);
+    }
+  }, [room?.lastForceReturnUse]);
+
+  // Sinkronisasi Chat Realtime, Efek Suara Notifikasi & Toast Pop-Up Pesan
+  useEffect(() => {
+    const chatLen = room?.chats?.length || 0;
+    if (chatLen > prevChatLenRef.current) {
+      const lastMsg = room.chats[chatLen - 1];
+      if (lastMsg && lastMsg.senderId !== playerId) {
+        // Bunyikan nada notifikasi chat yang renyah & jelas
+        sound.playChatNotification();
+
+        if (!showChatModal) {
+          setUnreadChats(prev => prev + 1);
+        }
+
+        // Tampilkan Toast Pop-Up Pesan Masuk Mengambang
+        setChatToast(lastMsg);
+        if (chatToastTimerRef.current) clearTimeout(chatToastTimerRef.current);
+        chatToastTimerRef.current = setTimeout(() => {
+          setChatToast(null);
+        }, 4200);
+      }
+      setTimeout(() => {
+        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        if (mobileChatEndRef.current) mobileChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }, 60);
+    }
+    prevChatLenRef.current = chatLen;
+  }, [room?.chats, playerId, showChatModal]);
+
+  const handleSendChat = (e, customText) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const textToSend = typeof customText === 'string' ? customText : chatInput;
+    if (!textToSend || !textToSend.trim()) return;
+    sound.playClick();
+    socket.emit('room:chat', { text: textToSend.trim() });
+    setChatInput('');
+  };
+
   useEffect(() => {
     const unsub = sound.subscribe((st) => {
       setAudioState({ ...st });
@@ -291,8 +502,13 @@ function App() {
 
   const handleSelectSkillTarget = (targetPlayerId, targetPawnIdx) => {
     sound.playClick();
-    socket.emit('game:use_skill', { targetPlayerId, targetPawnIdx });
-    setSkillTargeting(false);
+    if (forceReturnTargeting) {
+      socket.emit('game:use_force_return', { targetPlayerId, targetPawnIdx });
+      setForceReturnTargeting(false);
+    } else {
+      socket.emit('game:use_skill', { targetPlayerId, targetPawnIdx });
+      setSkillTargeting(false);
+    }
   };
 
   const handleAccumulateSkill = () => {
@@ -427,13 +643,15 @@ function App() {
       socket.emit('room:leave', { code: currentCode });
     }
 
-    // 3. Reset state client kembali ke lobby beranda
+    // 3. Reset state client kembali ke landing page beranda
+    sound.setInRoom(false);
     setRoom(null);
     setCode('');
     setPlayerId('');
-    setScreen('lobby');
+    setScreen('home');
     setError('');
     setShowStatsModal(false);
+    setShowChatModal(false);
 
     // 4. Bersihkan URL query parameter ?room=...
     history.replaceState({}, '', location.pathname);
@@ -516,18 +734,214 @@ function App() {
     </div>
   );
 
+  const renderChatBox = (isMobile = false) => {
+    const quickChats = [
+      'Semangat! 🔥',
+      'GG! 👏',
+      'Awas petir! ⚡',
+      'Ampun bang! 😂',
+      'Jangan makan bidakku! 😭',
+      'Maju terus! 🚀'
+    ];
+
+    return (
+      <div className={`chat-box-card ${isMobile ? 'mobile-chat-card' : ''}`}>
+        <div className="chat-card-header">
+          <div className="chat-header-title">
+            <span>💬</span>
+            <strong>Obrolan Room</strong>
+            <span className="chat-count-tag">{(room?.chats || []).length}</span>
+          </div>
+          {isMobile && (
+            <button
+              type="button"
+              className="chat-close-btn"
+              onClick={() => setShowChatModal(false)}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Message Feed */}
+        <div className="chat-messages-container">
+          {(room?.chats || []).length === 0 ? (
+            <div className="chat-empty-hint">
+              <span>💬</span>
+              <p>Belum ada obrolan. Kirim pesan ke teman bermain!</p>
+            </div>
+          ) : (
+            (room?.chats || []).map(chat => {
+              const isMe = chat.senderId === playerId;
+              const senderColor = COLOR_INFO[chat.senderColor]?.hex || '#ff6200';
+              return (
+                <div key={chat.id} className={`chat-item ${isMe ? 'chat-me' : 'chat-other'}`}>
+                  {!isMe && (
+                    <span
+                      className="chat-sender-avatar"
+                      style={{ background: senderColor }}
+                    >
+                      {chat.senderName?.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <div className="chat-bubble">
+                    <div className="chat-meta">
+                      <span className="chat-name" style={{ color: senderColor }}>
+                        {isMe ? 'Kamu' : chat.senderName}
+                      </span>
+                      <span className="chat-time">{chat.time}</span>
+                    </div>
+                    <div className="chat-text">{chat.text}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div ref={isMobile ? mobileChatEndRef : chatEndRef} />
+        </div>
+
+        {/* Quick Chat Pills */}
+        <div className="quick-chat-pills-row">
+          {quickChats.map(qc => (
+            <button
+              key={qc}
+              type="button"
+              className="quick-chat-pill"
+              onClick={() => handleSendChat(null, qc)}
+            >
+              {qc}
+            </button>
+          ))}
+        </div>
+
+        {/* Input Bar */}
+        <form onSubmit={e => handleSendChat(e)} className="chat-input-bar">
+          <input
+            type="text"
+            placeholder="Tulis pesan obrolan..."
+            value={chatInput}
+            onChange={e => setChatInput(e.target.value)}
+            maxLength={120}
+            className="chat-input-box"
+          />
+          <button
+            type="submit"
+            className="chat-send-action-btn"
+            disabled={!chatInput.trim()}
+            title="Kirim Pesan"
+          >
+            ➤
+          </button>
+        </form>
+      </div>
+    );
+  };
+
+  const renderNetworkIndicator = (isCompact = false) => {
+    let quality = 'excellent'; // 'excellent' | 'good' | 'poor' | 'disconnected'
+    let qualityText = 'Sinyal Stabil';
+    let barsCount = 4;
+
+    if (!isConnected || isReconnecting) {
+      quality = 'disconnected';
+      qualityText = 'Menghubungkan Ulang...';
+      barsCount = 0;
+    } else if (ping === null) {
+      quality = 'checking';
+      qualityText = 'Memeriksa Sinyal...';
+      barsCount = 2;
+    } else if (ping < 100) {
+      quality = 'excellent';
+      qualityText = 'Sinyal Bagus & Stabil';
+      barsCount = 4;
+    } else if (ping < 250) {
+      quality = 'good';
+      qualityText = 'Sinyal Sedang';
+      barsCount = 3;
+    } else {
+      quality = 'poor';
+      qualityText = 'Sinyal Lemah / Tidak Stabil';
+      barsCount = 1;
+    }
+
+    return (
+      <div
+        className={`network-status-capsule quality-${quality} ${isCompact ? 'compact' : ''}`}
+        title={`Status Jaringan: ${qualityText} ${ping !== null && isConnected ? `(${ping}ms)` : ''}`}
+      >
+        <div className="network-signal-bars">
+          <span className={`sig-bar bar-1 ${barsCount >= 1 ? 'bar-lit' : ''}`} />
+          <span className={`sig-bar bar-2 ${barsCount >= 2 ? 'bar-lit' : ''}`} />
+          <span className={`sig-bar bar-3 ${barsCount >= 3 ? 'bar-lit' : ''}`} />
+          <span className={`sig-bar bar-4 ${barsCount >= 4 ? 'bar-lit' : ''}`} />
+        </div>
+
+        {/* Loading Spinner saat Reconnecting atau Sinyal Lemah */}
+        {(!isConnected || isReconnecting || quality === 'poor') && (
+          <span className="network-mini-spinner" />
+        )}
+
+        <span className="network-ping-text">
+          {!isConnected || isReconnecting
+            ? 'Menghubungkan...'
+            : ping !== null
+            ? `${ping}ms`
+            : '...'}
+        </span>
+      </div>
+    );
+  };
+
   return (
     <main className="app">
+      {/* Sticky Banner Loading Reconnect saat Sinyal Terputus / Tidak Stabil */}
+      {(!isConnected || isReconnecting) && (
+        <div className="network-reconnect-sticky-bar">
+          <div className="network-reconnect-inner">
+            <span className="network-reconnect-spinner" />
+            <div className="network-reconnect-msg">
+              <strong>⚠️ Sinyal Internet Tidak Stabil</strong>
+              <span>Sedang menghubungkan kembali ke server JakLudo...</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header: Saat pertandingan berlangsung, di atasnya dikosongkan kecuali kode room font kecil saja */}
       {screen === 'room' && room?.started ? (
         <div className="gameplay-minimal-header">
-          <span className="gameplay-small-code">
-            Room: <strong>#{room.code}</strong>
-          </span>
-          {blackHoleActive && (
-            <span className="gameplay-small-bh">🕳️ Black Hole ON</span>
-          )}
+          <div className="gameplay-header-left">
+            <span className="gameplay-small-code">
+              Room: <strong>#{room.code}</strong>
+            </span>
+            {blackHoleActive && (
+              <span className="gameplay-small-bh">🕳️ Black Hole ON</span>
+            )}
+          </div>
           <div className="gameplay-header-right">
+            {/* Indikator Sinyal & Latensi Kompak */}
+            {renderNetworkIndicator(true)}
+            <button
+              type="button"
+              className="gameplay-shop-mini"
+              onClick={() => {
+                sound.playClick();
+                setShowShopModal(true);
+              }}
+              title="Buka Toko Item JakLudo"
+            >
+              🏪 Toko
+            </button>
+            {!isInstalled && (
+              <button
+                type="button"
+                className="gameplay-install-mini"
+                onClick={handleInstallApp}
+                title="Pasang Aplikasi JakLudo"
+              >
+                📲 App
+              </button>
+            )}
             <button
               type="button"
               className="gameplay-sound-mini"
@@ -559,6 +973,36 @@ function App() {
           </div>
 
           <div className="header-actions">
+            {/* Tombol Toko Item / Shop */}
+            <button
+              type="button"
+              className="shop-nav-btn"
+              onClick={() => {
+                sound.playClick();
+                setShowShopModal(true);
+              }}
+              title="Buka Toko Item JakLudo"
+            >
+              🏪 <span className="shop-nav-text">Toko</span>
+              {currentUser && (
+                <span className="shop-nav-badge">
+                  💎 {currentUser.points ?? 0}
+                </span>
+              )}
+            </button>
+
+            {/* Tombol Pasang PWA App */}
+            {!isInstalled && (
+              <button
+                type="button"
+                className="pwa-install-header-btn"
+                onClick={handleInstallApp}
+                title="Pasang Aplikasi JakLudo"
+              >
+                📲 <span className="pwa-install-text">Pasang App</span>
+              </button>
+            )}
+
             {/* User Auth Profile Capsule */}
             {currentUser ? (
               <div className="user-profile-capsule">
@@ -603,6 +1047,9 @@ function App() {
                 {audioState.bgmMuted && audioState.sfxMuted ? ' Mute' : (audioState.isBgmPlaying ? ' Musik' : ' Audio')}
               </span>
             </button>
+
+            {/* Indikator Kualitas Jaringan & Sinyal */}
+            {renderNetworkIndicator(false)}
           </div>
         </header>
       )}
@@ -630,6 +1077,51 @@ function App() {
         </div>
       )}
 
+      {/* Toast Pop-Up Notifikasi Pesan Chat Baru Realtime */}
+      {chatToast && (
+        <div
+          className="chat-toast-popup"
+          key={chatToast.id}
+          onClick={() => {
+            sound.playClick();
+            setShowChatModal(true);
+            setUnreadChats(0);
+            setChatToast(null);
+          }}
+          title="Klik untuk membuka percakapan"
+        >
+          <div
+            className="chat-toast-avatar"
+            style={{ background: COLOR_INFO[chatToast.senderColor]?.hex || '#ff6200' }}
+          >
+            {chatToast.senderName ? chatToast.senderName.slice(0, 1).toUpperCase() : '💬'}
+          </div>
+          <div className="chat-toast-body">
+            <div className="chat-toast-header">
+              <span
+                className="chat-toast-sender"
+                style={{ color: COLOR_INFO[chatToast.senderColor]?.hex || '#0f172a' }}
+              >
+                {chatToast.senderName}
+              </span>
+              <span className="chat-toast-tag">PESAN BARU</span>
+            </div>
+            <div className="chat-toast-text">{chatToast.text}</div>
+          </div>
+          <button
+            type="button"
+            className="chat-toast-close"
+            onClick={(e) => {
+              e.stopPropagation();
+              setChatToast(null);
+            }}
+            title="Tutup Notifikasi"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Screen: Home */}
       {screen === 'home' ? (
         <section className="hero">
@@ -643,6 +1135,27 @@ function App() {
             <p>
               Game Ludo multiplayer realtime seru bersama teman. Dilengkapi dadu 3D interaktif, safezone, mode black hole, dan perebutan takhta Ludo King!
             </p>
+
+            {/* PWA Install Promo Strip on Home */}
+            {!isInstalled && (
+              <div className="pwa-home-banner">
+                <div className="pwa-home-left">
+                  <span className="pwa-app-icon">📲</span>
+                  <div>
+                    <strong>Pasang JakLudo di HP / Komputer</strong>
+                    <p>Main lebih cepat, layar penuh tanpa browser bar, dan hemat kuota!</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pwa-home-btn"
+                  onClick={handleInstallApp}
+                  title="Pasang Aplikasi JakLudo"
+                >
+                  ⚡ Pasang Gratis
+                </button>
+              </div>
+            )}
 
             {/* Sesi Pertandingan yang Masih Berlangsung */}
             {activeSessionRoom && (
@@ -690,7 +1203,23 @@ function App() {
                           <span className="home-king-badge">👑 LUDO KING</span>
                         )}
                       </div>
-                      <small className="logged-handle">@{currentUser.username}</small>
+                      <div className="logged-sub-row">
+                        <small className="logged-handle">@{currentUser.username}</small>
+                        <span className="logged-points-chip">
+                          💎 <strong>{currentUser.points ?? 0}</strong> Poin
+                        </span>
+                        <button
+                          type="button"
+                          className="logged-shop-btn"
+                          onClick={() => {
+                            sound.playClick();
+                            setShowShopModal(true);
+                          }}
+                          title="Buka Toko Item"
+                        >
+                          🏪 Toko Item
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -953,15 +1482,96 @@ function App() {
                 {/* Board Area */}
                 <div className="board-wrapper">
                   <div className="game-arena-column">
+                    {/* Alert Notifikasi Saat Ada Pemain yang Mendapatkan Skill Eliminasi */}
+                    {skillUnlockNotice && (
+                      <div className={`skill-unlock-alert-banner ${skillUnlockNotice.isMe ? 'alert-self' : 'alert-enemy'}`}>
+                        <div className="alert-bolt-icon">⚡</div>
+                        <div className="alert-content">
+                          <strong>
+                            {skillUnlockNotice.isMe
+                              ? '⚡ SKILL ELIMINASI AKTIF! (3 Bidak Masuk Garis Akhir)'
+                              : `⚠️ PERINGATAN DARURAT: ${skillUnlockNotice.playerName.toUpperCase()} MEMPEROLEH SKILL ELIMINASI!`}
+                          </strong>
+                          <p>
+                            {skillUnlockNotice.isMe
+                              ? 'Poin skill terisi! Kamu dapat mengeliminasi 1 bidak lawan di lintasan saat giliranmu!'
+                              : `Bidak ${skillUnlockNotice.playerName} sudah 3 finish. Waspadalah! Bidakmu yang ada di lintasan dapat disambar petir & dieliminasi!`}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="alert-close-btn"
+                          onClick={() => setSkillUnlockNotice(null)}
+                          title="Tutup Peringatan"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Alert Notifikasi Item Toko (Blackhole Shield / Force Return) */}
+                    {itemNotice && (
+                      <div className={`skill-unlock-alert-banner alert-${itemNotice.type}`}>
+                        <div className="alert-bolt-icon">{itemNotice.icon}</div>
+                        <div className="alert-content">
+                          <strong>{itemNotice.title}</strong>
+                          <p>{itemNotice.text}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="alert-close-btn"
+                          onClick={() => setItemNotice(null)}
+                          title="Tutup Peringatan"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
                     <LudoBoard
                       room={room}
                       myPlayerId={playerId}
                       isMyTurn={isTurn}
                       movablePawns={movablePawns}
                       onMovePawn={handleMovePawn}
-                      skillTargeting={skillTargeting}
+                      skillTargeting={skillTargeting || forceReturnTargeting}
                       onSelectSkillTarget={handleSelectSkillTarget}
                     />
+
+                    {/* Force Return Banner: Tampil saat memiliki item Force Return dan sudah minimal 3x injak */}
+                    {isTurn && (me?.inventory?.forceReturn || 0) > 0 && (me?.stompCount || 0) >= 3 && !room?.rolling && !room?.animatingMove && (
+                      <div className="skill-control-banner force-return-control-banner">
+                        <div className="skill-banner-head">
+                          <span className="skill-bolt-anim">⚡</span>
+                          <div className="skill-banner-text">
+                            <strong>⚡ FORCE RETURN AKTIF! (Sudah 3x Injak Bidak Lawan)</strong>
+                            <small>
+                              Injakan: <strong>{me.stompCount}/3</strong> · Tersisa <strong>{me.inventory.forceReturn}</strong>x item Force Return
+                            </small>
+                          </div>
+                        </div>
+
+                        <div className="skill-banner-actions">
+                          <button
+                            type="button"
+                            className={`btn-use-skill btn-force-active ${forceReturnTargeting ? 'targeting-active' : ''}`}
+                            onClick={() => {
+                              sound.playClick();
+                              setForceReturnTargeting(!forceReturnTargeting);
+                              setSkillTargeting(false);
+                            }}
+                          >
+                            {forceReturnTargeting ? '❌ Batal Pilih Target' : '⚡ Gunakan Force Return (Eliminasi Langsung)'}
+                          </button>
+                        </div>
+
+                        {forceReturnTargeting && (
+                          <div className="skill-target-help">
+                            🎯 <em>Klik bidak lawan manapun di arena untuk langsung memulangkannya ke markas!</em>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Skill Ultimate Banner: Tampil saat 3 bidak finish dan pemain punya poin skill */}
                     {isTurn && (room?.pawns?.[playerId]?.filter(v => v === 44).length || 0) >= 3 && (me?.skillPoints || 0) > 0 && !room?.rolling && !room?.animatingMove && (
@@ -1089,11 +1699,34 @@ function App() {
                           ))}
                           <button
                             type="button"
+                            className="mobile-emoji-pill mobile-chat-pill"
+                            onClick={() => {
+                              sound.playClick();
+                              setShowChatModal(true);
+                              setUnreadChats(0);
+                            }}
+                            title="Buka Obrolan Room"
+                          >
+                            💬 {unreadChats > 0 && <span className="mobile-chat-badge">{unreadChats}</span>}
+                          </button>
+                          <button
+                            type="button"
                             className="mobile-emoji-pill mobile-skor-pill"
                             onClick={() => setShowStatsModal(true)}
                             title="Buka Skor"
                           >
                             📊
+                          </button>
+                          <button
+                            type="button"
+                            className="mobile-emoji-pill mobile-shop-pill"
+                            onClick={() => {
+                              sound.playClick();
+                              setShowShopModal(true);
+                            }}
+                            title="Buka Toko Item"
+                          >
+                            🏪
                           </button>
                         </div>
                       </div>
@@ -1220,8 +1853,59 @@ function App() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Inventaris Item Pemain & Shortcut Toko */}
+                  <div className="game-inventory-card">
+                    <div className="game-inventory-header">
+                      <span className="inv-title">🎒 INVENTARIS ITEM</span>
+                      <button
+                        type="button"
+                        className="inv-shop-link-btn"
+                        onClick={() => {
+                          sound.playClick();
+                          setShowShopModal(true);
+                        }}
+                        title="Buka Toko Item"
+                      >
+                        🏪 Buka Toko
+                      </button>
+                    </div>
+                    <div className="game-inventory-chips">
+                      <div className={`inv-chip ${me?.inventory?.blackholeShield ? 'has-item' : 'zero-item'}`} title="Melindungi otomatis dari sedotan Black Hole">
+                        <span className="inv-chip-emoji">🛡️</span>
+                        <div className="inv-chip-details">
+                          <span className="inv-chip-label">Blackhole Shield</span>
+                          <strong className="inv-chip-qty">{me?.inventory?.blackholeShield || 0} buah</strong>
+                        </div>
+                      </div>
+
+                      <div className={`inv-chip ${me?.inventory?.forceReturn ? 'has-item' : 'zero-item'}`} title="Eliminasi langsung saat sudah 3x injak">
+                        <span className="inv-chip-emoji">⚡</span>
+                        <div className="inv-chip-details">
+                          <span className="inv-chip-label">Force Return</span>
+                          <strong className="inv-chip-qty">
+                            {me?.inventory?.forceReturn || 0} buah
+                            <span className="inv-stomp-tag">({me?.stompCount || 0}/3)</span>
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Desktop Chat Panel Realtime */}
+                  {renderChatBox(false)}
                 </div>
               </div>
+
+              {/* Chat Bottom Sheet Drawer for Mobile */}
+              {showChatModal && (
+                <div className="stats-modal-overlay" onClick={() => setShowChatModal(false)}>
+                  <div className="stats-bottom-sheet mobile-chat-sheet" onClick={e => e.stopPropagation()}>
+                    <div className="sheet-handle" />
+                    {renderChatBox(true)}
+                  </div>
+                </div>
+              )}
 
               {/* Stats & Log Bottom Sheet Drawer for Mobile */}
               {showStatsModal && (
@@ -1324,6 +2008,15 @@ function App() {
       <AudioSettingsModal
         isOpen={showAudioModal}
         onClose={() => setShowAudioModal(false)}
+      />
+
+      {/* Toko Item / Shop JakLudo (Blackhole Shield & Force Return) */}
+      <ShopModal
+        isOpen={showShopModal}
+        onClose={() => setShowShopModal(false)}
+        currentUser={currentUser}
+        onUpdateUser={setCurrentUser}
+        authToken={authToken}
       />
 
       {/* Footer */}

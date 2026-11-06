@@ -46,7 +46,27 @@
     "avatar": "🎯",
     "wins": 0,
     "matchesPlayed": 0,
-    "points": 0,
+    "points": 200,
     "authType": "password"
+  },
+  {
+    "userId": "user_53df1e07-cf72-4873-8706-ce4bd0524783",
+    "username": "seliron",
+    "name": "seliron",
+    "avatar": "🎯",
+    "wins": 0,
+    "matchesPlayed": 1,
+    "points": 5,
+    "authType": "password"
+  },
+  {
+    "userId": "bot_siw3c7e",
+    "username": "Bot Hijau",
+    "name": "Bot Hijau",
+    "avatar": "🤖",
+    "wins": 1,
+    "matchesPlayed": 1,
+    "points": 25,
+    "authType": "bot"
   }
 ]

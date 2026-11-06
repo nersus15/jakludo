@@ -312,7 +312,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
 
             <div className="form-group">
               <label>PASSWORD</label>
-              <div className="password-input-wrapper">
+              <div className="input-with-prefix password-input-box">
+                <span className="input-prefix">🔒</span>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Masukkan password"
@@ -400,7 +401,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
 
             <div className="form-group">
               <label>PASSWORD</label>
-              <div className="password-input-wrapper">
+              <div className="input-with-prefix password-input-box">
+                <span className="input-prefix">🔒</span>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Minimal 8 karakter unik & kuat"
@@ -467,7 +469,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                   </span>
                 )}
               </div>
-              <div className="password-input-wrapper">
+              <div className="input-with-prefix password-input-box">
+                <span className="input-prefix">🔒</span>
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   placeholder="Ketik ulang password di atas"

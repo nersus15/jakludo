@@ -36,6 +36,11 @@ function publicRoom(r) {
     lastBlackHole: r.lastBlackHole || null,
     lastGoal: r.lastGoal || null,
     lastSkillUse: r.lastSkillUse || null,
+    lastSkillUnlock: r.lastSkillUnlock || null,
+    lastShieldProtect: r.lastShieldProtect || null,
+    lastForceReturnReady: r.lastForceReturnReady || null,
+    lastForceReturnUse: r.lastForceReturnUse || null,
+    chats: r.chats || [],
     history: r.history || [],
     settings: r.settings || { safeZones: true, blackHole: false }
   };
@@ -189,6 +194,8 @@ function createRoom(socket, payload) {
     pawns: {},
     message: 'Menunggu pemain bergabung...',
     history: [],
+    chats: [],
+    lastSkillUnlock: null,
     consecutiveSixes: 0,
     settings: {
       safeZones: true // Default: Zona Aman Aktif
@@ -244,6 +251,9 @@ function joinRoom(socket, code, payload) {
     existingPlayer.id = socket.id;
     existingPlayer.connected = true;
     existingPlayer.autoPlayCount = 0; // Reset hitungan auto-play karena user sudah aktif kembali
+    if (user?.inventory) {
+      existingPlayer.inventory = { ...user.inventory };
+    }
 
     // Pindahkan bidak dari socket ID lama ke socket ID baru
     if (room.pawns[oldSocketId]) {
@@ -304,7 +314,12 @@ function joinRoom(socket, code, payload) {
     isLudoKing: isKing,
     connected: true,
     autoPlayCount: 0,
-    isOut: false
+    isOut: false,
+    stompCount: 0,
+    inventory: {
+      blackholeShield: (user?.inventory && user.inventory.blackholeShield) || 0,
+      forceReturn: (user?.inventory && user.inventory.forceReturn) || 0
+    }
   };
 
   const isFirstPlayer = room.players.length === 0;
@@ -345,7 +360,15 @@ function addBot(room, hostSocketId) {
     name: BOT_NAMES[room.players.length] || `Bot ${room.players.length + 1}`,
     color,
     isHost: false,
-    isBot: true
+    isBot: true,
+    connected: true,
+    autoPlayCount: 0,
+    isOut: false,
+    stompCount: 0,
+    inventory: {
+      blackholeShield: 0,
+      forceReturn: 0
+    }
   };
   room.players.push(bot);
   room.pawns[botId] = [0, 0, 0, 0];
@@ -710,24 +733,43 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 
       // 1. Fitur Black Hole (jika aktif dan menginjak kotak Black Hole)
       if (room.settings?.blackHole && BLACK_HOLE_INDICES.includes(trackPos)) {
-        currentPawns[pawnIdx] = 0; // Tersedot langsung kembali ke base!
-        room.lastBlackHole = {
-          id: Date.now() + Math.random(),
-          playerId,
-          pawnIdx,
-          trackPos,
-          color: currentPlayer.color,
-          time: Date.now()
-        };
-        addHistory(room, `🕳️ Bidak ${pawnIdx + 1} milik ${currentPlayer.name} menginjak Black Hole dan tersedot kembali ke Base!`);
-        room.message = `🕳️ Bidak ${currentPlayer.name} tersedot Black Hole ke base!`;
+        if (currentPlayer.inventory?.blackholeShield > 0) {
+          // BLACKHOLE SHIELD AKTIF: Bidak tidak tersedot!
+          currentPlayer.inventory.blackholeShield -= 1;
+          db.consumeUserItem({ userId: currentPlayer.userId, username: currentPlayer.username, itemType: 'blackholeShield' });
+
+          room.lastShieldProtect = {
+            id: Date.now() + Math.random(),
+            playerId,
+            playerName: currentPlayer.name,
+            pawnIdx,
+            trackPos,
+            color: currentPlayer.color,
+            time: Date.now()
+          };
+          addHistory(room, `🛡️ BLACKHOLE SHIELD AKTIF! Bidak ${pawnIdx + 1} milik ${currentPlayer.name} terselamatkan dari Black Hole! (Sisa Perisai: ${currentPlayer.inventory.blackholeShield})`);
+          room.message = `🛡️ Blackhole Shield melindungi bidak ${currentPlayer.name}! Bidak aman!`;
+        } else {
+          currentPawns[pawnIdx] = 0; // Tersedot langsung kembali ke base!
+          room.lastBlackHole = {
+            id: Date.now() + Math.random(),
+            playerId,
+            pawnIdx,
+            trackPos,
+            color: currentPlayer.color,
+            time: Date.now()
+          };
+          addHistory(room, `🕳️ Bidak ${pawnIdx + 1} milik ${currentPlayer.name} menginjak Black Hole dan tersedot kembali ke Base!`);
+          room.message = `🕳️ Bidak ${currentPlayer.name} tersedot Black Hole ke base!`;
+        }
       } else {
         // 2. Cek pemakanan lawan di lintasan
         const isSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos);
 
         if (!isSafe) {
           for (const opponent of room.players) {
-            if (opponent.id === currentPlayer.id || opponent.isOut) continue;
+            // Pemain sendiri dilewati; tetapi bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
+            if (opponent.id === currentPlayer.id) continue;
             const oppColorIdx = COLORS.indexOf(opponent.color);
             const oppPawns = room.pawns[opponent.id];
             if (!oppPawns) continue;
@@ -745,14 +787,30 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 
                   oppPawns[j] = 0; // Tendang balik ke markas
                   captured = true;
+
+                  // Hitung progres injakan bidak lawan untuk Force Return
+                  currentPlayer.stompCount = (currentPlayer.stompCount || 0) + 1;
+
                   capturedInfo = {
                     id: Date.now() + Math.random(),
                     attacker: currentPlayer.name,
                     defender: opponent.name,
                     color: opponent.color,
+                    defenderIsOut: !!opponent.isOut,
                     trackPos
                   };
-                  addHistory(room, `⚔️ ${currentPlayer.name} memakan bidak ${opponent.name}!`);
+                  addHistory(room, `⚔️ ${currentPlayer.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}! (Injakan: ${currentPlayer.stompCount})`);
+
+                  // Notifikasi Force Return aktif jika memiliki item dan mencapai minimal 3x injakan
+                  if (currentPlayer.inventory?.forceReturn > 0 && currentPlayer.stompCount >= 3) {
+                    room.lastForceReturnReady = {
+                      id: Date.now() + Math.random(),
+                      playerId: currentPlayer.id,
+                      playerName: currentPlayer.name,
+                      time: Date.now()
+                    };
+                    addHistory(room, `⚡ FORCE RETURN SIAP! ${currentPlayer.name} telah 3x menginjak lawan! Hak eliminasi langsung aktif!`);
+                  }
                 }
               }
             }
@@ -789,11 +847,20 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
         currentPlayer.skillPoints = 1; // Poin skill awal = 1 kesempatan eliminasi
         addHistory(room, `⚡ ${currentPlayer.name} BERHASIL MEMASUKKAN 3 BIDAK! SKILL ELIMINASI TERBUKA!`);
         room.message = `⚡ SKILL TERBUKA! ${currentPlayer.name} dapat mengeliminasi 1 bidak lawan!`;
+
+        // Broadcast notifikasi peringatan ke pemain lain
+        room.lastSkillUnlock = {
+          id: Date.now() + Math.random(),
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.name,
+          playerColor: currentPlayer.color,
+          time: Date.now()
+        };
       }
     }
 
-    // Aturan: Angka 6 ATAU berhasil memasukkan satu bidak ke tengah memberikan bonus lempar dadu & jalan satu bidak lagi!
-    const extraTurn = (rollVal === 6) || reachedGoal;
+    // Aturan: Angka 6, Berhasil Masuk Garis Tengah (Goal), ATAU Berhasil Mengeliminasi Bidak Lawan (Capture) memberikan bonus giliran melempar dadu & jalan satu kali lagi!
+    const extraTurn = (rollVal === 6) || reachedGoal || captured;
     room.dice = null;
     room.lastCapture = capturedInfo;
     room.lastGoal = goalInfo;
@@ -803,6 +870,10 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
         currentPlayer.accumulatedThisTurn = false;
         room.message = `🎯 Bidak masuk ke garis tengah! ${currentPlayer.name} dapat bonus giliran lempar dadu & jalan satu bidak lagi!`;
         addHistory(room, `🎯 ${currentPlayer.name} memasukkan bidak ke tengah (bonus lempar dadu & jalan lagi)!`);
+      } else if (captured) {
+        currentPlayer.accumulatedThisTurn = false;
+        room.message = `⚔️ Bidak lawan berhasil dieliminasi! ${currentPlayer.name} dapat giliran jalan lagi sekali!`;
+        addHistory(room, `⚔️ ${currentPlayer.name} mengeliminasi bidak lawan (bonus lempar dadu & jalan lagi)!`);
       } else {
         room.message = `Dapat angka 6! ${currentPlayer.name} dapat melempar dadu sekali lagi.`;
         addHistory(room, `🎲 ${currentPlayer.name} dapat angka 6 (bonus lempar lagi)!`);
@@ -819,6 +890,13 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 }
 
 io.on('connection', socket => {
+  // Heartbeat Ping/Pong untuk mendeteksi stabilitas sinyal realtime
+  socket.on('network:ping', (clientTimestamp, callback) => {
+    if (typeof callback === 'function') {
+      callback(clientTimestamp);
+    }
+  });
+
   socket.on('room:create', payload => createRoom(socket, payload));
   socket.on('room:join', payload => joinRoom(socket, payload?.code, payload));
   socket.on('leaderboard:get', () => socket.emit('leaderboard:update', db.getLeaderboard()));
@@ -943,7 +1021,7 @@ io.on('connection', socket => {
     }
 
     const targetPlayer = r.players.find(p => p.id === targetPlayerId);
-    if (!targetPlayer || targetPlayer.id === currentPlayer.id || targetPlayer.isOut) {
+    if (!targetPlayer || targetPlayer.id === currentPlayer.id) {
       return socket.emit('room:error', 'Pemain target tidak valid.');
     }
 
@@ -982,9 +1060,12 @@ io.on('connection', socket => {
     };
 
     addHistory(r, `⚡ ${currentPlayer.name} MENGGUNAKAN SKILL ELIMINASI: Menendang bidak ${targetPlayer.name} kembali ke markas! Poin skill kembali ke 0.`);
-    r.message = `⚡ ${currentPlayer.name} menggunakan SKILL ELIMINASI pada bidak ${targetPlayer.name}!`;
+    r.message = `⚡ ${currentPlayer.name} berhasil mengeliminasi bidak ${targetPlayer.name} dengan SKILL dan dapat giliran jalan lagi!`;
 
+    // Aturan 1: Setelah eliminasi bidak lawan dengan skill, dapat bonus giliran jalan lagi sekali!
+    r.dice = null;
     emitRoom(r);
+    triggerTurn(r);
   });
 
   // Pemain memilih tidak menggunakan skill pada giliran ini (Akumulasi 2x lipat)
@@ -1008,6 +1089,73 @@ io.on('connection', socket => {
     }
   });
 
+  // Fitur Toko / Item: Force Return (Eliminasi Langsung saat sudah 3x menginjak bidak)
+  socket.on('game:use_force_return', ({ targetPlayerId, targetPawnIdx }) => {
+    const r = rooms.get(socket.data.room);
+    if (!r || !r.started || r.winner || r.rolling || r.animatingMove) return;
+
+    const currentPlayer = r.players[r.turn];
+    if (!currentPlayer || currentPlayer.id !== socket.id || currentPlayer.isOut) {
+      return socket.emit('room:error', 'Sekarang bukan giliranmu.');
+    }
+
+    if (!currentPlayer.inventory || !currentPlayer.inventory.forceReturn || currentPlayer.inventory.forceReturn <= 0) {
+      return socket.emit('room:error', 'Kamu belum memiliki item Force Return. Beli di Toko seharga 100 poin!');
+    }
+
+    if ((currentPlayer.stompCount || 0) < 3) {
+      return socket.emit('room:error', `Force Return memerlukan minimal 3 kali menginjak bidak lawan. Progresmu: ${currentPlayer.stompCount || 0}/3.`);
+    }
+
+    const targetPlayer = r.players.find(p => p.id === targetPlayerId);
+    if (!targetPlayer || targetPlayer.id === currentPlayer.id) {
+      return socket.emit('room:error', 'Pemain target tidak valid.');
+    }
+
+    const oppPawns = r.pawns[targetPlayer.id];
+    if (!oppPawns || targetPawnIdx < 0 || targetPawnIdx > 3) {
+      return socket.emit('room:error', 'Bidak target tidak valid.');
+    }
+
+    const oppVal = oppPawns[targetPawnIdx];
+    if (oppVal < 1 || oppVal > 39) {
+      return socket.emit('room:error', 'Hanya bidak lawan di lintasan yang dapat dieliminasi.');
+    }
+
+    // Eksekusi Force Return: Tendang bidak target kembali ke base!
+    oppPawns[targetPawnIdx] = 0;
+    currentPlayer.inventory.forceReturn -= 1;
+    db.consumeUserItem({ userId: currentPlayer.userId, username: currentPlayer.username, itemType: 'forceReturn' });
+    currentPlayer.stompCount = Math.max(0, (currentPlayer.stompCount || 0) - 3);
+
+    const forceEvent = {
+      id: Date.now() + Math.random(),
+      attackerId: currentPlayer.id,
+      attackerName: currentPlayer.name,
+      defenderId: targetPlayer.id,
+      defenderName: targetPlayer.name,
+      color: targetPlayer.color,
+      targetPawnIdx
+    };
+
+    r.lastForceReturnUse = forceEvent;
+    r.lastCapture = {
+      id: Date.now() + Math.random(),
+      attacker: currentPlayer.name,
+      defender: targetPlayer.name,
+      color: targetPlayer.color,
+      isForceReturn: true
+    };
+
+    addHistory(r, `⚡ FORCE RETURN! ${currentPlayer.name} melancarkan serangan eliminasi langsung terhadap bidak ${targetPawnIdx + 1} milik ${targetPlayer.name}! Bidak dipulangkan ke markas!`);
+    r.message = `⚡ Force Return! ${currentPlayer.name} mengeliminasi bidak ${targetPlayer.name} dan dapat giliran lempar dadu lagi!`;
+
+    // Bonus giliran lempar dadu lagi
+    r.dice = null;
+    emitRoom(r);
+    triggerTurn(r);
+  });
+
   socket.on('game:reaction', ({ emoji }) => {
     const r = rooms.get(socket.data.room);
     if (!r || !emoji) return;
@@ -1021,6 +1169,30 @@ io.on('connection', socket => {
         emoji
       });
     }
+  });
+
+  // Fitur Chat Realtime Game Berlangsung
+  socket.on('room:chat', ({ text }) => {
+    const r = rooms.get(socket.data.room);
+    if (!r) return;
+    const player = r.players.find(p => p.id === socket.id);
+    if (!player) return;
+
+    const cleanText = String(text || '').trim().slice(0, 140);
+    if (!cleanText) return;
+
+    if (!r.chats) r.chats = [];
+    const chatMsg = {
+      id: Date.now() + Math.random(),
+      senderId: player.id,
+      senderName: player.name,
+      senderColor: player.color,
+      text: cleanText,
+      time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    };
+    r.chats.push(chatMsg);
+    if (r.chats.length > 50) r.chats.shift();
+    emitRoom(r);
   });
 
   socket.on('room:leave', ({ code } = {}) => {
@@ -1169,6 +1341,44 @@ app.get('/api/leaderboard', (req, res) => {
   const leaderboard = db.getLeaderboard();
   const ludoKing = leaderboard[0] && leaderboard[0].isLudoKing ? leaderboard[0] : null;
   res.json({ success: true, leaderboard, ludoKing });
+});
+
+// 6. Katalog Item Toko / Shop JakLudo
+app.get('/api/shop/items', (req, res) => {
+  res.json({ success: true, items: db.SHOP_ITEMS });
+});
+
+// 7. Beli Item dari Shop JakLudo (100 Poin)
+app.post('/api/shop/buy', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = (authHeader.replace(/^Bearer\s+/i, '') || req.body?.token || '').trim();
+  const user = db.getUserByToken(token);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Silakan login terlebih dahulu untuk berbelanja.' });
+  }
+
+  const { itemType } = req.body || {};
+  const result = db.buyShopItem({ userId: user.id, username: user.username, itemType });
+  if (result.error) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  // Jika user sedang berada di dalam room aktif, sinkronkan inventory di room
+  for (const [, r] of rooms) {
+    const playerInRoom = r.players.find(p => p.userId === user.id || (p.username && p.username.toLowerCase() === user.username.toLowerCase()));
+    if (playerInRoom) {
+      playerInRoom.inventory = { ...result.inventory };
+      emitRoom(r);
+    }
+  }
+
+  const isKing = db.checkIsLudoKing(result.user.username);
+  res.json({
+    success: true,
+    message: `Berhasil membeli ${result.item.name}!`,
+    item: result.item,
+    user: { ...result.user, isLudoKing: isKing }
+  });
 });
 const dist = path.join(__dirname, '../dist');
 app.use(express.static(dist));

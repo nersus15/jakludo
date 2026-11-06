@@ -52,10 +52,10 @@ export default function LeaderboardModal({ isOpen, onClose, currentUser, socket 
 
   const myEntry = currentUser
     ? leaderboard.find(
-        p =>
-          (currentUser.id && p.userId === currentUser.id) ||
-          p.username?.toLowerCase() === currentUser.username?.toLowerCase()
-      )
+      p =>
+        (currentUser.id && p.userId === currentUser.id) ||
+        p.username?.toLowerCase() === currentUser.username?.toLowerCase()
+    )
     : null;
 
   return (

@@ -25,7 +25,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=3001
+ENV PORT=5172
 
 # Salin package manifest
 COPY package*.json ./
@@ -46,11 +46,11 @@ RUN mkdir -p /app/server/data && chown -R node:node /app
 USER node
 
 # Expose port aplikasi
-EXPOSE 3001
+EXPOSE 5172
 
 # Healthcheck otomatis Docker
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:5172/health || exit 1
 
 # Jalankan server JakLudo
 CMD ["node", "server/index.js"]

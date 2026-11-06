@@ -1174,5 +1174,5 @@ const dist = path.join(__dirname, '../dist');
 app.use(express.static(dist));
 app.get('*', (req, res) => res.sendFile(path.join(dist, 'index.html')));
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5172;
 server.listen(PORT, () => console.log(`JakLudo server listening on ${PORT}`));

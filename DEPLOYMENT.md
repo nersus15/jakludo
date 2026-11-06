@@ -76,7 +76,7 @@ docker compose up -d --build
 Container akan otomatis:
 1. Mem-build frontend Vite (React).
 2. Memasang dependensi produksi Express & Socket.io.
-3. Menjalankan container `jakludo-app` di port `3001`.
+3. Menjalankan container `jakludo-app` di port `5172`.
 4. Mem-mount volume database `./server/data` sehingga data pemain tidak akan hilang saat container di-restart.
 
 ---
@@ -96,11 +96,11 @@ docker compose logs -f
 
 ### Tes Akses Lokal Server:
 ```bash
-curl http://localhost:3001/health
+curl http://localhost:5172/health
 # Respon: {"ok":true,"rooms":0}
 ```
 
-Sekarang kamu sudah bisa mengakses game di browser melalui: `http://ip-server-kamu:3001/`.
+Sekarang kamu sudah bisa mengakses game di browser melalui: `http://ip-server-kamu:5172/`.
 
 ---
 
@@ -125,7 +125,7 @@ server {
     server_name domainkamu.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:5172;
         proxy_http_version 1.1;
 
         # Konfigurasi WebSocket Socket.io yang wajib ada

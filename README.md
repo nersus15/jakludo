@@ -20,7 +20,7 @@ npm run build
 npm start
 ```
 
-The server serves `dist` and Socket.IO on `PORT` (default 3001). Deploy the Node process behind HTTPS reverse proxy and point your domain to it. Keep Socket.IO websocket and polling traffic enabled. For multi-instance scaling, add a shared Socket.IO adapter and persistent room store; this starter uses in-memory rooms and loses rooms on restart.
+The server serves `dist` and Socket.IO on `PORT` (default 5172). Deploy the Node process behind HTTPS reverse proxy and point your domain to it. Keep Socket.IO websocket and polling traffic enabled. For multi-instance scaling, add a shared Socket.IO adapter and persistent room store; this starter uses in-memory rooms and loses rooms on restart.
 
 ## Current game rules / limitations
 

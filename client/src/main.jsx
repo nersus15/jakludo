@@ -2019,6 +2019,39 @@ function App() {
         authToken={authToken}
       />
 
+      {/* Modal Panduan Pasang PWA untuk iOS Safari */}
+      {showIosInstallGuide && (
+        <div className="modal-overlay" onClick={() => setShowIosInstallGuide(false)}>
+          <div className="ios-install-card" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className="sheet-close-btn"
+              onClick={() => setShowIosInstallGuide(false)}
+            >
+              ✕
+            </button>
+            <div className="ios-install-icon">📲</div>
+            <h3>Pasang JakLudo di iPhone / iPad</h3>
+            <p>Ikuti 2 langkah mudah berikut untuk menambahkan JakLudo ke Layar Utama:</p>
+            <ol className="ios-install-steps">
+              <li>
+                Ketuk tombol <strong>Bagikan (Share)</strong> <span className="ios-icon-box">⎋</span> di bilah bawah browser Safari.
+              </li>
+              <li>
+                Geser ke bawah dan pilih <strong>"Tambahkan ke Layar Utama" (Add to Home Screen)</strong> <span className="ios-icon-box">➕</span>.
+              </li>
+            </ol>
+            <button
+              type="button"
+              className="primary btn-ios-done"
+              onClick={() => setShowIosInstallGuide(false)}
+            >
+              Mengerti, Siap Main!
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <footer>
         <span>© 2026 JAKLUDO · REALTIME MULTIPLAYER LUDO ARENA</span>

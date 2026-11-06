@@ -6708,3 +6708,193 @@ footer {
 .skill-unlock-alert-banner.alert-forceReturn .alert-content p {
   color: #b45309;
 }
+
+/* ==========================================================================
+   PWA (PROGRESSIVE WEB APP) STYLING & PROMPTS
+   ========================================================================== */
+.pwa-install-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  padding: 7px 13px;
+  border-radius: 12px;
+  font: 800 12.5px 'Space Grotesk', sans-serif;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.28);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.pwa-install-header-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.45);
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+.gameplay-install-mini {
+  background: #10b981;
+  border: none;
+  color: #ffffff;
+  padding: 4px 9px;
+  border-radius: 10px;
+  font: 800 11px 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.gameplay-install-mini:hover {
+  background: #059669;
+  transform: scale(1.05);
+}
+
+/* PWA Home Banner */
+.pwa-home-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #fef3c7 100%);
+  border: 1.5px solid #6ee7b7;
+  border-radius: 18px;
+  padding: 12px 18px;
+  margin-bottom: 18px;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.12);
+  animation: pwaBannerFade 0.4s ease-out;
+}
+
+@keyframes pwaBannerFade {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pwa-home-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pwa-app-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+  animation: pwaBounce 2s infinite ease-in-out;
+}
+
+@keyframes pwaBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.pwa-home-left strong {
+  display: block;
+  font: 800 14px 'Space Grotesk', sans-serif;
+  color: #065f46;
+  margin-bottom: 2px;
+}
+
+.pwa-home-left p {
+  margin: 0;
+  font: 500 12px 'DM Sans', sans-serif;
+  color: #047857;
+  line-height: 1.3;
+}
+
+.pwa-home-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: none;
+  padding: 9px 18px;
+  border-radius: 12px;
+  font: 800 13px 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.pwa-home-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(16, 185, 129, 0.5);
+}
+
+/* iOS Safari PWA Install Helper Modal */
+.ios-install-card {
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 28px;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 25px 60px rgba(15, 23, 42, 0.35);
+  text-align: center;
+  position: relative;
+  animation: modalScaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ios-install-icon {
+  font-size: 44px;
+  margin-bottom: 8px;
+}
+
+.ios-install-card h3 {
+  font: 800 19px 'Space Grotesk', sans-serif;
+  color: #0f172a;
+  margin: 0 0 8px 0;
+}
+
+.ios-install-card p {
+  font: 500 13px 'DM Sans', sans-serif;
+  color: #64748b;
+  margin: 0 0 18px 0;
+}
+
+.ios-install-steps {
+  text-align: left;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 14px 18px 14px 34px;
+  margin: 0 0 20px 0;
+  font: 500 13px 'DM Sans', sans-serif;
+  color: #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ios-icon-box {
+  display: inline-block;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 13px;
+  vertical-align: middle;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.btn-ios-done {
+  width: 100%;
+  border-radius: 14px;
+  padding: 12px;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .pwa-home-banner {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+    padding: 12px 14px;
+  }
+  .pwa-home-btn {
+    text-align: center;
+    width: 100%;
+  }
+  .pwa-install-header-btn .pwa-install-text {
+    display: none;
+  }
+}

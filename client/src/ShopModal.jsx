@@ -191,3 +191,4 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
     </div>
   );
 }
+

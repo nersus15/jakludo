@@ -1,0 +1,544 @@
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import {
+  COLORS,
+  COLOR_INFO,
+  START_TILES,
+  TRACK_COORDS,
+  SAFE_TRACK_INDICES,
+  BLACK_HOLE_INDICES,
+  getPawnCoord
+} from './boardConstants';
+import { sound } from './sound';
+
+// Pemetaan sudut layar (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
+// berdasarkan sudut rotasi papan agar badge nama pemain selalu sejajar dengan letak markasnya
+function getCornerColors(rotation) {
+  switch (rotation) {
+    case 90:
+      return { tl: 'red', tr: 'green', bl: 'blue', br: 'yellow' };
+    case 180:
+      return { tl: 'blue', tr: 'red', bl: 'yellow', br: 'green' };
+    case 270:
+      return { tl: 'yellow', tr: 'blue', bl: 'green', br: 'red' };
+    case 0:
+    default:
+      return { tl: 'green', tr: 'yellow', bl: 'red', br: 'blue' };
+  }
+}
+
+export default function LudoBoard({
+  room,
+  myPlayerId,
+  isMyTurn,
+  movablePawns = [],
+  onMovePawn,
+  skillTargeting = false,
+  onSelectSkillTarget
+}) {
+  if (!room) return null;
+
+  const currentTurnPlayer = room.players[room.turn];
+  const [animPawn, setAnimPawn] = useState(null);
+  const activeAnimId = useRef(null);
+  const safeZonesActive = room.settings?.safeZones !== false;
+  const blackHoleActive = !!room.settings?.blackHole;
+
+  // Perspektif pemain: Base milik pemain lokal selalu berada di pojok kanan bawah
+  const myPlayer = room.players?.find(p => p.id === myPlayerId);
+  const myColor = myPlayer?.color;
+  const BOARD_ROTATION = {
+    blue: 0,
+    yellow: 90,
+    green: 180,
+    red: 270
+  };
+  const boardRotation = myColor ? (BOARD_ROTATION[myColor] ?? 0) : 0;
+  const counterStyle = boardRotation !== 0 ? { transform: `rotate(${-boardRotation}deg)` } : undefined;
+
+  // Hitung kotak tujuan mana saja yang bisa dilewati / dituju oleh bidak pemain aktif
+  const validTargets = useMemo(() => {
+    if (!isMyTurn || room.dice === null || !myColor || !movablePawns.length) return {};
+    const targets = {};
+    const myPawns = room.pawns[myPlayerId] || [0, 0, 0, 0];
+
+    movablePawns.forEach(pawnIdx => {
+      const currentVal = myPawns[pawnIdx];
+      let targetCoord = null;
+      let targetVal = 0;
+
+      if (currentVal === 0) {
+        // Keluar markas menuju petak start
+        targetVal = 1;
+        targetCoord = START_TILES[myColor];
+      } else {
+        // Melangkah maju
+        targetVal = currentVal + room.dice;
+        targetCoord = getPawnCoord(myColor, targetVal);
+      }
+
+      if (targetCoord) {
+        const key = `${targetCoord[0]},${targetCoord[1]}`;
+        targets[key] = {
+          pawnIdx,
+          targetVal,
+          isExit: currentVal === 0
+        };
+      }
+    });
+
+    return targets;
+  }, [isMyTurn, room.dice, myColor, myPlayerId, room.pawns, movablePawns]);
+
+  // Animasi langkah demi langkah saat menerima animatingMove dari server
+  useEffect(() => {
+    const move = room.animatingMove;
+    if (!move || !move.id || activeAnimId.current === move.id) return;
+
+    activeAnimId.current = move.id;
+
+    const stepsSequence = [];
+    if (move.from === 0) {
+      stepsSequence.push(1);
+    } else {
+      for (let s = move.from + 1; s <= move.to; s++) {
+        stepsSequence.push(s);
+      }
+    }
+
+    if (stepsSequence.length === 0) return;
+
+    let stepIdx = 0;
+    setAnimPawn({
+      playerId: move.playerId,
+      pawnIdx: move.pawnIdx,
+      currentVal: stepsSequence[0],
+      isHopping: true,
+      stepIdx: 0
+    });
+    sound.playStep(0);
+
+    const stepInterval = setInterval(() => {
+      stepIdx++;
+      if (stepIdx < stepsSequence.length) {
+        sound.playStep(stepIdx);
+        setAnimPawn({
+          playerId: move.playerId,
+          pawnIdx: move.pawnIdx,
+          currentVal: stepsSequence[stepIdx],
+          isHopping: true,
+          stepIdx
+        });
+
+        setTimeout(() => {
+          setAnimPawn(prev => prev ? { ...prev, isHopping: false } : null);
+        }, 160);
+      } else {
+        clearInterval(stepInterval);
+        sound.playStepLand();
+        setAnimPawn({
+          playerId: move.playerId,
+          pawnIdx: move.pawnIdx,
+          currentVal: move.to,
+          isHopping: false,
+          stepIdx
+        });
+      }
+    }, 220);
+
+    return () => {
+      clearInterval(stepInterval);
+    };
+  }, [room.animatingMove]);
+
+  // Saat server selesai memproses animasi, bersihkan animPawn
+  useEffect(() => {
+    if (!room.animatingMove) {
+      setAnimPawn(null);
+      activeAnimId.current = null;
+    }
+  }, [room.animatingMove]);
+
+  const lastPlayedCaptureIdRef = useRef(null);
+  const lastPlayedBlackHoleIdRef = useRef(null);
+  const lastPlayedGoalIdRef = useRef(null);
+  const lastPlayedSkillIdRef = useRef(null);
+
+  // Cek capture effect (bidak terinjak & dieliminasi lawan) - diputar tepat 1 kali per event
+  useEffect(() => {
+    if (room.lastCapture && room.lastCapture.id && room.lastCapture.id !== lastPlayedCaptureIdRef.current) {
+      lastPlayedCaptureIdRef.current = room.lastCapture.id;
+      sound.playFunnyElimination();
+    }
+  }, [room.lastCapture]);
+
+  // Cek Black Hole effect (bidak tersedot ke lubang hitam) - diputar tepat 1 kali per event
+  useEffect(() => {
+    if (room.lastBlackHole && room.lastBlackHole.id && room.lastBlackHole.id !== lastPlayedBlackHoleIdRef.current) {
+      lastPlayedBlackHoleIdRef.current = room.lastBlackHole.id;
+      sound.playFunnyBlackHole();
+    }
+  }, [room.lastBlackHole]);
+
+  // Cek Goal Finish effect (bidak berhasil masuk ke tengah garis akhir)
+  useEffect(() => {
+    if (room.lastGoal && room.lastGoal.id && room.lastGoal.id !== lastPlayedGoalIdRef.current) {
+      lastPlayedGoalIdRef.current = room.lastGoal.id;
+      sound.playGoalCelebration();
+    }
+  }, [room.lastGoal]);
+
+  // Cek Ultimate Skill Strike effect (petir menggelegar saat skill eliminasi digunakan)
+  useEffect(() => {
+    if (room.lastSkillUse && room.lastSkillUse.id && room.lastSkillUse.id !== lastPlayedSkillIdRef.current) {
+      lastPlayedSkillIdRef.current = room.lastSkillUse.id;
+      sound.playThunderSkill();
+    }
+  }, [room.lastSkillUse]);
+
+  // Kumpulkan posisi semua bidak yang ada di luar markas (val > 0)
+  const pawnsByCoord = {};
+  for (const player of room.players) {
+    const pList = room.pawns[player.id] || [];
+    pList.forEach((rawVal, pIdx) => {
+      let effectiveVal = rawVal;
+      let isHopping = false;
+
+      if (animPawn && animPawn.playerId === player.id && animPawn.pawnIdx === pIdx) {
+        effectiveVal = animPawn.currentVal;
+        isHopping = animPawn.isHopping;
+      } else if (room.animatingMove && room.animatingMove.playerId === player.id && room.animatingMove.pawnIdx === pIdx) {
+        effectiveVal = room.animatingMove.from;
+      }
+
+      if (effectiveVal > 0) {
+        const coord = getPawnCoord(player.color, effectiveVal);
+        if (coord) {
+          const key = `${coord[0]},${coord[1]}`;
+          if (!pawnsByCoord[key]) pawnsByCoord[key] = [];
+          pawnsByCoord[key].push({
+            player,
+            pawnIdx: pIdx,
+            val: effectiveVal,
+            isHopping,
+            isMine: player.id === myPlayerId,
+            canMove: isMyTurn && player.id === myPlayerId && movablePawns.includes(pIdx) && !room.animatingMove
+          });
+        }
+      }
+    });
+  }
+
+  // Hitung berapa banyak bidak masing-masing warna yang sudah finish (val === 44)
+  const finishedCounts = {};
+  COLORS.forEach(c => (finishedCounts[c] = 0));
+  for (const player of room.players) {
+    const pList = room.pawns[player.id] || [];
+    finishedCounts[player.color] = pList.filter(v => v === 44).length;
+  }
+
+  const handlePawnClick = (pawnIdx, canMove) => {
+    if (canMove && onMovePawn && !room.animatingMove) {
+      sound.playClick();
+      onMovePawn(pawnIdx);
+    }
+  };
+
+  // Render Base Home Quadrant (Markas 4x4 bersih, proporsional)
+  const renderBase = (color, rStart, cStart) => {
+    const player = room.players.find(p => p.color === color);
+    const pawns = player ? room.pawns[player.id] || [0, 0, 0, 0] : [0, 0, 0, 0];
+    const isThisPlayerTurn = currentTurnPlayer?.color === color;
+
+    return (
+      <div
+        key={`base-${color}`}
+        className={`board-base base-${color} ${isThisPlayerTurn ? 'base-active-turn' : ''} ${player?.isOut ? 'base-player-out' : ''}`}
+        style={{
+          gridRow: `${rStart + 1} / span 4`,
+          gridColumn: `${cStart + 1} / span 4`
+        }}
+      >
+        <div className="base-inner-card">
+          <div className="base-yard" style={counterStyle}>
+            {[0, 1, 2, 3].map(pawnIdx => {
+              const rawVal = pawns[pawnIdx];
+              const isPawnOut = (animPawn && animPawn.playerId === player?.id && animPawn.pawnIdx === pawnIdx)
+                ? animPawn.currentVal >= 1
+                : rawVal >= 1;
+              const inBase = !isPawnOut;
+              const canMove = inBase && isMyTurn && player?.id === myPlayerId && movablePawns.includes(pawnIdx) && !room.animatingMove;
+
+              return (
+                <div key={pawnIdx} className={`yard-slot yard-slot-${color}`}>
+                  {inBase && (
+                    <button
+                      type="button"
+                      className={`pawn-token pawn-${color} ${canMove ? 'pawn-can-move pulse-anim' : ''}`}
+                      onClick={() => handlePawnClick(pawnIdx, canMove)}
+                      disabled={!canMove}
+                      title={canMove ? `Klik Bidak ${pawnIdx + 1} untuk melangkah` : `Bidak ${pawnIdx + 1} (di markas)`}
+                    >
+                      <span className="pawn-inner" style={counterStyle}>
+                        {pawnIdx + 1}
+                      </span>
+                      {canMove && <span className="pawn-halo" />}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render petak lintasan 11x11
+  const renderCell = (r, c) => {
+    const isBaseTL = r < 4 && c < 4;
+    const isBaseTR = r < 4 && c >= 7;
+    const isBaseBL = r >= 7 && c < 4;
+    const isBaseBR = r >= 7 && c >= 7;
+    const isCenter = r === 5 && c === 5;
+
+    if (isBaseTL || isBaseTR || isBaseBR || isBaseBL || isCenter) {
+      return null;
+    }
+
+    // Kotak Start masing-masing warna
+    let startColor = null;
+    if (r === START_TILES.red[0] && c === START_TILES.red[1]) startColor = 'red';
+    else if (r === START_TILES.green[0] && c === START_TILES.green[1]) startColor = 'green';
+    else if (r === START_TILES.yellow[0] && c === START_TILES.yellow[1]) startColor = 'yellow';
+    else if (r === START_TILES.blue[0] && c === START_TILES.blue[1]) startColor = 'blue';
+
+    // Jalur Runway menuju Goal (Home Path)
+    let homeColor = null;
+    if (c === 5 && r >= 6 && r <= 9) homeColor = 'red';
+    else if (r === 5 && c >= 1 && c <= 4) homeColor = 'green';
+    else if (c === 5 && r >= 1 && r <= 4) homeColor = 'yellow';
+    else if (r === 5 && c >= 6 && c <= 9) homeColor = 'blue';
+
+    const trackIdx = TRACK_COORDS.findIndex(coord => coord[0] === r && coord[1] === c);
+    const isBlackHole = blackHoleActive && trackIdx !== -1 && BLACK_HOLE_INDICES.includes(trackIdx);
+    const isStar = trackIdx !== -1 && SAFE_TRACK_INDICES.includes(trackIdx);
+
+    const cellPawns = pawnsByCoord[`${r},${c}`] || [];
+
+    // Cek apakah petak ini adalah petak tujuan (target hint highlight)
+    const targetInfo = validTargets[`${r},${c}`];
+    const isValidTarget = !!targetInfo;
+
+    let cellClass = 'board-cell';
+    if (homeColor) cellClass += ` cell-home-${homeColor}`;
+    if (startColor) cellClass += ` cell-start cell-start-${startColor}`;
+    if (isStar && safeZonesActive) cellClass += ' cell-safe-star';
+    if (isBlackHole) cellClass += ' cell-black-hole';
+    if (isValidTarget) cellClass += ' cell-valid-target';
+
+    return (
+      <div
+        key={`cell-${r}-${c}`}
+        className={cellClass}
+        style={{ gridRow: r + 1, gridColumn: c + 1 }}
+        onClick={() => {
+          if (isValidTarget && !room.animatingMove) {
+            handlePawnClick(targetInfo.pawnIdx, true);
+          }
+        }}
+        title={isValidTarget ? `Klik untuk melangkah ke kotak ini (Bidak ${targetInfo.pawnIdx + 1})` : undefined}
+      >
+        {/* Highlight visual elegan kotak tujuan (Hint Jalur) */}
+        {isValidTarget && (
+          <div className="target-tile-highlight" style={counterStyle}>
+            <span className="target-pulse-ring" style={{ borderColor: COLOR_INFO[myColor]?.hex }} />
+            <span className="target-dot" style={{ background: COLOR_INFO[myColor]?.hex }} />
+          </div>
+        )}
+
+        {isStar && safeZonesActive && (
+          <span className="cell-icon star-icon" style={counterStyle}>★</span>
+        )}
+        {isBlackHole && !cellPawns.length && !isValidTarget && (
+          <span className="cell-icon blackhole-icon" style={counterStyle} title="Black Hole! Bidak yang menginjak akan tersedot ke Base!">
+            🕳️
+          </span>
+        )}
+
+        {cellPawns.length > 0 && (
+          <div className={`pawn-cluster cluster-size-${Math.min(cellPawns.length, 4)}`}>
+            {cellPawns.map(({ player, pawnIdx, val, isHopping, canMove }, idx) => {
+              const isSkillTarget = skillTargeting && player.id !== myPlayerId && val >= 1 && val <= 39;
+              const isInteractive = canMove || isSkillTarget;
+
+              let btnClass = `pawn-token pawn-${player.color}`;
+              if (canMove) btnClass += ' pawn-can-move pulse-anim';
+              if (isHopping) btnClass += ' pawn-stepping';
+              if (isSkillTarget) btnClass += ' pawn-skill-target pulse-skill-target';
+
+              return (
+                <button
+                  key={`${player.id}-${pawnIdx}`}
+                  type="button"
+                  className={btnClass}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isSkillTarget) {
+                      sound.playClick();
+                      onSelectSkillTarget && onSelectSkillTarget(player.id, pawnIdx);
+                      return;
+                    }
+                    handlePawnClick(pawnIdx, canMove);
+                  }}
+                  disabled={!isInteractive}
+                  title={
+                    isSkillTarget
+                      ? `⚡ KLIK UNTUK ELIMINASI: Bidak ${pawnIdx + 1} (${player.name})`
+                      : canMove
+                      ? `Klik untuk melangkahkan Bidak ${pawnIdx + 1}`
+                      : `Bidak ${pawnIdx + 1} (${player.name})`
+                  }
+                  style={{ zIndex: isHopping ? 100 : (isSkillTarget ? 90 : 10 + idx) }}
+                >
+                  <span className="pawn-inner" style={counterStyle}>{pawnIdx + 1}</span>
+                  {canMove && <span className="pawn-halo" />}
+                  {isSkillTarget && <span className="pawn-target-crosshair">🎯</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render Kotak Tengah (Finish Goal 1x1 pada r=5, c=5)
+  const isGoalTarget = !!validTargets['5,5'];
+  const renderCenterGoal = () => {
+    return (
+      <div
+        className={`board-center-goal ${isGoalTarget ? 'cell-valid-target' : ''}`}
+        style={{
+          gridRow: '6 / span 1',
+          gridColumn: '6 / span 1'
+        }}
+        onClick={() => {
+          if (isGoalTarget && !room.animatingMove) {
+            handlePawnClick(validTargets['5,5'].pawnIdx, true);
+          }
+        }}
+        title={isGoalTarget ? 'Klik untuk memasukkan bidak ke Garis Akhir!' : undefined}
+      >
+        <div className="goal-triangle goal-green">
+          <span className="goal-counter" style={counterStyle}>{finishedCounts.green > 0 ? finishedCounts.green : ''}</span>
+        </div>
+        <div className="goal-triangle goal-yellow">
+          <span className="goal-counter" style={counterStyle}>{finishedCounts.yellow > 0 ? finishedCounts.yellow : ''}</span>
+        </div>
+        <div className="goal-triangle goal-blue">
+          <span className="goal-counter" style={counterStyle}>{finishedCounts.blue > 0 ? finishedCounts.blue : ''}</span>
+        </div>
+        <div className="goal-triangle goal-red">
+          <span className="goal-counter" style={counterStyle}>{finishedCounts.red > 0 ? finishedCounts.red : ''}</span>
+        </div>
+        <div className="goal-center-point" />
+
+        {isGoalTarget && (
+          <div className="target-tile-highlight" style={counterStyle}>
+            <span className="target-pulse-ring" style={{ borderColor: '#f59e0b' }} />
+            <span className="target-dot" style={{ background: '#f59e0b' }} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render Card/Badge Profil Pemain di 4 sudut luar papan (HUD)
+  // Teks selalu horizontal, tajam, rapi, dan tidak miring karena tidak diputar oleh rotasi board
+  const renderPlayerHudCard = (color) => {
+    const player = room.players.find(p => p.color === color);
+    const isThisPlayerTurn = currentTurnPlayer?.color === color;
+    const isMe = player?.id === myPlayerId;
+    const pawns = player ? room.pawns[player.id] || [0, 0, 0, 0] : [0, 0, 0, 0];
+    const finishedCount = pawns.filter(v => v === 44).length;
+    const homeCount = pawns.filter(v => v === 0).length;
+
+    return (
+      <div
+        key={`hud-${color}`}
+        className={`player-hud-card hud-${color} ${isThisPlayerTurn ? 'hud-active-turn' : ''} ${player?.isOut ? 'hud-player-out' : ''}`}
+      >
+        <div className="hud-avatar" style={{ background: COLOR_INFO[color].hex }}>
+          {player ? player.name.charAt(0).toUpperCase() : '?'}
+          {isThisPlayerTurn && <span className="hud-turn-pulse" />}
+        </div>
+        <div className="hud-info">
+          <div className="hud-name-row">
+            <strong className="hud-player-name">{player ? player.name : 'Kosong'}</strong>
+            {isMe && <span className="hud-tag you-tag">KAMU</span>}
+            {player?.isBot && <span className="hud-tag bot-tag">BOT</span>}
+            {player?.isLudoKing && <span className="hud-tag king-tag">👑</span>}
+          </div>
+          <div className="hud-sub-row">
+            {player?.isOut ? (
+              <span className="hud-out-tag">❌ OUT</span>
+            ) : !player?.connected && !player?.isBot ? (
+              <span className="hud-offline-tag">📶 Terputus</span>
+            ) : player?.autoPlayCount > 0 ? (
+              <span className="hud-auto-tag">Auto {player.autoPlayCount}/3</span>
+            ) : isThisPlayerTurn ? (
+              <span className="hud-active-text">Giliran jalan...</span>
+            ) : (
+              <span className="hud-stats-text">
+                {finishedCount > 0 ? `★ ${finishedCount} fin` : `${homeCount} di markas`}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const corners = getCornerColors(boardRotation);
+
+  return (
+    <div className="ludo-arena-frame">
+      {/* HUD Bar Atas: Sudut Kiri Atas (TL) & Kanan Atas (TR) */}
+      <div className="board-hud-row board-hud-top">
+        {renderPlayerHudCard(corners.tl)}
+        {renderPlayerHudCard(corners.tr)}
+      </div>
+
+      {/* Papan Ludo 11x11 */}
+      <div className="ludo-board-container">
+        <div
+          className="ludo-board"
+          style={{
+            transform: `rotate(${boardRotation}deg)`,
+            transition: 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+        >
+          {/* 4 Markas Pojok (4x4) */}
+          {renderBase('green', 0, 0)}
+          {renderBase('yellow', 0, 7)}
+          {renderBase('red', 7, 0)}
+          {renderBase('blue', 7, 7)}
+
+          {/* 11x11 Petak Lintasan */}
+          {Array.from({ length: 11 }, (_, r) =>
+            Array.from({ length: 11 }, (_, c) => renderCell(r, c))
+          )}
+
+          {/* Finish Goal Tengah (1x1) */}
+          {renderCenterGoal()}
+        </div>
+      </div>
+
+      {/* HUD Bar Bawah: Sudut Kiri Bawah (BL) & Kanan Bawah (BR, selalu KAMU) */}
+      <div className="board-hud-row board-hud-bottom">
+        {renderPlayerHudCard(corners.bl)}
+        {renderPlayerHudCard(corners.br)}
+      </div>
+    </div>
+  );
+}

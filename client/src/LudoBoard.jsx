@@ -26,7 +26,14 @@ function getCornerColors(rotation) {
   }
 }
 
-export default function LudoBoard({
+// Wrapper: room bisa null sebelum data pertama datang. Hook ada di LudoBoardView,
+// jadi return lebih awal di sini tidak melanggar aturan hooks React.
+export default function LudoBoard(props) {
+  if (!props.room) return null;
+  return <LudoBoardView {...props} />;
+}
+
+function LudoBoardView({
   room,
   myPlayerId,
   isMyTurn,
@@ -35,11 +42,15 @@ export default function LudoBoard({
   skillTargeting = false,
   onSelectSkillTarget
 }) {
-  if (!room) return null;
-
-  const currentTurnPlayer = room.players[room.turn];
   const [animPawn, setAnimPawn] = useState(null);
   const activeAnimId = useRef(null);
+  // Event yang sudah ada saat papan pertama kali tampil (mis. saat reconnect) dianggap sudah diputar
+  const lastPlayedCaptureIdRef = useRef(room.lastCapture?.id ?? null);
+  const lastPlayedBlackHoleIdRef = useRef(room.lastBlackHole?.id ?? null);
+  const lastPlayedGoalIdRef = useRef(room.lastGoal?.id ?? null);
+  const lastPlayedSkillIdRef = useRef(room.lastSkillUse?.id ?? null);
+
+  const currentTurnPlayer = room.players[room.turn];
   const safeZonesActive = room.settings?.safeZones !== false;
   const blackHoleActive = !!room.settings?.blackHole;
 
@@ -108,6 +119,7 @@ export default function LudoBoard({
     if (stepsSequence.length === 0) return;
 
     let stepIdx = 0;
+    const hopTimers = [];
     setAnimPawn({
       playerId: move.playerId,
       pawnIdx: move.pawnIdx,
@@ -129,9 +141,9 @@ export default function LudoBoard({
           stepIdx
         });
 
-        setTimeout(() => {
+        hopTimers.push(setTimeout(() => {
           setAnimPawn(prev => prev ? { ...prev, isHopping: false } : null);
-        }, 160);
+        }, 160));
       } else {
         clearInterval(stepInterval);
         sound.playStepLand();
@@ -147,6 +159,7 @@ export default function LudoBoard({
 
     return () => {
       clearInterval(stepInterval);
+      hopTimers.forEach(clearTimeout);
     };
   }, [room.animatingMove]);
 
@@ -157,11 +170,6 @@ export default function LudoBoard({
       activeAnimId.current = null;
     }
   }, [room.animatingMove]);
-
-  const lastPlayedCaptureIdRef = useRef(null);
-  const lastPlayedBlackHoleIdRef = useRef(null);
-  const lastPlayedGoalIdRef = useRef(null);
-  const lastPlayedSkillIdRef = useRef(null);
 
   // Cek capture effect (bidak terinjak & dieliminasi lawan) - diputar tepat 1 kali per event
   useEffect(() => {
@@ -278,7 +286,8 @@ export default function LudoBoard({
                       disabled={!canMove}
                       title={canMove ? `Klik Bidak ${pawnIdx + 1} untuk melangkah` : `Bidak ${pawnIdx + 1} (di markas)`}
                     >
-                      <span className="pawn-inner" style={counterStyle}>
+                      {/* base-yard sudah diputar balik; jangan putar lagi agar angka tidak miring */}
+                      <span className="pawn-inner">
                         {pawnIdx + 1}
                       </span>
                       {canMove && <span className="pawn-halo" />}

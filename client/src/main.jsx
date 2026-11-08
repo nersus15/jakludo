@@ -19,7 +19,14 @@ import './style.css';
 const EMOJIS = ['🎲', '🔥', '👏', '😂', '😭', '👑', '⚡', '🎯'];
 
 function App() {
-  const socket = useMemo(() => io({ autoConnect: true }), []);
+  // WebSocket dicoba lebih dulu (lebih stabil lewat tunnel/proxy), polling hanya cadangan
+  const socket = useMemo(() => io({
+    autoConnect: true,
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 3000
+  }), []);
   const [screen, setScreen] = useState('home');
   const [name, setName] = useState('');
   const [code, setCode] = useState(new URLSearchParams(location.search).get('room') || '');

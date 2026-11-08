@@ -34,6 +34,16 @@ export function useNetworkStatus(socket) {
     socket.io.on('reconnect_attempt', onReconnectAttempt);
     socket.io.on('reconnect', onConnect);
 
+    // HP sering memutus koneksi saat tab di background (mis. membagikan link undangan).
+    // Saat tab aktif lagi / jaringan kembali, sambungkan segera tanpa menunggu jadwal reconnect.
+    const reconnectNow = () => {
+      if (document.visibilityState === 'visible' && !socket.connected) socket.connect();
+      else if (socket.connected) measure();
+    };
+    document.addEventListener('visibilitychange', reconnectNow);
+    window.addEventListener('online', reconnectNow);
+    window.addEventListener('pageshow', reconnectNow);
+
     measure();
     const pingTimer = setInterval(measure, 3000);
 
@@ -43,6 +53,9 @@ export function useNetworkStatus(socket) {
       socket.off('connect_error', onDisconnect);
       socket.io.off('reconnect_attempt', onReconnectAttempt);
       socket.io.off('reconnect', onConnect);
+      document.removeEventListener('visibilitychange', reconnectNow);
+      window.removeEventListener('online', reconnectNow);
+      window.removeEventListener('pageshow', reconnectNow);
       clearInterval(pingTimer);
     };
   }, [socket]);

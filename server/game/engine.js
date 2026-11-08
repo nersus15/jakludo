@@ -219,11 +219,21 @@ function handleRoll(room, playerId, isAuto = false) {
     }
 
     if (getMovablePawns(room, currentPlayer, roll).length === 0) {
-      room.message = `${currentPlayer.name} mendapatkan angka ${roll}, tetapi tidak ada bidak yang dapat melangkah.`;
-      addHistory(room, `${currentPlayer.name} melempar dadu: ${roll} (tidak ada langkah valid)`);
+      // Angka 6 tetap memberi lemparan bonus walaupun tidak ada bidak yang bisa jalan
+      // (mis. bidak terakhir di jalur finish butuh angka yang lebih kecil)
+      const bonus = roll === 6;
+      room.message = bonus
+        ? `${currentPlayer.name} dapat 6 tapi tidak ada langkah. Tetap dapat lemparan bonus!`
+        : `${currentPlayer.name} mendapatkan angka ${roll}, tetapi tidak ada bidak yang dapat melangkah.`;
+      addHistory(room, `${currentPlayer.name} melempar dadu: ${roll} (tidak ada langkah valid${bonus ? ', lempar lagi' : ''})`);
       emitRoom(room);
       if (room.passTimer) clearTimeout(room.passTimer);
-      room.passTimer = roomTimeout(room, () => advanceTurn(room), 1300);
+      room.passTimer = roomTimeout(room, () => {
+        if (!bonus) return advanceTurn(room);
+        room.dice = null;
+        emitRoom(room);
+        triggerTurn(room);
+      }, 1300);
       return;
     }
 

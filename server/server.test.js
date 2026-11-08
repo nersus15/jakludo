@@ -385,3 +385,25 @@ test('room dan data pemain tetap ada setelah server restart', async () => {
   await stop(srv.child);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('dapat 6 tanpa langkah yang mungkin tetap mendapat lemparan bonus', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const pa = room.players[0];
+  // Tiga bidak finish, satu di jalur finish (val 41): angka 6 melewati finish
+  room.pawns[pa.id] = [41, 44, 44, 44];
+  const crypto = require('crypto');
+  const original = crypto.randomInt;
+  crypto.randomInt = () => 5; // dadu = 6
+  try {
+    a.emit('game:roll');
+    await wait(750 + 1300 + 300);
+  } finally {
+    crypto.randomInt = original;
+  }
+  assert.equal(room.turn, 0, 'giliran tetap milik pemain yang dapat 6');
+  assert.equal(room.dice, null, 'boleh melempar lagi');
+});

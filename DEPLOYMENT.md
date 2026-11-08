@@ -171,6 +171,34 @@ Jika memakai Nginx, sebaiknya port 5172 tidak dibuka ke publik (firewall), supay
 
 ---
 
+## 4b. Jika Memakai Tunnel (Cloudflare Tunnel, ngrok, dll.)
+
+- **WebSocket wajib aktif di tunnel.** Klien mencoba WebSocket lebih dulu dan baru memakai HTTP long-polling sebagai cadangan. Polling lewat tunnel jauh lebih rentan putus. Di Cloudflare: *Network → WebSockets: On*.
+- **Set `TRUST_PROXY=1`.** Semua request datang dari daemon tunnel, jadi tanpa ini semua pemain dianggap satu IP dan batas login/registrasi berlaku untuk seluruh situs sekaligus.
+- **Jangan menjalankan lebih dari satu instance/replika.** Room disimpan di memori proses. Kalau ada dua instance, pemain di room yang sama bisa terhubung ke proses berbeda dan "hilang" dari room.
+
+### Melacak pemain yang terputus
+Server mencatat setiap koneksi dan alasan putusnya:
+```bash
+docker compose logs --since 2h | grep "\[conn\]"
+```
+Contoh:
+```
+[conn] disconnect id=... transport=websocket device=mobile room=AB12C player="Budi" reason="ping timeout" after=312s
+```
+| `reason` | Arti |
+| :--- | :--- |
+| `ping timeout` | HP tidur, tab di background, atau jaringan beku lebih dari ±55 detik |
+| `transport close` / `transport error` | Koneksi diputus di tengah jalan oleh tunnel, proxy, atau jaringan |
+| `client namespace disconnect` | Pemain sengaja menutup koneksi |
+| `server shutting down` | Server di-restart |
+
+Kalau `transport` di log sering bernilai `polling`, berarti WebSocket tidak lolos lewat tunnel. Itu yang pertama perlu dibereskan.
+
+Pemain yang terputus otomatis menyambung ulang ke kursinya. Kursi di lobby ditahan 2 menit, dan saat permainan berjalan gilirannya dimainkan sistem setelah 8 detik tanpa langsung dinyatakan OUT.
+
+---
+
 ## 5. Perintah Berguna untuk Maintenance
 
 | Aksi | Perintah |

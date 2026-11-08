@@ -31,6 +31,10 @@ app.use(express.json({ limit: '10kb' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   maxHttpBufferSize: 16 * 1024,
+  // Lebih toleran terhadap jeda jaringan HP / tunnel: koneksi baru dianggap putus
+  // setelah tidak ada balasan ping selama pingInterval + pingTimeout (25 + 30 detik).
+  pingInterval: 25000,
+  pingTimeout: 30000,
   ...(corsOrigin ? { cors: { origin: corsOrigin } } : {})
 });
 
@@ -44,7 +48,7 @@ const DISCONNECTED_TURN_DELAY_MS = 8000;
 // Pemain yang terputus baru bisa dinyatakan OUT setelah offline selama ini (bukan karena sinyal goyang)
 const OFFLINE_OUT_MS = 2 * 60 * 1000;
 // Kursi di lobby ditahan selama ini setelah koneksi putus
-const LOBBY_SEAT_GRACE_MS = 30 * 1000;
+const LOBBY_SEAT_GRACE_MS = 2 * 60 * 1000; // cukup untuk membagikan link undangan lewat aplikasi lain
 
 const makeRoomCode = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 const makeSessionId = () => 'sess_' + crypto.randomBytes(12).toString('hex');
@@ -937,7 +941,23 @@ function validateEliminationTarget(socket, r, { targetPlayerId, targetPawnIdx })
 // SOCKET EVENTS
 // ==========================================
 
+// Log siklus koneksi agar penyebab pemain terputus bisa dilacak di log produksi.
+// Alasan umum: "ping timeout" (HP tidur / tab di background / jaringan beku),
+// "transport close" / "transport error" (koneksi diputus tunnel/proxy/jaringan).
+function logConnection(socket, event, extra = '') {
+  const ua = String(socket.handshake.headers['user-agent'] || '');
+  const device = /mobile|android|iphone|ipad/i.test(ua) ? 'mobile' : 'desktop';
+  const transport = socket.conn?.transport?.name || '-';
+  const r = rooms.get(socket.data.room);
+  const player = r?.players.find(p => p.id === socket.id);
+  console.log(`[conn] ${event} id=${socket.id} transport=${transport} device=${device}` +
+    `${r ? ` room=${r.code}` : ''}${player ? ` player="${player.name}"` : ''}${extra}`);
+}
+
 io.on('connection', socket => {
+  const connectedAt = Date.now();
+  logConnection(socket, 'connect');
+  socket.conn.once('upgrade', () => logConnection(socket, 'upgrade'));
   // Heartbeat Ping/Pong untuk mengukur latensi
   socket.on('network:ping', (clientTimestamp, callback) => {
     if (typeof callback === 'function') callback(clientTimestamp);
@@ -1174,7 +1194,8 @@ io.on('connection', socket => {
     delete socket.data.room;
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', reason => {
+    logConnection(socket, 'disconnect', ` reason="${reason}" after=${Math.round((Date.now() - connectedAt) / 1000)}s`);
     try {
       const r = rooms.get(socket.data.room);
       if (r) handleDeparture(socket, r, { intentional: false });

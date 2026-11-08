@@ -92,6 +92,40 @@ function getMovablePawns(room, player, dice) {
   return result;
 }
 
+// ==========================================
+// BLACK HOLE
+// ==========================================
+
+// Posisi Black Hole yang berlaku di room (statis atau hasil pindah acak)
+function getBlackHoles(room) {
+  return Array.isArray(room.blackHoles) && room.blackHoles.length ? room.blackHoles : BLACK_HOLE_INDICES;
+}
+
+// Pindahkan tiap Black Hole ke petak acak di ruasnya sendiri (ruas k = petak 10k..10k+9).
+// Petak start, petak aman, petak berisi bidak, dan posisi lama dihindari.
+function relocateBlackHoles(room, random = Math.random) {
+  const occupied = new Set();
+  for (const p of room.players) {
+    const colorIdx = COLORS.indexOf(p.color);
+    for (const v of room.pawns[p.id] || []) {
+      const t = getTrackIndex(colorIdx, v);
+      if (t !== null) occupied.add(t);
+    }
+  }
+  const current = getBlackHoles(room);
+  return [0, 1, 2, 3].map(segment => {
+    const candidates = [];
+    for (let i = 0; i < 10; i++) {
+      const t = segment * 10 + i;
+      if (COLOR_OFFSETS.includes(t) || SAFE_TRACK_INDICES.includes(t) || occupied.has(t) || t === current[segment]) continue;
+      candidates.push(t);
+    }
+    // Ruas penuh bidak: Black Hole tetap di tempat lamanya
+    if (candidates.length === 0) return current[segment];
+    return candidates[Math.floor(random() * candidates.length)];
+  });
+}
+
 function chooseBestPawn(room, player, dice) {
   const currentPawns = room.pawns[player.id];
   if (!currentPawns) return null;
@@ -144,6 +178,8 @@ module.exports = {
   nextFreeColor,
   canPawnMove,
   getMovablePawns,
+  getBlackHoles,
+  relocateBlackHoles,
   chooseBestPawn,
   isPawnIndex
 };

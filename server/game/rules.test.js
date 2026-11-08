@@ -53,3 +53,19 @@ test('isPawnIndex hanya menerima bilangan bulat 0..3', () => {
   for (const ok of [0, 1, 2, 3]) assert.equal(isPawnIndex(ok), true);
   for (const bad of [-1, 4, 1.5, '1', 'abc', null, undefined, NaN]) assert.equal(isPawnIndex(bad), false);
 });
+
+// ---------- Black Hole acak ----------
+
+test('Black Hole acak pindah di ruasnya sendiri dan menghindari bidak, petak aman, dan start', () => {
+  const { relocateBlackHoles, COLOR_OFFSETS: offsets, SAFE_TRACK_INDICES: safe } = require('./rules');
+  // Merah menempati track 1..5 (val 2..6 untuk bidak 0..3 + 1 bidak di val 4)
+  const room = makeRoom({ a: [2, 3, 4, 5], b: [0, 0, 0, 0] }, { safeZones: true, blackHole: true });
+  for (let i = 0; i < 200; i++) {
+    const holes = relocateBlackHoles(room);
+    holes.forEach((t, segment) => {
+      assert.equal(Math.floor(t / 10), segment, 'tetap di ruasnya');
+      assert.ok(!offsets.includes(t) && !safe.includes(t), 'bukan petak start/aman');
+      assert.ok(![1, 2, 3, 4].includes(t), 'bukan petak berisi bidak');
+    });
+  }
+});

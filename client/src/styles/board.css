@@ -241,6 +241,12 @@
 
 .cell-black-hole {
   background: #2b2420;
+  animation: hole-open 0.4s var(--ease);
+}
+
+/* Black Hole baru muncul (mode acak: pindah tiap putaran) */
+@keyframes hole-open {
+  from { background: #ffffff; transform: scale(0.6); }
 }
 
 /* Finish di tengah */

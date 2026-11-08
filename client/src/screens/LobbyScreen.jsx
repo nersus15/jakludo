@@ -70,6 +70,7 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
   const [copyState, setCopyState] = useState('');
   const safeZones = room.settings?.safeZones !== false;
   const blackHole = !!room.settings?.blackHole;
+  const blackHoleMode = room.settings?.blackHoleMode === 'random' ? 'random' : 'static';
   const count = room.players.length;
   const isHost = !!me?.isHost;
 
@@ -146,6 +147,33 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
             <span className={`badge ${blackHole ? 'badge--warning' : ''}`}>{blackHole ? 'Aktif' : 'Nonaktif'}</span>
           )}
         </div>
+        {blackHole && (
+          <fieldset className="setting setting--sub" disabled={!isHost}>
+            <legend className="setting__legend">Lokasi Black Hole</legend>
+            <div className="segmented" role="radiogroup" aria-label="Lokasi Black Hole">
+              {[
+                { value: 'static', label: 'Tetap' },
+                { value: 'random', label: 'Acak' }
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={blackHoleMode === opt.value}
+                  className="segmented__option"
+                  onClick={() => isHost && blackHoleMode !== opt.value && actions.setBlackHoleMode(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="muted setting__hint">
+              {blackHoleMode === 'random'
+                ? 'Acak: setiap satu putaran, tiap lubang pindah ke petak kosong lain di garisnya.'
+                : 'Tetap: empat lubang di petak yang sama sepanjang permainan.'}
+            </p>
+          </fieldset>
+        )}
         <p className="setting__note muted">Bidak yang berdiri di kotak start warnanya sendiri tidak bisa dimakan lawan.</p>
       </section>
 

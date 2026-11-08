@@ -293,6 +293,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     removeBot: () => emitWithClick('room:remove_bot'),
     toggleSafeZones: () => emitWithClick('room:update_settings', { safeZones: room?.settings?.safeZones === false }),
     toggleBlackHole: () => emitWithClick('room:update_settings', { blackHole: !room?.settings?.blackHole }),
+    setBlackHoleMode: mode => emitWithClick('room:update_settings', { blackHoleMode: mode }),
     startGame: () => emitWithClick('game:start'),
     restartGame: () => emitWithClick('game:restart'),
     rollDice: () => socket.emit('game:roll'),

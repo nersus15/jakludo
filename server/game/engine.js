@@ -8,12 +8,13 @@ const {
   COLORS,
   COLOR_OFFSETS,
   SAFE_TRACK_INDICES,
-  BLACK_HOLE_INDICES,
   FINISH,
   getTrackIndex,
   canPawnMove,
   getMovablePawns,
   chooseBestPawn,
+  getBlackHoles,
+  relocateBlackHoles,
   isPawnIndex
 } = require('./rules');
 const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY } = require('./config');
@@ -44,6 +45,8 @@ function startGame(r) {
   store.resetRoomEvents(r);
   r.started = true;
   r.turn = 0;
+  r.blackHoles = r.settings.blackHole && r.settings.blackHoleMode === 'random' ? relocateBlackHoles(r) : null;
+  r.turnsSinceBlackHoleShift = 0;
   for (const p of r.players) {
     r.pawns[p.id] = [0, 0, 0, 0];
     resetPlayerForGame(p);
@@ -100,12 +103,25 @@ function advanceTurn(room) {
   room.turn = next;
   room.dice = null;
   room.consecutiveSixes = 0;
+  shiftBlackHolesEachRound(room, activePlayers.length);
   room.players.forEach(p => { p.accumulatedThisTurn = false; });
   const nextPlayer = room.players[room.turn];
   room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/${MAX_AUTO_PLAY})` : ''}.`;
 
   emitRoom(room);
   triggerTurn(room);
+}
+
+// Mode Black Hole acak: setelah semua pemain aktif mendapat giliran (1 putaran),
+// keempat Black Hole pindah ke petak lain di ruasnya masing-masing.
+function shiftBlackHolesEachRound(room, activeCount) {
+  if (!room.settings?.blackHole || room.settings.blackHoleMode !== 'random') return;
+  room.turnsSinceBlackHoleShift = (room.turnsSinceBlackHoleShift || 0) + 1;
+  if (room.turnsSinceBlackHoleShift < activeCount) return;
+  room.turnsSinceBlackHoleShift = 0;
+  room.blackHoles = relocateBlackHoles(room);
+  room.lastBlackHoleShift = { id: eventId(), positions: room.blackHoles };
+  addHistory(room, '🕳️ Black Hole berpindah tempat!');
 }
 
 // Jadwalkan aksi berikutnya untuk pemain yang sedang mendapat giliran
@@ -356,7 +372,7 @@ function resolveLanding(room, player, pawnIdx, toVal) {
   }
 
   // 2. Efek Black Hole pada bidak yang baru mendarat (bisa dicegah item, mis. Blackhole Shield)
-  if (room.settings?.blackHole && BLACK_HOLE_INDICES.includes(trackPos)) {
+  if (room.settings?.blackHole && getBlackHoles(room).includes(trackPos)) {
     if (!runItemHooks(room, player, 'blackHole', { pawnIdx, trackPos })) {
       room.pawns[player.id][pawnIdx] = 0;
       room.lastBlackHole = { id: eventId(), playerId: player.id, pawnIdx, trackPos, color: player.color, time: Date.now() };

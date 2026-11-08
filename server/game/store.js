@@ -1,7 +1,7 @@
 // State room di memori: broadcast ke klien, snapshot ke SQLite, dan siklus hidup room.
 const db = require('../db');
 const inventory = require('./inventory');
-const { getMovablePawns } = require('./rules');
+const { getMovablePawns, getBlackHoles } = require('./rules');
 const { ROOM_IDLE_TTL_MS, ROOM_SAVE_DELAY_MS, LOBBY_SEAT_GRACE_MS, MAX_HISTORY } = require('./config');
 
 const rooms = new Map();
@@ -64,8 +64,10 @@ function publicRoom(r) {
     lastSkillUse: r.lastSkillUse || null,
     lastSkillUnlock: r.lastSkillUnlock || null,
     lastItemEvent: r.lastItemEvent || null,
+    lastBlackHoleShift: r.lastBlackHoleShift || null,
+    blackHoles: r.settings?.blackHole ? getBlackHoles(r) : [],
     history: r.history || [],
-    settings: r.settings || { safeZones: true, blackHole: false }
+    settings: { blackHoleMode: 'static', ...(r.settings || { safeZones: true, blackHole: false }) }
   };
 }
 
@@ -96,6 +98,7 @@ function resetRoomEvents(r) {
   r.lastSkillUse = null;
   r.lastSkillUnlock = null;
   r.lastItemEvent = null;
+  r.lastBlackHoleShift = null;
 }
 
 function clearRoomTimers(r) {

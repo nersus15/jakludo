@@ -29,7 +29,7 @@ function createRoom(socket, payload) {
     history: [],
     chats: [],
     lobbyRemovals: new Map(),
-    settings: { safeZones: true, blackHole: false },
+    settings: { safeZones: true, blackHole: false, blackHoleMode: 'static' },
     botTimeout: null,
     rollTimer: null,
     passTimer: null,
@@ -210,7 +210,7 @@ function removeBot(room, hostSocketId) {
   }
 }
 
-function updateSettings(room, hostSocketId, { safeZones, blackHole }) {
+function updateSettings(room, hostSocketId, { safeZones, blackHole, blackHoleMode }) {
   if (!room || room.host !== hostSocketId || room.started) return;
   let changed = false;
   if (typeof safeZones === 'boolean') {
@@ -221,6 +221,11 @@ function updateSettings(room, hostSocketId, { safeZones, blackHole }) {
   if (typeof blackHole === 'boolean') {
     room.settings.blackHole = blackHole;
     addHistory(room, `⚙️ Host mengatur Black Hole: ${blackHole ? 'AKTIF 🕳️' : 'NONAKTIF'}.`);
+    changed = true;
+  }
+  if (blackHoleMode === 'static' || blackHoleMode === 'random') {
+    room.settings.blackHoleMode = blackHoleMode;
+    addHistory(room, `⚙️ Host mengatur lokasi Black Hole: ${blackHoleMode === 'random' ? 'ACAK (pindah tiap putaran)' : 'TETAP'}.`);
     changed = true;
   }
   if (changed) emitRoom(room);

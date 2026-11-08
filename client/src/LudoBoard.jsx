@@ -4,7 +4,6 @@ import {
   START_TILES,
   TRACK_COORDS,
   SAFE_TRACK_INDICES,
-  BLACK_HOLE_INDICES,
   getPawnCoord
 } from './boardConstants';
 import { sound } from './sound';
@@ -52,6 +51,8 @@ function LudoBoardView({
   const currentTurnPlayer = room.players[room.turn];
   const safeZonesActive = room.settings?.safeZones !== false;
   const blackHoleActive = !!room.settings?.blackHole;
+  // Posisi Black Hole dikirim server (bisa berpindah tiap putaran pada mode acak)
+  const blackHoles = room.blackHoles || [];
 
   // Perspektif pemain: Base milik pemain lokal selalu berada di pojok kanan bawah
   const myPlayer = room.players?.find(p => p.id === myPlayerId);
@@ -327,7 +328,7 @@ function LudoBoardView({
     else if (r === 5 && c >= 6 && c <= 9) homeColor = 'blue';
 
     const trackIdx = TRACK_COORDS.findIndex(coord => coord[0] === r && coord[1] === c);
-    const isBlackHole = blackHoleActive && trackIdx !== -1 && BLACK_HOLE_INDICES.includes(trackIdx);
+    const isBlackHole = blackHoleActive && trackIdx !== -1 && blackHoles.includes(trackIdx);
     const isStar = trackIdx !== -1 && SAFE_TRACK_INDICES.includes(trackIdx);
 
     const cellPawns = pawnsByCoord[`${r},${c}`] || [];

@@ -260,7 +260,7 @@ function LudoBoardView({
     return (
       <div
         key={`base-${color}`}
-        className={`board-base base-${color} ${isThisPlayerTurn ? 'base-active-turn' : ''} ${player?.isOut ? 'base-player-out' : ''}`}
+        className={`board-base base-${color} ${isThisPlayerTurn ? 'base-active-turn' : ''} ${player?.isOut ? 'base-player-out' : ''} ${!player ? 'base-empty' : ''}`}
         style={{
           gridRow: `${rStart + 1} / span 4`,
           gridColumn: `${cStart + 1} / span 4`
@@ -278,7 +278,8 @@ function LudoBoardView({
 
               return (
                 <div key={pawnIdx} className={`yard-slot yard-slot-${color}`}>
-                  {inBase && (
+                  {/* Warna tanpa pemain/bot: markas tetap ada tapi tanpa bidak */}
+                  {inBase && player && (
                     <button
                       type="button"
                       className={`pawn-token pawn-${color} ${canMove ? 'pawn-can-move pulse-anim' : ''}`}

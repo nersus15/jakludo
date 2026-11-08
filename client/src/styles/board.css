@@ -249,6 +249,11 @@
   from { background: #ffffff; transform: scale(0.6); }
 }
 
+/* Warna tanpa pemain: markas tetap tergambar tapi redup dan kosong */
+.base-empty .base-inner-card {
+  opacity: 0.55;
+}
+
 /* Finish di tengah */
 .board-center-goal {
   display: grid;
@@ -391,11 +396,11 @@
 }
 
 .pulse-anim {
-  animation: pawn-nudge 0.6s var(--ease) 3 alternate;
+  animation: pawn-nudge 0.5s var(--ease) 2 alternate;
 }
 
 @keyframes pawn-nudge {
-  to { transform: translateY(-3px) scale(1.08); }
+  to { transform: translateY(-2px); }
 }
 
 /* Area sentuh bidak interaktif diperluas sampai ±44px */
@@ -429,17 +434,17 @@
   animation: pawn-nudge 0.6s var(--ease) 3 alternate;
 }
 
-/* Lompatan per langkah saat bidak berjalan */
+/* Langkah bidak: geser per petak dengan angkatan kecil, tanpa membesar */
 .pawn-stepping {
   z-index: 100;
   pointer-events: none;
-  animation: pawn-hop 0.22s cubic-bezier(0.2, 0.85, 0.35, 1.25) forwards;
+  animation: pawn-hop 0.2s var(--ease);
 }
 
 @keyframes pawn-hop {
-  0% { transform: translateY(0) scale(1); }
-  45% { transform: translateY(-14px) scale(1.2); }
-  100% { transform: translateY(0) scale(1.05); }
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
 }
 
 /* Bidak di markas: 36px di HP, area sentuh tetap 44px lewat ::after */

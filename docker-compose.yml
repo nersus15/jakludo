@@ -10,6 +10,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5172
+      # Isi 1 jika diakses lewat Nginx reverse proxy agar rate limit login memakai IP asli pemain
+      - TRUST_PROXY=${TRUST_PROXY:-0}
     volumes:
       # Mount direktori data lokal ke container agar database users & leaderboard persisten
       - ./server/data:/app/server/data

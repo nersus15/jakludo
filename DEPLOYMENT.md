@@ -62,10 +62,13 @@ cd /opt/jakludo
 *(Atau upload folder proyek `ludo-party` menggunakan `scp` / `rsync` / SFTP ke server).*
 
 ### B. Pastikan Izin Folder Data
-Folder `server/data/` digunakan untuk menyimpan database lokal pemain (`users.json`, `leaderboard.json`, dll). Pastikan foldernya ada:
+Folder `server/data/` digunakan untuk menyimpan database lokal pemain (`users.json`, `sessions.json`, `leaderboard.json`). File-file ini **tidak** ikut di repository git. Container berjalan sebagai user non-root `node` (uid 1000), jadi folder ini harus bisa ditulis oleh uid 1000:
 ```bash
 mkdir -p server/data
+sudo chown -R 1000:1000 server/data
 ```
+
+Jika file data rusak, server sengaja **menolak start** (pesan `[DB FATAL]` di log) dan menyimpan salinan `*.corrupt-<waktu>`. Pulihkan dari backup lalu jalankan ulang. Ini mencegah data pemain tertimpa kosong.
 
 ### C. Build & Jalankan Container
 Cukup jalankan satu perintah:
@@ -157,6 +160,14 @@ sudo systemctl reload nginx
 sudo certbot --nginx -d domainkamu.com
 ```
 Certbot akan otomatis mengamankan domain kamu dengan SSL/TLS (HTTPS).
+
+### D. Aktifkan TRUST_PROXY
+Karena semua request kini datang dari Nginx, set `TRUST_PROXY=1` agar batas percobaan login dihitung per IP pemain (bukan IP Nginx). Buat file `.env` di folder proyek:
+```bash
+echo "TRUST_PROXY=1" > .env
+docker compose up -d
+```
+Jika memakai Nginx, sebaiknya port 5172 tidak dibuka ke publik (firewall), supaya header `X-Forwarded-For` tidak bisa dipalsukan.
 
 ---
 

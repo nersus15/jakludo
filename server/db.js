@@ -56,7 +56,7 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
 
-    -- user_id tanpa foreign key karena ada baris seed leaderboard tanpa akun
+    -- user_id tanpa foreign key: database lama bisa berisi baris tanpa akun (bot/tamu/contoh)
     CREATE TABLE IF NOT EXISTS leaderboard (
       user_id TEXT PRIMARY KEY,
       username TEXT NOT NULL,
@@ -177,22 +177,8 @@ function importLegacyJson() {
   console.log(`[DB] Data JSON lama dipindahkan ke SQLite: ${users.length} user, ${leaderboard.length} baris leaderboard.`);
 }
 
-function seedLeaderboard() {
-  const { n } = db.prepare('SELECT COUNT(*) AS n FROM leaderboard').get();
-  if (n > 0) return;
-  const insert = db.prepare(`INSERT INTO leaderboard
-    (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, ?, ?, ?, 'seed')`);
-  transaction(() => {
-    insert.run('seed-1', 'ludo_emperor', 'Sultan JakLudo', '👑', 18, 24, 570);
-    insert.run('seed-2', 'queen_dice', 'Ratu Dadu', '🎲', 14, 20, 450);
-    insert.run('seed-3', 'lucky_roller', 'Si Hoki 6', '🔥', 11, 18, 365);
-    insert.run('seed-4', 'master_stride', 'Langkah Sakti', '⚡', 8, 15, 275);
-  });
-}
-
 migrate();
 importLegacyJson();
-seedLeaderboard();
 
 const q = {
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
@@ -208,7 +194,8 @@ const q = {
     (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, 0, 0, ?, ?)`),
   addResult: db.prepare(`UPDATE leaderboard SET matches_played = matches_played + 1,
     wins = wins + ?, points = points + ? WHERE user_id = ?`),
-  ranked: db.prepare(`SELECT * FROM leaderboard WHERE auth_type NOT IN ('bot', 'player')
+  // Hanya akun asli: baris bot, tamu, dan pemain contoh (seed) versi lama tidak ikut peringkat
+  ranked: db.prepare(`SELECT * FROM leaderboard WHERE auth_type NOT IN ('bot', 'player', 'seed')
     ORDER BY wins DESC, points DESC,
       CASE WHEN matches_played > 0 THEN CAST(wins AS REAL) / matches_played ELSE 0 END DESC`),
   spendPoints: db.prepare('UPDATE leaderboard SET points = points - ? WHERE user_id = ? AND points >= ?'),

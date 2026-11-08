@@ -50,8 +50,19 @@ app.use((err, req, res, next) => {
 });
 
 const dist = path.join(__dirname, '../dist');
-app.use(express.static(dist));
-app.get('*', (req, res) => res.sendFile(path.join(dist, 'index.html')));
+// File di /assets punya hash di namanya, jadi aman di-cache selamanya. HTML, sw.js, dan manifest
+// harus selalu dicek ulang agar update langsung sampai; file publik lain (musik, ikon) cukup sehari.
+app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '1y', fallthrough: false }));
+app.use(express.static(dist, {
+  setHeaders(res, filePath) {
+    const noCache = /\.(html|webmanifest|json)$/.test(filePath) || filePath.endsWith('sw.js');
+    res.setHeader('Cache-Control', noCache ? 'no-cache' : 'public, max-age=86400');
+  }
+}));
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(dist, 'index.html'));
+});
 
 // ==========================================
 // PROSES: simpan room saat berhenti, jangan mati karena satu error

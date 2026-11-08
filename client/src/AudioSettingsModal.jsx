@@ -1,213 +1,94 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useId, useState } from 'react';
+import Modal from './components/Modal';
 import { sound } from './sound';
 
+function VolumeControl({ id, title, description, percent, muted, onVolume, onToggleMute, extra }) {
+  return (
+    <section className="audio-control" aria-labelledby={`${id}-title`}>
+      <div className="audio-control__head">
+        <div>
+          <h3 id={`${id}-title`}>{title}</h3>
+          <p className="muted">{description}</p>
+        </div>
+        <button type="button" className="btn btn--secondary" aria-pressed={muted} onClick={onToggleMute}>
+          {muted ? 'Nyalakan' : 'Bisukan'}
+        </button>
+      </div>
+      <div className="audio-control__slider">
+        <label htmlFor={id} className="sr-only">Volume {title}</label>
+        <input
+          id={id}
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={muted ? 0 : percent}
+          onChange={e => onVolume(Number(e.target.value) / 100)}
+          aria-valuetext={muted ? 'Dibisukan' : `${percent} persen`}
+        />
+        <output htmlFor={id} className="audio-control__value">{muted ? 'Mati' : `${percent}%`}</output>
+      </div>
+      {extra}
+    </section>
+  );
+}
+
 export default function AudioSettingsModal({ isOpen, onClose }) {
-  const [audioState, setAudioState] = useState(sound.getState());
+  const [audio, setAudio] = useState(sound.getState());
+  const bgmId = useId();
+  const sfxId = useId();
 
-  useEffect(() => {
-    const unsubscribe = sound.subscribe((state) => {
-      setAudioState({ ...state });
-    });
-    return unsubscribe;
-  }, []);
-
-  if (!isOpen) return null;
-
-  const bgmPercent = Math.round(audioState.bgmVolume * 100);
-  const sfxPercent = Math.round(audioState.sfxVolume * 100);
-
-  const handleBgmSlider = (e) => {
-    const val = parseFloat(e.target.value) / 100;
-    sound.setBgmVolume(val);
-  };
-
-  const handleSfxSlider = (e) => {
-    const val = parseFloat(e.target.value) / 100;
-    sound.setSfxVolume(val);
-  };
-
-  const handleToggleBgmMute = () => {
-    sound.toggleBgmMute();
-  };
-
-  const handleToggleSfxMute = () => {
-    sound.toggleSfxMute();
-  };
-
-  const handleToggleBgmPlay = () => {
-    sound.toggleBgmPlay();
-  };
-
-  const handleTestSfx = () => {
-    sound.playDiceLand(true);
-  };
-
-  const handleResetDefaults = () => {
-    sound.resetDefaults();
-    sound.playJoinNotification();
-  };
+  useEffect(() => sound.subscribe(state => setAudio({ ...state })), []);
 
   return (
-    <div className="audio-modal-overlay" onClick={onClose}>
-      <div
-        className="audio-modal-card"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Pengaturan Suara JakLudo"
-      >
-        <button type="button" className="audio-close-btn" onClick={onClose} title="Tutup">
-          ✕
-        </button>
-
-        <div className="audio-header">
-          <div className="audio-title-icon">🎧</div>
-          <h2>Pengaturan Suara</h2>
-          <p className="audio-sub">
-            Atur volume musik latar dan efek suara secara terpisah sesuai kenyamanan bermainmu.
-          </p>
-        </div>
-
-        <div className="audio-modal-body">
-          {/* Section 1: Musik Latar (BGM) */}
-          <div className={`audio-setting-card ${audioState.bgmMuted ? 'card-muted' : ''}`}>
-            <div className="audio-card-head">
-              <div className="audio-card-icon bgm-icon">🎵</div>
-              <div className="audio-card-info">
-                <div className="audio-card-name-row">
-                  <strong>Musik Latar (BGM)</strong>
-                  {audioState.bgmMuted ? (
-                    <span className="audio-status-badge muted-badge">Mute</span>
-                  ) : (
-                    <span className="audio-status-badge active-badge">
-                      {audioState.isBgmPlaying ? '▶ Memutar' : '⏸ Dijeda'}
-                    </span>
-                  )}
-                </div>
-                <small className="audio-card-desc">Musik Latar JakLudo (Diputar saat bermain di room)</small>
-              </div>
-
-              <div className="audio-head-actions">
-                <button
-                  type="button"
-                  className={`audio-mini-btn ${audioState.isBgmPlaying ? 'btn-playing' : ''}`}
-                  onClick={handleToggleBgmPlay}
-                  title={audioState.isBgmPlaying ? 'Jeda Musik' : 'Putar Musik'}
-                >
-                  {audioState.isBgmPlaying ? '⏸' : '▶'}
-                </button>
-                <button
-                  type="button"
-                  className={`audio-mini-btn ${audioState.bgmMuted ? 'btn-muted' : ''}`}
-                  onClick={handleToggleBgmMute}
-                  title={audioState.bgmMuted ? 'Nyalakan Musik' : 'Bisukan Musik'}
-                >
-                  {audioState.bgmMuted ? '🔇' : '🔊'}
-                </button>
-              </div>
-            </div>
-
-            <div className="audio-slider-row">
-              <span className="slider-label-min">0%</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={audioState.bgmMuted ? 0 : bgmPercent}
-                onChange={handleBgmSlider}
-                className="audio-range-slider bgm-slider"
-                aria-label="Volume Musik Latar"
-              />
-              <span className="slider-label-val">{audioState.bgmMuted ? '0%' : `${bgmPercent}%`}</span>
-            </div>
-            <div className="audio-card-footer-tip">
-              💡 <em>Default: 25% — Hanya berbunyi di arena permainan, tenang di beranda</em>
-            </div>
-          </div>
-
-          {/* Section 2: Efek Suara (SFX) */}
-          <div className={`audio-setting-card ${audioState.sfxMuted ? 'card-muted' : ''}`}>
-            <div className="audio-card-head">
-              <div className="audio-card-icon sfx-icon">🎲</div>
-              <div className="audio-card-info">
-                <div className="audio-card-name-row">
-                  <strong>Efek Suara (SFX)</strong>
-                  {audioState.sfxMuted ? (
-                    <span className="audio-status-badge muted-badge">Mute</span>
-                  ) : (
-                    <span className="audio-status-badge active-badge">Aktif</span>
-                  )}
-                </div>
-                <small className="audio-card-desc">Kocokan dadu, langkah bidak, eliminasi & perayaan goal</small>
-              </div>
-
-              <div className="audio-head-actions">
-                <button
-                  type="button"
-                  className="audio-test-btn"
-                  onClick={() => sound.playGoalCelebration()}
-                  title="Tes Suara Bidak Masuk Garis Akhir"
-                >
-                  ⭐ Tes Goal
-                </button>
-                <button
-                  type="button"
-                  className="audio-test-btn"
-                  onClick={handleTestSfx}
-                  title="Tes Suara Dadu"
-                >
-                  🔔 Tes Dadu
-                </button>
-                <button
-                  type="button"
-                  className={`audio-mini-btn ${audioState.sfxMuted ? 'btn-muted' : ''}`}
-                  onClick={handleToggleSfxMute}
-                  title={audioState.sfxMuted ? 'Nyalakan SFX' : 'Bisukan SFX'}
-                >
-                  {audioState.sfxMuted ? '🔇' : '🔊'}
-                </button>
-              </div>
-            </div>
-
-            <div className="audio-slider-row">
-              <span className="slider-label-min">0%</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={audioState.sfxMuted ? 0 : sfxPercent}
-                onChange={handleSfxSlider}
-                className="audio-range-slider sfx-slider"
-                aria-label="Volume Efek Suara"
-              />
-              <span className="slider-label-val">{audioState.sfxMuted ? '0%' : `${sfxPercent}%`}</span>
-            </div>
-            <div className="audio-card-footer-tip">
-              ⚡ <em>Default: 75% — Jernih dan renyah agar setiap aksi terdengar jelas</em>
-            </div>
-          </div>
-
-          {/* Preset & Save Buttons */}
-          <div className="audio-modal-bottom-row">
-            <button
-              type="button"
-              className="audio-reset-defaults-btn"
-              onClick={handleResetDefaults}
-              title="Kembalikan volume ke settingan rekomendasi"
-            >
-              🔄 Reset Rekomendasi (Musik 25% · SFX 75%)
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="sm"
+      icon="🔊"
+      title="Pengaturan suara"
+      subtitle="Musik latar hanya berbunyi di dalam room."
+      footer={
+        <>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => {
+              sound.resetDefaults();
+              sound.playJoinNotification();
+            }}
+          >
+            Kembalikan default
+          </button>
+          <button type="button" className="btn btn--primary" onClick={onClose}>Selesai</button>
+        </>
+      }
+    >
+      <div className="audio-controls">
+        <VolumeControl
+          id={bgmId}
+          title="Musik latar"
+          description="Default 25%, cukup pelan agar suara permainan tetap terdengar."
+          percent={Math.round(audio.bgmVolume * 100)}
+          muted={audio.bgmMuted}
+          onVolume={v => sound.setBgmVolume(v)}
+          onToggleMute={() => sound.toggleBgmMute()}
+        />
+        <VolumeControl
+          id={sfxId}
+          title="Efek suara"
+          description="Dadu, langkah bidak, makan bidak, dan perayaan finish."
+          percent={Math.round(audio.sfxVolume * 100)}
+          muted={audio.sfxMuted}
+          onVolume={v => sound.setSfxVolume(v)}
+          onToggleMute={() => sound.toggleSfxMute()}
+          extra={
+            <button type="button" className="btn btn--ghost audio-control__test" onClick={() => sound.playDiceLand(true)}>
+              Coba suara dadu
             </button>
-            <button
-              type="button"
-              className="audio-save-close-btn"
-              onClick={onClose}
-            >
-              Selesai & Simpan
-            </button>
-          </div>
-        </div>
+          }
+        />
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -8,7 +8,7 @@
     "dev:server": "node server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test --test-concurrency=1 server/*.test.js",
+    "test": "node --test --test-concurrency=1 \"server/**/*.test.js\"",
     "backup": "node server/backup.js"
   },
   "dependencies": {

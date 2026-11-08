@@ -30,13 +30,10 @@ db.exec(`
   PRAGMA busy_timeout = 5000;
 `);
 
-const SCHEMA_VERSION = 1;
-
-function migrate() {
-  const { user_version: version } = db.prepare('PRAGMA user_version').get();
-  if (version >= SCHEMA_VERSION) return;
-
-  db.exec(`
+// Setiap versi skema adalah satu langkah migrasi. Tambah langkah baru di akhir daftar.
+const MIGRATIONS = [
+  // v1: tabel awal
+  () => db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -77,8 +74,34 @@ function migrate() {
       state TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
-  `);
-  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  `),
+
+  // v2: inventaris generik per item (sebelumnya satu kolom per jenis item di tabel users),
+  // supaya item baru bisa ditambahkan tanpa mengubah skema database
+  () => db.exec(`
+    CREATE TABLE user_items (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      item_id TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+      PRIMARY KEY (user_id, item_id)
+    );
+    INSERT INTO user_items (user_id, item_id, quantity)
+      SELECT id, 'blackholeShield', shield_count FROM users WHERE shield_count > 0;
+    INSERT INTO user_items (user_id, item_id, quantity)
+      SELECT id, 'forceReturn', force_return_count FROM users WHERE force_return_count > 0;
+    ALTER TABLE users DROP COLUMN shield_count;
+    ALTER TABLE users DROP COLUMN force_return_count;
+  `)
+];
+
+function migrate() {
+  const { user_version: version } = db.prepare('PRAGMA user_version').get();
+  for (let v = version; v < MIGRATIONS.length; v++) {
+    transaction(() => {
+      MIGRATIONS[v]();
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+    });
+  }
 }
 
 function transaction(fn) {
@@ -121,12 +144,15 @@ function importLegacyJson() {
 
   transaction(() => {
     const insertUser = db.prepare(`INSERT OR IGNORE INTO users
-      (id, username, name, password_hash, auth_type, avatar, email, shield_count, force_return_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (id, username, name, password_hash, auth_type, avatar, email, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertItem = db.prepare('INSERT OR IGNORE INTO user_items (user_id, item_id, quantity) VALUES (?, ?, ?)');
     for (const u of users) {
       insertUser.run(u.id, u.username, u.name || u.username, u.passwordHash || null, u.authType || 'password',
-        u.avatar || null, u.email || null, u.inventory?.blackholeShield || 0, u.inventory?.forceReturn || 0,
-        u.createdAt || new Date().toISOString());
+        u.avatar || null, u.email || null, u.createdAt || new Date().toISOString());
+      for (const [itemId, quantity] of Object.entries(u.inventory || {})) {
+        if (quantity > 0) insertItem.run(u.id, itemId, quantity);
+      }
     }
     const insertSession = db.prepare('INSERT OR IGNORE INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)');
     const userExists = db.prepare('SELECT 1 FROM users WHERE id = ?');
@@ -186,10 +212,10 @@ const q = {
     ORDER BY wins DESC, points DESC,
       CASE WHEN matches_played > 0 THEN CAST(wins AS REAL) / matches_played ELSE 0 END DESC`),
   spendPoints: db.prepare('UPDATE leaderboard SET points = points - ? WHERE user_id = ? AND points >= ?'),
-  addShield: db.prepare('UPDATE users SET shield_count = shield_count + 1 WHERE id = ?'),
-  addForceReturn: db.prepare('UPDATE users SET force_return_count = force_return_count + 1 WHERE id = ?'),
-  useShield: db.prepare('UPDATE users SET shield_count = shield_count - 1 WHERE id = ? AND shield_count > 0'),
-  useForceReturn: db.prepare('UPDATE users SET force_return_count = force_return_count - 1 WHERE id = ? AND force_return_count > 0'),
+  userItems: db.prepare('SELECT item_id, quantity FROM user_items WHERE user_id = ? AND quantity > 0'),
+  addItem: db.prepare(`INSERT INTO user_items (user_id, item_id, quantity) VALUES (?, ?, ?)
+    ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity`),
+  useItem: db.prepare('UPDATE user_items SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ? AND quantity > 0'),
   saveRoom: db.prepare(`INSERT INTO rooms (code, state, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(code) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`),
   deleteRoom: db.prepare('DELETE FROM rooms WHERE code = ?'),
@@ -208,8 +234,15 @@ function rowToUser(row) {
     avatar: row.avatar,
     email: row.email || undefined,
     createdAt: row.created_at,
-    inventory: { blackholeShield: row.shield_count, forceReturn: row.force_return_count }
+    inventory: getUserItems(row.id)
   };
+}
+
+// Stok item milik akun: { [itemId]: jumlah }
+function getUserItems(userId) {
+  const items = {};
+  for (const row of q.userItems.all(userId)) items[row.item_id] = row.quantity;
+  return items;
 }
 
 function rowToEntry(row) {
@@ -348,27 +381,8 @@ async function loginUser({ username, password }) {
 }
 
 // ==========================================
-// TOKO / SHOP JAKLUDO
+// PROFIL USER
 // ==========================================
-
-const SHOP_ITEMS = {
-  blackholeShield: {
-    id: 'blackholeShield',
-    name: 'Blackhole Shield',
-    icon: '🛡️',
-    price: 100,
-    type: 'passive',
-    description: 'Melindungi bidak dari sedotan Blackhole. Otomatis aktif saat menginjak petak Blackhole sehingga bidakmu tidak kembali ke markas.'
-  },
-  forceReturn: {
-    id: 'forceReturn',
-    name: 'Force Return',
-    icon: '⚡',
-    price: 100,
-    type: 'active',
-    description: 'Kemampuan eliminasi langsung instan. Aktif ketika kamu sudah berhasil menginjak bidak lawan sebanyak 3 kali.'
-  }
-};
 
 function sanitizeUser(u) {
   if (!u) return null;
@@ -462,36 +476,29 @@ function checkIsLudoKing(userId) {
   return !!(king && king.wins > 0 && king.user_id === userId);
 }
 
-function buyShopItem({ userId, itemType }) {
-  if (!Object.prototype.hasOwnProperty.call(SHOP_ITEMS, itemType)) {
-    return { error: 'Item toko tidak valid.' };
-  }
-  const item = SHOP_ITEMS[itemType];
+// Beli item: pengurangan poin dan penambahan stok terjadi dalam satu transaksi.
+// Katalog & harga item ditentukan oleh registry item (server/items), bukan oleh database.
+function purchaseItem({ userId, itemId, price }) {
   const user = findUserById(userId);
   if (!user) return { error: 'Pengguna tidak ditemukan.' };
 
-  // Pengurangan poin dan penambahan item terjadi dalam satu transaksi
   const bought = transaction(() => {
     ensureLeaderboardEntry(user);
-    if (q.spendPoints.run(item.price, user.id, item.price).changes === 0) return false;
-    (itemType === 'blackholeShield' ? q.addShield : q.addForceReturn).run(user.id);
+    if (q.spendPoints.run(price, user.id, price).changes === 0) return false;
+    q.addItem.run(user.id, itemId, 1);
     return true;
   });
 
   if (!bought) {
     const points = q.entryByUser.get(user.id)?.points || 0;
-    return { error: `Poin tidak mencukupi. Diperlukan ${item.price} poin, kamu memiliki ${points} poin.` };
+    return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${points} poin.` };
   }
-
-  const fresh = findUserById(user.id);
-  const sanitized = sanitizeUser(fresh);
-  return { success: true, item, points: sanitized.points, inventory: { ...fresh.inventory }, user: sanitized };
+  return { success: true, user: sanitizeUser(findUserById(user.id)) };
 }
 
-function consumeUserItem({ userId, itemType }) {
-  if (!userId) return false;
-  const stmt = itemType === 'blackholeShield' ? q.useShield : itemType === 'forceReturn' ? q.useForceReturn : null;
-  return !!stmt && stmt.run(userId).changes > 0;
+function consumeUserItem({ userId, itemId }) {
+  if (!userId || typeof itemId !== 'string') return false;
+  return q.useItem.run(userId, itemId).changes > 0;
 }
 
 let closed = false;
@@ -546,8 +553,8 @@ module.exports = {
   getLeaderboard,
   checkIsLudoKing,
   sanitizeUser,
-  SHOP_ITEMS,
-  buyShopItem,
+  getUserItems,
+  purchaseItem,
   consumeUserItem,
   saveRoom,
   deleteRoom,

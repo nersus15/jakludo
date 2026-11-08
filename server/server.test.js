@@ -9,7 +9,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-test-'));
 process.env.JAKLUDO_DATA_DIR = dataDir;
 
 const { io: ioClient } = require('socket.io-client');
-const { server, rooms, flushRooms } = require('./index');
+const { server, rooms, shutdown } = require('./index');
 const db = require('./db');
 
 let url;
@@ -22,9 +22,8 @@ test.before(async () => {
 
 test.after(async () => {
   clients.forEach(c => c.close());
+  shutdown();
   await new Promise(resolve => server.close(resolve));
-  flushRooms();
-  db.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -65,7 +64,7 @@ async function createRoomWith(names) {
 
 test('payload kosong / rusak tidak menjatuhkan server', async () => {
   const c = await connect();
-  for (const ev of ['game:move', 'room:update_settings', 'game:use_skill', 'game:use_force_return', 'game:reaction', 'room:chat', 'room:join', 'room:leave']) {
+  for (const ev of ['game:move', 'room:update_settings', 'game:use_skill', 'game:use_force_return', 'game:use_item', 'game:reaction', 'room:chat', 'room:join', 'room:leave']) {
     c.emit(ev);
     c.emit(ev, null);
     c.emit(ev, 'string');
@@ -129,17 +128,18 @@ test('restart hanya setelah ada pemenang dan mereset state pemain', async () => 
   await wait(50);
   assert.equal(room.winner, null);
 
-  room.players[0].stompCount = 5;
+  room.players[0].items.forceReturn = { owned: 0, earned: 2, state: { stomps: 2 } };
   room.players[0].skillPoints = 4;
   host.emit('game:start'); // start ulang di tengah game harus ditolak
   await wait(50);
-  assert.equal(room.players[0].stompCount, 5);
+  assert.equal(room.players[0].items.forceReturn.earned, 2);
 
   room.winner = room.players[1].id;
   host.emit('game:restart');
   await wait(80);
   assert.equal(room.winner, null);
-  assert.equal(room.players[0].stompCount, 0);
+  assert.equal(room.players[0].items.forceReturn.earned, 0, 'item hasil pertandingan hilang saat main lagi');
+  assert.deepEqual(room.players[0].items.forceReturn.state, {});
   assert.equal(room.players[0].skillPoints, 0);
   assert.deepEqual(room.pawns[room.players[0].id], [0, 0, 0, 0]);
 });

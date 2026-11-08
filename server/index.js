@@ -41,7 +41,9 @@ const io = new Server(server, {
 const rooms = new Map();
 const BOT_NAMES = { red: 'Bot Merah', green: 'Bot Hijau', yellow: 'Bot Kuning', blue: 'Bot Biru' };
 const EMOJIS = ['🎲', '🔥', '👏', '😂', '😭', '👑', '⚡', '🎯'];
+// Lobby tanpa pemain yang tersambung, atau room yang permainannya sudah selesai, dihapus setelah ini
 const ROOM_IDLE_TTL_MS = 5 * 60 * 1000;
+const ROOM_SAVE_DELAY_MS = 300;
 const TURN_TIMEOUT_MS = 15000;
 // Pemain yang koneksinya putus diberi waktu tersambung ulang sebelum gilirannya dimainkan sistem
 const DISCONNECTED_TURN_DELAY_MS = 8000;
@@ -148,6 +150,90 @@ function publicRoom(r) {
 function emitRoom(room) {
   if (!room) return;
   io.to(room.code).emit('room:update', publicRoom(room));
+  markRoomDirty(room);
+}
+
+// ==========================================
+// PERSISTENSI ROOM: snapshot ke SQLite agar permainan selamat dari restart/deploy
+// ==========================================
+
+const RUNTIME_KEYS = new Set(['botTimeout', 'rollTimer', 'passTimer', 'moveTimer', 'turnTimer', 'cleanupTimer', 'lobbyRemovals']);
+const dirtyRooms = new Set();
+let saveTimer = null;
+
+function snapshotRoom(room) {
+  const state = {};
+  for (const [key, value] of Object.entries(room)) {
+    if (!RUNTIME_KEYS.has(key)) state[key] = value;
+  }
+  return state;
+}
+
+function flushRooms() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  for (const code of dirtyRooms) {
+    const room = rooms.get(code);
+    try {
+      if (room) db.saveRoom(code, snapshotRoom(room));
+      else db.deleteRoom(code);
+    } catch (err) {
+      console.error(`[room ${code}] gagal menyimpan snapshot`, err);
+    }
+  }
+  dirtyRooms.clear();
+}
+
+function queueRoomSave(code) {
+  dirtyRooms.add(code);
+  if (!saveTimer) saveTimer = setTimeout(flushRooms, ROOM_SAVE_DELAY_MS);
+}
+
+function markRoomDirty(room) {
+  room.updatedAt = Date.now();
+  queueRoomSave(room.code);
+}
+
+// Pulihkan room dari snapshot terakhir. Semua socket lama sudah tidak ada, jadi pemain manusia
+// ditandai terputus dan tinggal tersambung ulang (lewat token / sessionId) ke kursinya.
+function restoreRooms() {
+  const now = Date.now();
+  for (const { code, state } of db.loadRooms()) {
+    const room = {
+      ...state,
+      lobbyRemovals: new Map(),
+      botTimeout: null,
+      rollTimer: null,
+      passTimer: null,
+      moveTimer: null,
+      turnTimer: null,
+      cleanupTimer: null
+    };
+    for (const p of room.players) {
+      if (!p.isBot) {
+        p.connected = false;
+        p.disconnectedAt = now;
+      }
+    }
+    // Animasi/kocokan yang terpotong restart: langkah bidak sudah tercatat, giliran dilanjutkan
+    room.rolling = false;
+    if (room.animatingMove) {
+      room.animatingMove = null;
+      room.dice = null;
+    }
+    rooms.set(code, room);
+    addHistory(room, '🔄 Server dimulai ulang. Menunggu pemain tersambung kembali...');
+
+    if (!room.started) {
+      for (const p of room.players) if (!p.isBot) holdLobbySeat(room, p);
+      scheduleCleanup(room);
+    } else if (room.winner) {
+      scheduleCleanup(room);
+    } else {
+      triggerTurn(room);
+    }
+  }
+  if (rooms.size > 0) console.log(`[room] ${rooms.size} room dipulihkan dari database.`);
 }
 
 function addHistory(room, text) {
@@ -172,19 +258,32 @@ function deleteRoom(room) {
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
   for (const timer of room.lobbyRemovals.values()) clearTimeout(timer);
   rooms.delete(room.code);
+  queueRoomSave(room.code);
+}
+
+function isCreator(room, player) {
+  return player.userId ? player.userId === room.creatorUserId : !!player.sessionId && player.sessionId === room.creatorSessionId;
+}
+
+// Room yang sedang berjalan hanya dihapus jika semua pemain manusia sudah OUT
+function deleteIfAllHumansOut(room) {
+  if (room.players.some(p => !p.isBot && !p.isOut)) return false;
+  deleteRoom(room);
+  return true;
 }
 
 function hasConnectedHuman(room) {
   return room.players.some(p => !p.isBot && p.connected && !p.left);
 }
 
-// Room yang sudah selesai atau ditinggal semua manusia dihapus setelah 5 menit
+// Hapus room 5 menit setelah permainan selesai (memberi waktu untuk "Main Lagi"),
+// atau jika lobby tidak punya satu pun pemain manusia yang tersambung selama 5 menit.
 function scheduleCleanup(room) {
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
   room.cleanupTimer = setTimeout(() => {
     room.cleanupTimer = null;
     if (rooms.get(room.code) !== room) return;
-    if (room.winner || !hasConnectedHuman(room)) deleteRoom(room);
+    if (room.winner || (!room.started && !hasConnectedHuman(room))) deleteRoom(room);
   }, ROOM_IDLE_TTL_MS);
   room.cleanupTimer.unref();
 }
@@ -203,6 +302,21 @@ function removeLobbyPlayer(room, player) {
   }
   if (room.host === player.id) reassignHost(room);
   emitRoom(room);
+}
+
+// Koneksi putus di lobby: kursi ditahan agar bisa tersambung ulang.
+// Kursi pembuat room ditahan selama room masih ada; kursi pemain lain dilepas setelah masa tenggang.
+function holdLobbySeat(room, player) {
+  player.connected = false;
+  player.disconnectedAt = player.disconnectedAt || Date.now();
+  cancelLobbyRemoval(room, player);
+  if (isCreator(room, player)) return;
+  room.lobbyRemovals.set(player, setTimeout(() => {
+    room.lobbyRemovals.delete(player);
+    if (rooms.get(room.code) !== room || room.started || player.connected) return;
+    addHistory(room, `${player.name} meninggalkan ruang tunggu.`);
+    removeLobbyPlayer(room, player);
+  }, LOBBY_SEAT_GRACE_MS));
 }
 
 function cancelLobbyRemoval(room, player) {
@@ -1184,6 +1298,7 @@ io.on('connection', socket => {
     r.chats.push(chatMsg);
     if (r.chats.length > 50) r.chats.shift();
     io.to(r.code).emit('room:chat_message', chatMsg);
+    markRoomDirty(r);
   });
 
   on(socket, 'room:leave', ({ code }) => {
@@ -1307,21 +1422,24 @@ app.get('*', (req, res) => res.sendFile(path.join(dist, 'index.html')));
 
 process.on('uncaughtException', err => {
   console.error('[uncaughtException]', err);
-  db.flushNow();
+  flushRooms();
 });
 process.on('unhandledRejection', err => {
   console.error('[unhandledRejection]', err);
 });
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
-    db.flushNow();
+    flushRooms();
+    db.close();
     process.exit(0);
   });
 }
 
 const PORT = process.env.PORT || 5172;
+restoreRooms();
+
 if (require.main === module) {
-  server.listen(PORT, () => console.log(`JakLudo server listening on ${PORT}`));
+  server.listen(PORT, () => console.log(`JakLudo server listening on ${server.address().port}`));
 }
 
-module.exports = { server, io, rooms };
+module.exports = { server, io, rooms, flushRooms };

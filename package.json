@@ -8,7 +8,8 @@
     "dev:server": "node server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test --test-concurrency=1 server/*.test.js"
+    "test": "node --test --test-concurrency=1 server/*.test.js",
+    "backup": "node server/backup.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -24,6 +25,6 @@
     "vite": "^5.4.11"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   }
 }

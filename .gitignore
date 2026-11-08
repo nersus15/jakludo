@@ -4,6 +4,10 @@ dist/
 
 # Data runtime (akun, sesi login, leaderboard) - jangan pernah di-commit
 server/data/*.json
+server/data/*.json.migrated-*
+server/data/*.db
+server/data/*.db-*
+server/data/backups/
 server/data/*.tmp
 server/data/*.corrupt-*
 

@@ -9,7 +9,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-test-'));
 process.env.JAKLUDO_DATA_DIR = dataDir;
 
 const { io: ioClient } = require('socket.io-client');
-const { server, rooms } = require('./index');
+const { server, rooms, flushRooms } = require('./index');
 const db = require('./db');
 
 let url;
@@ -23,7 +23,8 @@ test.before(async () => {
 test.after(async () => {
   clients.forEach(c => c.close());
   await new Promise(resolve => server.close(resolve));
-  db.flushNow();
+  flushRooms();
+  db.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -207,22 +208,6 @@ test('endpoint /api yang tidak ada mengembalikan 404 JSON', async () => {
   assert.equal((await res.json()).success, false);
 });
 
-test('file data rusak tidak diperlakukan sebagai kosong', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-corrupt-'));
-  fs.writeFileSync(path.join(dir, 'users.json'), '[{"id": "u1", ');
-  const { spawnSync } = require('child_process');
-  const r = spawnSync(process.execPath, ['-e', "require('./server/db')"], {
-    cwd: path.join(__dirname, '..'),
-    env: { ...process.env, JAKLUDO_DATA_DIR: dir },
-    encoding: 'utf8'
-  });
-  assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /DB FATAL/);
-  assert.equal(fs.readFileSync(path.join(dir, 'users.json'), 'utf8'), '[{"id": "u1", ');
-  assert.ok(fs.readdirSync(dir).some(f => f.startsWith('users.json.corrupt-')));
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
 test('memakan bidak lawan di petak Black Hole tetap memberi bonus giliran', async () => {
   const { sockets, room } = await createRoomWith(['A', 'B']);
   const a = sockets[0].socket;
@@ -275,4 +260,91 @@ test('pemain yang terputus di tengah giliran tidak langsung dimainkan sistem', a
   await wait(900);
   assert.notEqual(room.dice, null, 'pemain bisa melempar dadu sendiri setelah tersambung ulang');
   assert.equal(room.players[0].autoPlayCount, 0);
+});
+
+test('data JSON lama dipindahkan ke SQLite saat pertama kali start', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-migrate-'));
+  fs.writeFileSync(path.join(dir, 'users.json'), JSON.stringify([
+    { id: 'u1', username: 'lama', name: 'Lama', passwordHash: 'scrypt:a:b', authType: 'password', inventory: { blackholeShield: 2, forceReturn: 1 } }
+  ]));
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify({ tok123: { userId: 'u1', createdAt: Date.now(), expiresAt: Date.now() + 60000 } }));
+  fs.writeFileSync(path.join(dir, 'leaderboard.json'), JSON.stringify([{ userId: 'u1', username: 'lama', name: 'Lama', wins: 3, matchesPlayed: 4, points: 90, authType: 'password' }]));
+
+  const { spawnSync } = require('child_process');
+  const script = `const db = require('./server/db');
+    const u = db.getUserByToken('tok123');
+    console.log(JSON.stringify({ name: u && u.name, inv: u && u.inventory, entry: db.getLeaderboard().find(e => e.userId === 'u1') }));
+    db.close();`;
+  const r = spawnSync(process.execPath, ['-e', script], {
+    cwd: path.join(__dirname, '..'), env: { ...process.env, JAKLUDO_DATA_DIR: dir }, encoding: 'utf8'
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.equal(out.name, 'Lama');
+  assert.deepEqual(out.inv, { blackholeShield: 2, forceReturn: 1 });
+  assert.equal(out.entry.points, 90);
+  assert.ok(fs.readdirSync(dir).some(f => f.startsWith('users.json.migrated-')), 'file JSON lama diberi tanda migrated');
+  assert.ok(fs.existsSync(path.join(dir, 'jakludo.db')));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('file JSON lama yang rusak menghentikan migrasi tanpa menghapus data', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-corrupt-'));
+  fs.writeFileSync(path.join(dir, 'users.json'), '[{"id": "u1", ');
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, ['-e', "require('./server/db')"], {
+    cwd: path.join(__dirname, '..'), env: { ...process.env, JAKLUDO_DATA_DIR: dir }, encoding: 'utf8'
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /DB FATAL/);
+  assert.equal(fs.readFileSync(path.join(dir, 'users.json'), 'utf8'), '[{"id": "u1", ');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('room dan data pemain tetap ada setelah server restart', async () => {
+  const { spawn } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-restart-'));
+  const start = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['server/index.js'], {
+      cwd: path.join(__dirname, '..'), env: { ...process.env, JAKLUDO_DATA_DIR: dir, PORT: '0' }
+    });
+    child.stdout.on('data', d => {
+      const m = String(d).match(/listening on (\d+)/);
+      if (m) resolve({ child, url: `http://localhost:${m[1]}` });
+    });
+    child.on('error', reject);
+  });
+  const stop = child => new Promise(resolve => { child.on('exit', resolve); child.kill('SIGTERM'); });
+  const client = u => {
+    const c = ioClient(u, { forceNew: true, transports: ['websocket'] });
+    clients.push(c);
+    return new Promise(resolve => c.on('connect', () => resolve(c)));
+  };
+  const reg = (u, username) => fetch(`${u}/api/auth/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password: 'Rahasia#123' })
+  }).then(r => r.json());
+
+  let srv = await start();
+  const a = await reg(srv.url, 'tahan_restart');
+  const host = await client(srv.url);
+  host.emit('room:create', { token: a.token });
+  const { code } = await once(host, 'room:joined');
+  host.emit('room:add_bot');
+  await wait(500);
+  host.close();
+  await stop(srv.child);
+
+  srv = await start();
+  const me = await fetch(`${srv.url}/api/auth/me`, { headers: { Authorization: `Bearer ${a.token}` } });
+  assert.equal(me.status, 200, 'token login tetap berlaku setelah restart');
+  const back = await client(srv.url);
+  back.emit('room:join', { code, token: a.token });
+  const rejoined = await once(back, 'room:joined');
+  assert.equal(rejoined.reconnected, true, 'kembali ke kursi lama di room yang sama');
+  const update = await once(back, 'room:update');
+  assert.equal(update.players.length, 2);
+  back.close();
+  await stop(srv.child);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -2,13 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { promisify } = require('util');
+const { DatabaseSync } = require('node:sqlite');
 
 const scrypt = promisify(crypto.scrypt);
 
 const DATA_DIR = process.env.JAKLUDO_DATA_DIR || path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
-const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
+const DB_FILE = path.join(DATA_DIR, 'jakludo.db');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
 const STARTER_POINTS = 200;
@@ -20,80 +19,210 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 // ==========================================
-// PENYIMPANAN JSON (cache memori + tulis atomic)
+// DATABASE SQLITE (satu file di folder data, dipasang sebagai volume di Docker)
 // ==========================================
 
-// File yang rusak TIDAK boleh diperlakukan sebagai kosong: penulisan berikutnya akan
-// menimpa seluruh data. Simpan salinan lalu hentikan server.
-function loadJson(file, defaultVal) {
-  if (!fs.existsSync(file)) return defaultVal;
-  const content = fs.readFileSync(file, 'utf8').trim();
-  if (!content) return defaultVal;
+const db = new DatabaseSync(DB_FILE);
+db.exec(`
+  PRAGMA journal_mode = WAL;
+  PRAGMA synchronous = NORMAL;
+  PRAGMA foreign_keys = ON;
+  PRAGMA busy_timeout = 5000;
+`);
+
+const SCHEMA_VERSION = 1;
+
+function migrate() {
+  const { user_version: version } = db.prepare('PRAGMA user_version').get();
+  if (version >= SCHEMA_VERSION) return;
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      name TEXT NOT NULL,
+      password_hash TEXT,
+      auth_type TEXT NOT NULL DEFAULT 'password',
+      avatar TEXT,
+      email TEXT,
+      shield_count INTEGER NOT NULL DEFAULT 0,
+      force_return_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    -- Token disimpan sebagai hash SHA-256: file database yang bocor tidak berisi token login yang bisa dipakai
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
+
+    -- user_id tanpa foreign key karena ada baris seed leaderboard tanpa akun
+    CREATE TABLE IF NOT EXISTS leaderboard (
+      user_id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      name TEXT NOT NULL,
+      avatar TEXT,
+      wins INTEGER NOT NULL DEFAULT 0,
+      matches_played INTEGER NOT NULL DEFAULT 0,
+      points INTEGER NOT NULL DEFAULT 0,
+      auth_type TEXT NOT NULL
+    );
+
+    -- Snapshot room yang sedang berjalan agar permainan selamat dari restart/deploy server
+    CREATE TABLE IF NOT EXISTS rooms (
+      code TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+function transaction(fn) {
+  db.exec('BEGIN IMMEDIATE');
   try {
-    return JSON.parse(content);
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
   } catch (err) {
-    const backup = `${file}.corrupt-${Date.now()}`;
-    fs.copyFileSync(file, backup);
-    throw new Error(`[DB FATAL] ${file} tidak valid (${err.message}). Salinan disimpan di ${backup}. Perbaiki/pulihkan file sebelum menjalankan server.`);
+    db.exec('ROLLBACK');
+    throw err;
   }
 }
 
-function writeJsonAtomic(file, data) {
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, file);
-}
+const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 
-const store = {
-  users: loadJson(USERS_FILE, []),
-  sessions: loadJson(SESSIONS_FILE, {}),
-  leaderboard: loadJson(LEADERBOARD_FILE, [])
-};
-const FILES = { users: USERS_FILE, sessions: SESSIONS_FILE, leaderboard: LEADERBOARD_FILE };
-const dirty = new Set();
-let flushTimer = null;
-let rankedCache = null;
+// Impor sekali dari penyimpanan JSON lama (users.json, sessions.json, leaderboard.json).
+// File JSON yang rusak menghentikan server agar data tidak diam-diam hilang.
+function importLegacyJson() {
+  const files = {
+    users: path.join(DATA_DIR, 'users.json'),
+    sessions: path.join(DATA_DIR, 'sessions.json'),
+    leaderboard: path.join(DATA_DIR, 'leaderboard.json')
+  };
+  if (!Object.values(files).some(f => fs.existsSync(f))) return;
 
-function flushNow() {
-  if (flushTimer) {
-    clearTimeout(flushTimer);
-    flushTimer = null;
-  }
-  for (const key of [...dirty]) {
+  const load = (file, fallback) => {
+    if (!fs.existsSync(file)) return fallback;
+    const content = fs.readFileSync(file, 'utf8').trim();
+    if (!content) return fallback;
     try {
-      writeJsonAtomic(FILES[key], store[key]);
-      dirty.delete(key);
+      return JSON.parse(content);
     } catch (err) {
-      console.error(`[DB WARNING] Gagal menulis ${FILES[key]} (${err.code || err.message}). Pastikan folder server/data dapat ditulis oleh proses server.`);
+      throw new Error(`[DB FATAL] ${file} tidak valid (${err.message}). Perbaiki/pulihkan file ini agar data bisa dipindahkan ke SQLite.`);
     }
+  };
+  const users = load(files.users, []);
+  const sessions = load(files.sessions, {});
+  const leaderboard = load(files.leaderboard, []);
+
+  transaction(() => {
+    const insertUser = db.prepare(`INSERT OR IGNORE INTO users
+      (id, username, name, password_hash, auth_type, avatar, email, shield_count, force_return_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const u of users) {
+      insertUser.run(u.id, u.username, u.name || u.username, u.passwordHash || null, u.authType || 'password',
+        u.avatar || null, u.email || null, u.inventory?.blackholeShield || 0, u.inventory?.forceReturn || 0,
+        u.createdAt || new Date().toISOString());
+    }
+    const insertSession = db.prepare('INSERT OR IGNORE INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)');
+    const userExists = db.prepare('SELECT 1 FROM users WHERE id = ?');
+    for (const [token, s] of Object.entries(sessions)) {
+      if (s && userExists.get(s.userId) && s.expiresAt > Date.now()) {
+        insertSession.run(hashToken(token), s.userId, s.createdAt || Date.now(), s.expiresAt);
+      }
+    }
+    const insertEntry = db.prepare(`INSERT OR IGNORE INTO leaderboard
+      (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const e of leaderboard) {
+      if (!e.userId || !e.username) continue;
+      insertEntry.run(e.userId, e.username, e.name || e.username, e.avatar || null, e.wins || 0,
+        e.matchesPlayed || 0, e.points || 0, e.authType || 'player');
+    }
+  });
+
+  const stamp = Date.now();
+  for (const file of Object.values(files)) {
+    if (fs.existsSync(file)) fs.renameSync(file, `${file}.migrated-${stamp}`);
   }
-  // Coba ulang nanti jika masih ada yang gagal ditulis
-  if (dirty.size > 0) scheduleFlush(5000);
+  console.log(`[DB] Data JSON lama dipindahkan ke SQLite: ${users.length} user, ${leaderboard.length} baris leaderboard.`);
 }
 
-function scheduleFlush(delay = 200) {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    flushNow();
-  }, delay);
+function seedLeaderboard() {
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM leaderboard').get();
+  if (n > 0) return;
+  const insert = db.prepare(`INSERT INTO leaderboard
+    (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, ?, ?, ?, 'seed')`);
+  transaction(() => {
+    insert.run('seed-1', 'ludo_emperor', 'Sultan JakLudo', '👑', 18, 24, 570);
+    insert.run('seed-2', 'queen_dice', 'Ratu Dadu', '🎲', 14, 20, 450);
+    insert.run('seed-3', 'lucky_roller', 'Si Hoki 6', '🔥', 11, 18, 365);
+    insert.run('seed-4', 'master_stride', 'Langkah Sakti', '⚡', 8, 15, 275);
+  });
 }
 
-function markDirty(key) {
-  dirty.add(key);
-  if (key === 'leaderboard') rankedCache = null;
-  scheduleFlush();
+migrate();
+importLegacyJson();
+seedLeaderboard();
+
+const q = {
+  userById: db.prepare('SELECT * FROM users WHERE id = ?'),
+  userByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
+  insertUser: db.prepare(`INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at)
+    VALUES (?, ?, ?, ?, 'password', ?, ?)`),
+  insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
+  sessionByHash: db.prepare('SELECT * FROM sessions WHERE token_hash = ?'),
+  deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+  pruneSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+  entryByUser: db.prepare('SELECT * FROM leaderboard WHERE user_id = ?'),
+  insertEntry: db.prepare(`INSERT OR IGNORE INTO leaderboard
+    (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, 0, 0, ?, ?)`),
+  addResult: db.prepare(`UPDATE leaderboard SET matches_played = matches_played + 1,
+    wins = wins + ?, points = points + ? WHERE user_id = ?`),
+  ranked: db.prepare(`SELECT * FROM leaderboard WHERE auth_type NOT IN ('bot', 'player')
+    ORDER BY wins DESC, points DESC,
+      CASE WHEN matches_played > 0 THEN CAST(wins AS REAL) / matches_played ELSE 0 END DESC`),
+  spendPoints: db.prepare('UPDATE leaderboard SET points = points - ? WHERE user_id = ? AND points >= ?'),
+  addShield: db.prepare('UPDATE users SET shield_count = shield_count + 1 WHERE id = ?'),
+  addForceReturn: db.prepare('UPDATE users SET force_return_count = force_return_count + 1 WHERE id = ?'),
+  useShield: db.prepare('UPDATE users SET shield_count = shield_count - 1 WHERE id = ? AND shield_count > 0'),
+  useForceReturn: db.prepare('UPDATE users SET force_return_count = force_return_count - 1 WHERE id = ? AND force_return_count > 0'),
+  saveRoom: db.prepare(`INSERT INTO rooms (code, state, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(code) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`),
+  deleteRoom: db.prepare('DELETE FROM rooms WHERE code = ?'),
+  allRooms: db.prepare('SELECT code, state, updated_at FROM rooms')
+};
+
+// Bentuk user sama seperti versi JSON sebelumnya agar kode pemanggil tidak berubah
+function rowToUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name,
+    passwordHash: row.password_hash,
+    authType: row.auth_type,
+    avatar: row.avatar,
+    email: row.email || undefined,
+    createdAt: row.created_at,
+    inventory: { blackholeShield: row.shield_count, forceReturn: row.force_return_count }
+  };
 }
 
-// Seed leaderboard awal untuk visual awal yang menarik
-if (store.leaderboard.length === 0) {
-  store.leaderboard = [
-    { userId: 'seed-1', username: 'ludo_emperor', name: 'Sultan JakLudo', avatar: '👑', wins: 18, matchesPlayed: 24, points: 570, authType: 'seed' },
-    { userId: 'seed-2', username: 'queen_dice', name: 'Ratu Dadu', avatar: '🎲', wins: 14, matchesPlayed: 20, points: 450, authType: 'seed' },
-    { userId: 'seed-3', username: 'lucky_roller', name: 'Si Hoki 6', avatar: '🔥', wins: 11, matchesPlayed: 18, points: 365, authType: 'seed' },
-    { userId: 'seed-4', username: 'master_stride', name: 'Langkah Sakti', avatar: '⚡', wins: 8, matchesPlayed: 15, points: 275, authType: 'seed' }
-  ];
-  markDirty('leaderboard');
+function rowToEntry(row) {
+  return {
+    userId: row.user_id,
+    username: row.username,
+    name: row.name,
+    avatar: row.avatar,
+    wins: row.wins,
+    matchesPlayed: row.matches_played,
+    points: row.points,
+    authType: row.auth_type
+  };
 }
 
 // ==========================================
@@ -164,17 +293,12 @@ async function verifyPassword(password, storedHash) {
 // MANAJEMEN USER
 // ==========================================
 
-function findUserByUsername(username) {
-  const lower = String(username).toLowerCase();
-  return store.users.find(u => u.username.toLowerCase() === lower);
-}
-
 function findUserById(id) {
-  return store.users.find(u => u.id === id);
+  return typeof id === 'string' ? rowToUser(q.userById.get(id)) : null;
 }
 
-function findEntry(userId) {
-  return store.leaderboard.find(b => b.userId === userId);
+function findUserByUsername(username) {
+  return rowToUser(q.userByUsername.get(String(username)));
 }
 
 async function registerUser({ username, password, name }) {
@@ -189,29 +313,23 @@ async function registerUser({ username, password, name }) {
   }
 
   const passwordHash = await hashPassword(password);
+  const displayName = (typeof name === 'string' ? name.trim().slice(0, 18) : '') || userValid.cleanUsername;
+  const id = 'user_' + crypto.randomUUID();
 
-  // Cek ulang: dua pendaftaran bersamaan bisa lolos cek pertama selama hashing berjalan
-  if (findUserByUsername(userValid.cleanUsername)) {
-    return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+  try {
+    transaction(() => {
+      q.insertUser.run(id, userValid.cleanUsername, displayName, passwordHash, '🎯', new Date().toISOString());
+      q.insertEntry.run(id, userValid.cleanUsername, displayName, '🎯', STARTER_POINTS, 'password');
+    });
+  } catch (err) {
+    // Dua pendaftaran bersamaan dengan username yang sama: constraint UNIQUE yang menentukan
+    if (String(err.message).includes('UNIQUE')) {
+      return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+    }
+    throw err;
   }
 
-  const cleanName = typeof name === 'string' ? name.trim().slice(0, 18) : '';
-  const newUser = {
-    id: 'user_' + crypto.randomUUID(),
-    username: userValid.cleanUsername,
-    name: cleanName || userValid.cleanUsername,
-    passwordHash,
-    authType: 'password',
-    avatar: '🎯',
-    createdAt: new Date().toISOString()
-  };
-
-  store.users.push(newUser);
-  markDirty('users');
-  ensureLeaderboardEntry(newUser);
-
-  const token = createSession(newUser.id);
-  return { user: sanitizeUser(newUser), token };
+  return { user: sanitizeUser(findUserById(id)), token: createSession(id) };
 }
 
 async function loginUser({ username, password }) {
@@ -223,13 +341,10 @@ async function loginUser({ username, password }) {
   if (!user || !user.passwordHash) {
     return { error: 'Username atau password salah.' };
   }
-
   if (!(await verifyPassword(password, user.passwordHash))) {
     return { error: 'Username atau password salah.' };
   }
-
-  const token = createSession(user.id);
-  return { user: sanitizeUser(user), token };
+  return { user: sanitizeUser(user), token: createSession(user.id) };
 }
 
 // ==========================================
@@ -257,7 +372,7 @@ const SHOP_ITEMS = {
 
 function sanitizeUser(u) {
   if (!u) return null;
-  const entry = findEntry(u.id);
+  const entry = q.entryByUser.get(u.id);
   return {
     id: u.id,
     username: u.username,
@@ -265,11 +380,8 @@ function sanitizeUser(u) {
     avatar: u.avatar,
     email: u.email,
     authType: u.authType,
-    points: entry ? (entry.points || 0) : 0,
-    inventory: {
-      blackholeShield: (u.inventory && u.inventory.blackholeShield) || 0,
-      forceReturn: (u.inventory && u.inventory.forceReturn) || 0
-    }
+    points: entry ? entry.points : 0,
+    inventory: { ...u.inventory }
   };
 }
 
@@ -279,48 +391,30 @@ function sanitizeUser(u) {
 
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
-  store.sessions[token] = {
-    userId,
-    createdAt: Date.now(),
-    expiresAt: Date.now() + SESSION_TTL_MS
-  };
-  markDirty('sessions');
+  const now = Date.now();
+  q.insertSession.run(hashToken(token), userId, now, now + SESSION_TTL_MS);
   return token;
 }
 
 function getUserByToken(token) {
   if (!token || typeof token !== 'string') return null;
-  if (!Object.prototype.hasOwnProperty.call(store.sessions, token)) return null;
-  const session = store.sessions[token];
-
-  if (Date.now() > session.expiresAt) {
-    delete store.sessions[token];
-    markDirty('sessions');
+  const hash = hashToken(token);
+  const session = q.sessionByHash.get(hash);
+  if (!session) return null;
+  if (Date.now() > session.expires_at) {
+    q.deleteSession.run(hash);
     return null;
   }
-  return findUserById(session.userId) || null;
+  return findUserById(session.user_id);
 }
 
 function deleteSession(token) {
-  if (typeof token === 'string' && Object.prototype.hasOwnProperty.call(store.sessions, token)) {
-    delete store.sessions[token];
-    markDirty('sessions');
-    return true;
-  }
-  return false;
+  if (!token || typeof token !== 'string') return false;
+  return q.deleteSession.run(hashToken(token)).changes > 0;
 }
 
 function pruneExpiredSessions() {
-  const now = Date.now();
-  let removed = 0;
-  for (const [token, s] of Object.entries(store.sessions)) {
-    if (!s || now > s.expiresAt || !findUserById(s.userId)) {
-      delete store.sessions[token];
-      removed++;
-    }
-  }
-  if (removed > 0) markDirty('sessions');
-  return removed;
+  return Number(q.pruneSessions.run(Date.now()).changes);
 }
 
 pruneExpiredSessions();
@@ -331,18 +425,7 @@ setInterval(pruneExpiredSessions, 60 * 60 * 1000).unref();
 // ==========================================
 
 function ensureLeaderboardEntry(user) {
-  if (findEntry(user.id)) return;
-  store.leaderboard.push({
-    userId: user.id,
-    username: user.username,
-    name: user.name,
-    avatar: user.avatar || '🎲',
-    wins: 0,
-    matchesPlayed: 0,
-    points: STARTER_POINTS, // Bonus starter untuk belanja di Toko (sekali saja)
-    authType: user.authType
-  });
-  markDirty('leaderboard');
+  q.insertEntry.run(user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType);
 }
 
 // Catat hasil pertandingan. Hanya akun terdaftar yang mendapat poin, dan hanya
@@ -352,51 +435,31 @@ function recordMatchResult({ winnerPlayerId, players }) {
   const humans = players.filter(p => !p.isBot);
   if (humans.length < 2) return;
 
-  let changed = false;
-  for (const p of humans) {
-    if (!p.userId) continue;
-    const user = findUserById(p.userId);
-    if (!user) continue;
-    ensureLeaderboardEntry(user);
-    const entry = findEntry(user.id);
-
-    entry.matchesPlayed = (entry.matchesPlayed || 0) + 1;
-    if (p.id === winnerPlayerId) {
-      entry.wins = (entry.wins || 0) + 1;
-      entry.points = (entry.points || 0) + WIN_POINTS;
-    } else {
-      entry.points = (entry.points || 0) + PLAY_POINTS;
+  transaction(() => {
+    for (const p of humans) {
+      const user = p.userId ? findUserById(p.userId) : null;
+      if (!user) continue;
+      ensureLeaderboardEntry(user);
+      const won = p.id === winnerPlayerId;
+      q.addResult.run(won ? 1 : 0, won ? WIN_POINTS : PLAY_POINTS, user.id);
     }
-    changed = true;
-  }
-  if (changed) markDirty('leaderboard');
+  });
 }
 
 // Urutkan: wins -> points -> win rate. Baris bot/tamu lama tidak ditampilkan.
 function getLeaderboard() {
-  if (rankedCache) return rankedCache;
-  const sorted = store.leaderboard
-    .filter(p => p.authType !== 'bot' && p.authType !== 'player')
-    .sort((a, b) => {
-      if (b.wins !== a.wins) return b.wins - a.wins;
-      if (b.points !== a.points) return b.points - a.points;
-      const aRate = a.matchesPlayed > 0 ? a.wins / a.matchesPlayed : 0;
-      const bRate = b.matchesPlayed > 0 ? b.wins / b.matchesPlayed : 0;
-      return bRate - aRate;
-    });
-
-  rankedCache = sorted.map((player, index) => {
+  return q.ranked.all().map((row, index) => {
+    const player = rowToEntry(row);
     const rank = index + 1;
     const winRate = player.matchesPlayed > 0 ? Math.round((player.wins / player.matchesPlayed) * 100) : 0;
     return { ...player, rank, winRate, isLudoKing: rank === 1 && player.wins > 0 };
   });
-  return rankedCache;
 }
 
 function checkIsLudoKing(userId) {
   if (!userId) return false;
-  const king = getLeaderboard()[0];
-  return !!(king && king.isLudoKing && king.userId === userId);
+  const king = q.ranked.get();
+  return !!(king && king.wins > 0 && king.user_id === userId);
 }
 
 function buyShopItem({ userId, itemType }) {
@@ -404,36 +467,71 @@ function buyShopItem({ userId, itemType }) {
     return { error: 'Item toko tidak valid.' };
   }
   const item = SHOP_ITEMS[itemType];
-
   const user = findUserById(userId);
   if (!user) return { error: 'Pengguna tidak ditemukan.' };
 
-  ensureLeaderboardEntry(user);
-  const entry = findEntry(user.id);
-  const currentPoints = entry.points || 0;
-  if (currentPoints < item.price) {
-    return { error: `Poin tidak mencukupi. Diperlukan ${item.price} poin, kamu memiliki ${currentPoints} poin.` };
+  // Pengurangan poin dan penambahan item terjadi dalam satu transaksi
+  const bought = transaction(() => {
+    ensureLeaderboardEntry(user);
+    if (q.spendPoints.run(item.price, user.id, item.price).changes === 0) return false;
+    (itemType === 'blackholeShield' ? q.addShield : q.addForceReturn).run(user.id);
+    return true;
+  });
+
+  if (!bought) {
+    const points = q.entryByUser.get(user.id)?.points || 0;
+    return { error: `Poin tidak mencukupi. Diperlukan ${item.price} poin, kamu memiliki ${points} poin.` };
   }
 
-  entry.points = currentPoints - item.price;
-  markDirty('leaderboard');
-
-  if (!user.inventory) user.inventory = { blackholeShield: 0, forceReturn: 0 };
-  user.inventory[itemType] = (user.inventory[itemType] || 0) + 1;
-  markDirty('users');
-
-  return { success: true, item, points: entry.points, inventory: { ...user.inventory }, user: sanitizeUser(user) };
+  const fresh = findUserById(user.id);
+  const sanitized = sanitizeUser(fresh);
+  return { success: true, item, points: sanitized.points, inventory: { ...fresh.inventory }, user: sanitized };
 }
 
 function consumeUserItem({ userId, itemType }) {
-  const user = userId ? findUserById(userId) : null;
-  if (!user || !user.inventory || !(user.inventory[itemType] > 0)) return false;
-  user.inventory[itemType] -= 1;
-  markDirty('users');
-  return true;
+  if (!userId) return false;
+  const stmt = itemType === 'blackholeShield' ? q.useShield : itemType === 'forceReturn' ? q.useForceReturn : null;
+  return !!stmt && stmt.run(userId).changes > 0;
+}
+
+let closed = false;
+
+// ==========================================
+// SNAPSHOT ROOM
+// ==========================================
+
+// Setelah database ditutup (server berhenti) snapshot tidak lagi disimpan
+function saveRoom(code, state) {
+  if (closed) return;
+  q.saveRoom.run(code, JSON.stringify(state), Date.now());
+}
+
+function deleteRoom(code) {
+  if (closed) return;
+  q.deleteRoom.run(code);
+}
+
+function loadRooms() {
+  const result = [];
+  for (const row of q.allRooms.all()) {
+    try {
+      result.push({ code: row.code, state: JSON.parse(row.state), updatedAt: row.updated_at });
+    } catch (err) {
+      console.error(`[DB] Snapshot room ${row.code} rusak, dilewati:`, err.message);
+      q.deleteRoom.run(row.code);
+    }
+  }
+  return result;
+}
+
+function close() {
+  if (closed) return;
+  closed = true;
+  db.close();
 }
 
 module.exports = {
+  DB_FILE,
   validateUsername,
   validatePassword,
   hashPassword,
@@ -451,5 +549,8 @@ module.exports = {
   SHOP_ITEMS,
   buyShopItem,
   consumeUserItem,
-  flushNow
+  saveRoom,
+  deleteRoom,
+  loadRooms,
+  close
 };

@@ -7,6 +7,8 @@ import AuthModal from './AuthModal';
 import LeaderboardModal from './LeaderboardModal';
 import AudioSettingsModal from './AudioSettingsModal';
 import ShopModal from './ShopModal';
+import { InventoryChips, ActiveItemActions } from './ItemControls';
+import { useItemCatalog } from './items';
 import { sound } from './sound';
 import { triggerConfetti } from './confetti';
 import { COLOR_INFO } from './boardConstants';
@@ -43,10 +45,11 @@ function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
   const [showShopModal, setShowShopModal] = useState(false);
-  const [forceReturnTargeting, setForceReturnTargeting] = useState(false);
+  // Item aktif yang sedang menunggu pemain memilih target (id item), null jika tidak ada
+  const [itemTargeting, setItemTargeting] = useState(null);
   const [itemNotice, setItemNotice] = useState(null);
-  const lastShieldProtectIdRef = useRef(null);
-  const lastForceReturnUseIdRef = useRef(null);
+  const lastItemEventIdRef = useRef(null);
+  const itemCatalog = useItemCatalog();
   const [currentUser, setCurrentUser] = useState(null);
   const [authToken, setAuthToken] = useState(storage.get('token'));
   const [activeSessionRoom, setActiveSessionRoom] = useState(storage.get('active_room'));
@@ -180,8 +183,7 @@ function App() {
       if (seedEventsRef.current) {
         seedEventsRef.current = false;
         lastSkillUnlockIdRef.current = updatedRoom.lastSkillUnlock?.id ?? null;
-        lastShieldProtectIdRef.current = updatedRoom.lastShieldProtect?.id ?? null;
-        lastForceReturnUseIdRef.current = updatedRoom.lastForceReturnUse?.id ?? null;
+        lastItemEventIdRef.current = updatedRoom.lastItemEvent?.id ?? null;
         // Kembali ke room yang sudah selesai tidak perlu memutar ulang perayaan menang
         hasTriggeredWin.current = !!updatedRoom.winner;
       }
@@ -293,36 +295,17 @@ function App() {
     }
   }, [room?.lastSkillUnlock, playerId]);
 
-  // Alert visual & audio saat Blackhole Shield aktif atau Force Return dieksekusi
+  // Pengumuman item ke semua pemain (perisai aktif, item dipakai, item gratis didapat)
   useEffect(() => {
-    if (room?.lastShieldProtect && room.lastShieldProtect.id !== lastShieldProtectIdRef.current) {
-      lastShieldProtectIdRef.current = room.lastShieldProtect.id;
-      setItemNotice({
-        type: 'shield',
-        icon: '🛡️',
-        title: 'PERISAI BLACKHOLE AKTIF!',
-        text: `Bidak milik ${room.lastShieldProtect.playerName} terlindungi dan terselamatkan dari Black Hole!`
-      });
-      sound.playJoinNotification();
-      const timer = setTimeout(() => setItemNotice(null), 5500);
-      return () => clearTimeout(timer);
-    }
-  }, [room?.lastShieldProtect]);
-
-  useEffect(() => {
-    if (room?.lastForceReturnUse && room.lastForceReturnUse.id !== lastForceReturnUseIdRef.current) {
-      lastForceReturnUseIdRef.current = room.lastForceReturnUse.id;
-      setItemNotice({
-        type: 'forceReturn',
-        icon: '⚡',
-        title: 'FORCE RETURN DIEKSEKUSI!',
-        text: `${room.lastForceReturnUse.attackerName} melancarkan eliminasi langsung terhadap bidak ${room.lastForceReturnUse.defenderName}!`
-      });
-      sound.playThunderSkill();
-      const timer = setTimeout(() => setItemNotice(null), 5500);
-      return () => clearTimeout(timer);
-    }
-  }, [room?.lastForceReturnUse]);
+    const event = room?.lastItemEvent;
+    if (!event || event.id === lastItemEventIdRef.current) return;
+    lastItemEventIdRef.current = event.id;
+    setItemNotice({ type: event.itemId, icon: event.icon, title: event.title, text: event.text });
+    if (event.sound === 'thunder') sound.playThunderSkill();
+    else sound.playJoinNotification();
+    const timer = setTimeout(() => setItemNotice(null), 5500);
+    return () => clearTimeout(timer);
+  }, [room?.lastItemEvent]);
 
   // Gulir ke pesan chat terbaru
   useEffect(() => {
@@ -469,11 +452,12 @@ function App() {
 
   const handleSelectSkillTarget = (targetPlayerId, targetPawnIdx) => {
     sound.playClick();
-    if (forceReturnTargeting) {
-      socket.emit('game:use_force_return', { targetPlayerId, targetPawnIdx });
-      setForceReturnTargeting(false);
+    const target = { playerId: targetPlayerId, pawnIdx: targetPawnIdx };
+    if (itemTargeting) {
+      socket.emit('game:use_item', { itemId: itemTargeting, target });
+      setItemTargeting(null);
     } else {
-      socket.emit('game:use_skill', { targetPlayerId, targetPawnIdx });
+      socket.emit('game:use_skill', { target });
       setSkillTargeting(false);
     }
   };
@@ -501,6 +485,11 @@ function App() {
     () => (isTurn && room?.dice !== null && !room?.animatingMove ? room?.movable || [] : []),
     [room, isTurn]
   );
+
+  // Mode pilih target item batal otomatis saat giliran lewat atau dadu sudah dilempar
+  useEffect(() => {
+    if (!isTurn || room?.dice !== null) setItemTargeting(null);
+  }, [isTurn, room?.dice]);
 
   // Auto-move: Jika hanya ada 1 bidak yang bisa jalan (tidak ada pilihan lain), jalankan otomatis!
   useEffect(() => {
@@ -1441,44 +1430,22 @@ function App() {
                       isMyTurn={isTurn}
                       movablePawns={movablePawns}
                       onMovePawn={handleMovePawn}
-                      skillTargeting={skillTargeting || forceReturnTargeting}
+                      skillTargeting={skillTargeting || !!itemTargeting}
                       onSelectSkillTarget={handleSelectSkillTarget}
                     />
 
-                    {/* Force Return Banner: Tampil saat memiliki item Force Return dan sudah minimal 3x injak */}
-                    {isTurn && (me?.inventory?.forceReturn || 0) > 0 && (me?.stompCount || 0) >= 3 && room?.dice === null && !room?.rolling && !room?.animatingMove && (
-                      <div className="skill-control-banner force-return-control-banner">
-                        <div className="skill-banner-head">
-                          <span className="skill-bolt-anim">⚡</span>
-                          <div className="skill-banner-text">
-                            <strong>⚡ FORCE RETURN AKTIF! (Sudah 3x Injak Bidak Lawan)</strong>
-                            <small>
-                              Injakan: <strong>{me.stompCount}/3</strong> · Tersisa <strong>{me.inventory.forceReturn}</strong>x item Force Return
-                            </small>
-                          </div>
-                        </div>
-
-                        <div className="skill-banner-actions">
-                          <button
-                            type="button"
-                            className={`btn-use-skill btn-force-active ${forceReturnTargeting ? 'targeting-active' : ''}`}
-                            onClick={() => {
-                              sound.playClick();
-                              setForceReturnTargeting(!forceReturnTargeting);
-                              setSkillTargeting(false);
-                            }}
-                          >
-                            {forceReturnTargeting ? '❌ Batal Pilih Target' : '⚡ Gunakan Force Return (Eliminasi Langsung)'}
-                          </button>
-                        </div>
-
-                        {forceReturnTargeting && (
-                          <div className="skill-target-help">
-                            🎯 <em>Klik bidak lawan manapun di arena untuk langsung memulangkannya ke markas!</em>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {/* Item aktif yang bisa dipakai sebelum melempar dadu (dibaca dari katalog item server) */}
+                    <ActiveItemActions
+                      catalog={itemCatalog}
+                      player={me}
+                      enabled={isTurn && room?.dice === null && !room?.rolling && !room?.animatingMove}
+                      targetingItemId={itemTargeting}
+                      onToggleTarget={id => {
+                        setItemTargeting(id);
+                        setSkillTargeting(false);
+                      }}
+                      onUse={itemId => socket.emit('game:use_item', { itemId })}
+                    />
 
                     {/* Skill Ultimate Banner: Tampil saat 3 bidak finish dan pemain punya poin skill */}
                     {isTurn && (room?.pawns?.[playerId]?.filter(v => v === 44).length || 0) >= 3 && (me?.skillPoints || 0) > 0 && room?.dice === null && !room?.rolling && !room?.animatingMove && (
@@ -1501,6 +1468,7 @@ function App() {
                             onClick={() => {
                               sound.playClick();
                               setSkillTargeting(!skillTargeting);
+                              setItemTargeting(null);
                             }}
                           >
                             {skillTargeting ? '❌ Batal Pilih Target' : '⚡ Gunakan Skill Eliminasi'}
@@ -1778,26 +1746,7 @@ function App() {
                         🏪 Buka Toko
                       </button>
                     </div>
-                    <div className="game-inventory-chips">
-                      <div className={`inv-chip ${me?.inventory?.blackholeShield ? 'has-item' : 'zero-item'}`} title="Melindungi otomatis dari sedotan Black Hole">
-                        <span className="inv-chip-emoji">🛡️</span>
-                        <div className="inv-chip-details">
-                          <span className="inv-chip-label">Blackhole Shield</span>
-                          <strong className="inv-chip-qty">{me?.inventory?.blackholeShield || 0} buah</strong>
-                        </div>
-                      </div>
-
-                      <div className={`inv-chip ${me?.inventory?.forceReturn ? 'has-item' : 'zero-item'}`} title="Eliminasi langsung saat sudah 3x injak">
-                        <span className="inv-chip-emoji">⚡</span>
-                        <div className="inv-chip-details">
-                          <span className="inv-chip-label">Force Return</span>
-                          <strong className="inv-chip-qty">
-                            {me?.inventory?.forceReturn || 0} buah
-                            <span className="inv-stomp-tag">({me?.stompCount || 0}/3)</span>
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
+                    <InventoryChips catalog={itemCatalog} player={me} />
                   </div>
 
                   {/* Desktop Chat Panel Realtime */}

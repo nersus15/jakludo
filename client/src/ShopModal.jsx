@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { sound } from './sound';
+import { storage } from './storage';
+import { useItemCatalog } from './items';
 
 export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, authToken }) {
   const [purchasing, setPurchasing] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const catalog = useItemCatalog();
 
   if (!isOpen) return null;
 
   const userPoints = currentUser?.points ?? 0;
-  const userInventory = currentUser?.inventory || { blackholeShield: 0, forceReturn: 0 };
+  const userInventory = currentUser?.inventory || {};
 
-  const handleBuy = async (itemType, itemName, price) => {
+  const handleBuy = async (itemId, itemName, price) => {
     if (!currentUser) {
       setFeedback({ type: 'error', message: 'Silakan masuk atau daftar akun terlebih dahulu untuk berbelanja.' });
       return;
@@ -22,19 +25,19 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       return;
     }
 
-    setPurchasing(itemType);
+    setPurchasing(itemId);
     setFeedback(null);
     sound.playClick();
 
     try {
-      const token = authToken || localStorage.getItem('jakplayer_token') || localStorage.getItem('joybit_token');
+      const token = authToken || storage.get('token');
       const res = await fetch('/api/shop/buy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ itemType, token })
+        body: JSON.stringify({ itemId })
       });
 
       const text = await res.text();
@@ -61,31 +64,6 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       setPurchasing(null);
     }
   };
-
-  const ITEMS = [
-    {
-      id: 'blackholeShield',
-      name: 'Blackhole Shield',
-      icon: '🛡️',
-      price: 100,
-      badge: 'Perisai Pasif Otomatis',
-      badgeColor: '#3b82f6',
-      description: 'Melindungi bidakmu dari sedotan Blackhole! Saat bidakmu melangkah ke petak Blackhole, perisai ini otomatis aktif sehingga bidakmu TIDAK tersedot kembali ke markas.',
-      owned: userInventory.blackholeShield || 0,
-      highlight: 'Otomatis aktif saat terkena Blackhole'
-    },
-    {
-      id: 'forceReturn',
-      name: 'Force Return',
-      icon: '⚡',
-      price: 100,
-      badge: 'Skill Eliminasi Aktif',
-      badgeColor: '#f59e0b',
-      description: 'Kekuatan petir eliminasi instan! Setiap kali kamu sudah berhasil menginjak/memakan bidak lawan sebanyak 3 kali, kemampuan Force Return akan menyala. Pilih 1 bidak lawan di arena untuk langsung dipulangkan ke markas + bonus jalan lagi!',
-      owned: userInventory.forceReturn || 0,
-      highlight: 'Aktif saat sudah 3x menginjak bidak lawan'
-    }
-  ];
 
   return (
     <div className="shop-modal-overlay" onClick={onClose}>
@@ -125,7 +103,7 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
 
         {/* Item Cards List */}
         <div className="shop-items-grid">
-          {ITEMS.map(item => {
+          {catalog.map(item => {
             const canAfford = userPoints >= item.price;
             const isBuying = purchasing === item.id;
 
@@ -136,21 +114,25 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
                     <span className="shop-item-icon">{item.icon}</span>
                   </div>
                   <div className="shop-item-meta">
-                    <div className="shop-item-badge" style={{ borderColor: item.badgeColor, color: item.badgeColor }}>
-                      {item.badge}
-                    </div>
+                    {item.badge && (
+                      <div className="shop-item-badge" style={{ borderColor: item.badgeColor, color: item.badgeColor }}>
+                        {item.badge}
+                      </div>
+                    )}
                     <h3 className="shop-item-name">{item.name}</h3>
                     <div className="shop-item-owned-chip">
-                      Dimiliki: <strong>{item.owned}</strong> buah
+                      Dimiliki: <strong>{userInventory[item.id] || 0}</strong> buah
                     </div>
                   </div>
                 </div>
 
                 <p className="shop-item-desc">{item.description}</p>
 
-                <div className="shop-item-highlight">
-                  <span>💡</span> {item.highlight}
-                </div>
+                {item.highlight && (
+                  <div className="shop-item-highlight">
+                    <span>💡</span> {item.highlight}
+                  </div>
+                )}
 
                 <div className="shop-item-footer">
                   <div className="shop-price-tag">

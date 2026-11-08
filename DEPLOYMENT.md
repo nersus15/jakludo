@@ -62,13 +62,15 @@ cd /opt/jakludo
 *(Atau upload folder proyek `ludo-party` menggunakan `scp` / `rsync` / SFTP ke server).*
 
 ### B. Pastikan Izin Folder Data
-Folder `server/data/` digunakan untuk menyimpan database lokal pemain (`users.json`, `sessions.json`, `leaderboard.json`). File-file ini **tidak** ikut di repository git. Container berjalan sebagai user non-root `node` (uid 1000), jadi folder ini harus bisa ditulis oleh uid 1000:
+Semua data (akun, sesi login, leaderboard, inventaris, dan room yang sedang berjalan) disimpan di database SQLite `server/data/jakludo.db`. Folder ini di-mount ke container, sehingga datanya **tetap ada** saat container di-restart, di-rebuild, atau di-deploy ulang. File database **tidak** ikut di repository git. Container berjalan sebagai user non-root `node` (uid 1000), jadi folder ini harus bisa ditulis oleh uid 1000:
 ```bash
 mkdir -p server/data
 sudo chown -R 1000:1000 server/data
 ```
 
-Jika file data rusak, server sengaja **menolak start** (pesan `[DB FATAL]` di log) dan menyimpan salinan `*.corrupt-<waktu>`. Pulihkan dari backup lalu jalankan ulang. Ini mencegah data pemain tertimpa kosong.
+**Pindah dari versi lama (JSON):** saat pertama kali start, server otomatis memindahkan `users.json`, `sessions.json`, dan `leaderboard.json` ke `jakludo.db`, lalu mengganti nama file lama menjadi `*.migrated-<waktu>` (tidak dihapus). Pemain tetap login dan poinnya tidak hilang. Jika salah satu file JSON rusak, server sengaja **menolak start** (pesan `[DB FATAL]` di log) supaya data tidak hilang diam-diam. Perbaiki atau pulihkan file tersebut, lalu jalankan ulang.
+
+Jangan menghapus `server/data/` saat update. Jika folder ini hilang, seluruh akun dan leaderboard ikut hilang.
 
 ### C. Build & Jalankan Container
 Cukup jalankan satu perintah:
@@ -80,7 +82,7 @@ Container akan otomatis:
 1. Mem-build frontend Vite (React).
 2. Memasang dependensi produksi Express & Socket.io.
 3. Menjalankan container `jakludo-app` di port `5172`.
-4. Mem-mount volume database `./server/data` sehingga data pemain tidak akan hilang saat container di-restart.
+4. Mem-mount folder `./server/data` (berisi `jakludo.db`) sehingga data pemain dan room yang sedang berjalan tidak hilang saat container di-restart atau di-deploy ulang.
 
 ---
 
@@ -207,5 +209,6 @@ Pemain yang terputus otomatis menyambung ulang ke kursinya. Kursi di lobby ditah
 | **Restart Aplikasi** | `docker compose restart` |
 | **Update / Rebuild Kode Terbaru** | `git pull && docker compose up -d --build` |
 | **Melihat Log** | `docker compose logs -f --tail=100` |
-| **Backup Database Data Pemain** | `tar -czvf backup-jakludo-$(date +%F).tar.gz server/data/` |
+| **Backup Database (aman saat server berjalan)** | `docker compose exec jakludo node server/backup.js` → `server/data/backups/jakludo-<waktu>.db` |
+| **Restore Database** | `docker compose down`, salin file backup menjadi `server/data/jakludo.db` (hapus `jakludo.db-wal` & `jakludo.db-shm`), lalu `docker compose up -d` |
 

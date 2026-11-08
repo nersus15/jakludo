@@ -43,11 +43,7 @@ export default function AudioSettingsModal({ isOpen, onClose }) {
   };
 
   const handleResetDefaults = () => {
-    sound.setBgmVolume(0.25);
-    sound.setSfxVolume(0.75);
-    if (audioState.bgmMuted) sound.toggleBgmMute();
-    if (audioState.sfxMuted) sound.toggleSfxMute();
-    sound.playBgm();
+    sound.resetDefaults();
     sound.playJoinNotification();
   };
 

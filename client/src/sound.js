@@ -1,5 +1,27 @@
 // Web Audio API Sound Synthesizer & Background Music Controller - JakLudo
 
+// localStorage bisa melempar error (mode privat, in-app browser WhatsApp/Instagram, storage diblokir).
+// Error di sini terjadi saat modul dimuat, jadi tanpa pengaman seluruh aplikasi gagal tampil.
+const prefs = {
+  get(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Abaikan: pengaturan suara hanya berlaku untuk sesi ini
+    }
+  }
+};
+
+const DEFAULT_BGM_VOLUME = 0.25;
+const DEFAULT_SFX_VOLUME = 0.75;
+
 class SoundManager {
   constructor() {
     this.ctx = null;
@@ -8,33 +30,68 @@ class SoundManager {
     // Load initial settings from localStorage (or sensible fun defaults)
     // Default BGM: 0.25 (lembut, tidak menutupi suara game)
     // Default SFX: 0.75 (renyah, jelas, dan seru)
-    const storedBgmVol = localStorage.getItem('jakludo_bgm_volume');
-    const storedSfxVol = localStorage.getItem('jakludo_sfx_volume');
-    const storedBgmMuted = localStorage.getItem('jakludo_bgm_muted');
-    const storedSfxMuted = localStorage.getItem('jakludo_sfx_muted');
+    const storedBgmVol = parseFloat(prefs.get('jakludo_bgm_volume'));
+    const storedSfxVol = parseFloat(prefs.get('jakludo_sfx_volume'));
 
-    this.bgmVolume = storedBgmVol !== null ? parseFloat(storedBgmVol) : 0.25;
-    this.sfxVolume = storedSfxVol !== null ? parseFloat(storedSfxVol) : 0.75;
-    this.bgmMuted = storedBgmMuted === 'true';
-    this.sfxMuted = storedSfxMuted === 'true';
-    this.bgmEnabled = localStorage.getItem('jakludo_bgm_enabled') !== 'false';
+    this.bgmVolume = Number.isFinite(storedBgmVol) ? storedBgmVol : DEFAULT_BGM_VOLUME;
+    this.sfxVolume = Number.isFinite(storedSfxVol) ? storedSfxVol : DEFAULT_SFX_VOLUME;
+    this.bgmMuted = prefs.get('jakludo_bgm_muted') === 'true';
+    this.sfxMuted = prefs.get('jakludo_sfx_muted') === 'true';
+    this.bgmEnabled = prefs.get('jakludo_bgm_enabled') !== 'false';
 
     this.listeners = new Set();
     this.hasUnlocked = false;
     this.isInRoom = false; // BGM hanya dimainkan saat berada di dalam room/gameplay
 
-    // Background Music Audio Element (dengan cache buster agar selalu memuat audio terbaru)
+    // Musik latar (±5 MB) baru diunduh saat pemain masuk room, bukan di halaman depan.
+    // Tanpa cache buster agar browser bisa memakai cache.
     if (typeof window !== 'undefined') {
       try {
-        this.bgmAudio = new Audio('/bgm.mp3?v=' + Date.now());
+        this.bgmAudio = new Audio();
         this.bgmAudio.loop = true;
-        this.bgmAudio.preload = 'auto';
+        this.bgmAudio.preload = 'none';
+        this.bgmAudio.addEventListener('error', () => {
+          console.warn('BGM tidak dapat dimuat:', this.bgmAudio.error?.message || this.bgmAudio.error?.code);
+        });
         this.updateBgmAudioVolume();
         this.setupAutoplayUnlock();
+        this.setupVisibilityHandling();
       } catch (err) {
         console.warn('Failed to initialize BGM audio element:', err);
       }
     }
+  }
+
+  // Pastikan sumber BGM terpasang sebelum diputar
+  ensureBgmSource() {
+    if (this.bgmAudio && !this.bgmAudio.src) {
+      this.bgmAudio.src = '/bgm.mp3';
+      this.bgmAudio.preload = 'auto';
+    }
+  }
+
+  // Putar BGM hanya jika semua syarat terpenuhi (di room, aktif, tidak mute, halaman terlihat)
+  resumeBgmIfAllowed() {
+    if (!this.bgmAudio || !this.isInRoom || !this.bgmEnabled || this.bgmMuted || !this.hasUnlocked) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    this.ensureBgmSource();
+    const promise = this.bgmAudio.play();
+    if (promise !== undefined) promise.catch(() => {});
+  }
+
+  // Hentikan musik saat aplikasi di background (pindah ke aplikasi lain / layar terkunci)
+  setupVisibilityHandling() {
+    if (typeof document === 'undefined') return;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        if (this.bgmAudio && !this.bgmAudio.paused) this.bgmAudio.pause();
+        if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {});
+      } else {
+        if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') this.ctx.resume().catch(() => {});
+        this.resumeBgmIfAllowed();
+      }
+      this.notifyListeners();
+    });
   }
 
   // Setup one-shot user interaction listener to bypass browser autoplay restrictions
@@ -45,12 +102,7 @@ class SoundManager {
       this.hasUnlocked = true;
       this.init();
       // BGM HANYA berbunyi jika user sudah berada di dalam room/permainan, BUKAN di landing page
-      if (this.isInRoom && this.bgmEnabled && !this.bgmMuted && this.bgmAudio) {
-        const promise = this.bgmAudio.play();
-        if (promise !== undefined) {
-          promise.catch(() => {});
-        }
-      }
+      this.resumeBgmIfAllowed();
       this.notifyListeners();
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
@@ -67,14 +119,15 @@ class SoundManager {
     if (!this.isInRoom) {
       this.pauseBgm();
     } else {
-      if (this.bgmEnabled && !this.bgmMuted) {
-        this.playBgm();
-      }
+      this.resumeBgmIfAllowed();
     }
     this.notifyListeners();
   }
 
+  // AudioContext hanya dibuat setelah ada interaksi pengguna. Membuatnya lebih awal (misalnya dari
+  // event socket) memicu peringatan "AudioContext was not allowed to start" di browser.
   init() {
+    if (!this.hasUnlocked) return;
     if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
@@ -84,8 +137,11 @@ class SoundManager {
         this.sfxGain.connect(this.ctx.destination);
       }
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+    // iOS memakai state 'interrupted' (telepon masuk, aplikasi di background)
+    if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
+      if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+        this.ctx.resume().catch(() => {});
+      }
     }
   }
 
@@ -127,12 +183,13 @@ class SoundManager {
   setBgmVolume(val) {
     const num = Math.max(0, Math.min(1, parseFloat(val) || 0));
     this.bgmVolume = num;
-    localStorage.setItem('jakludo_bgm_volume', String(num));
-    this.updateBgmAudioVolume();
+    prefs.set('jakludo_bgm_volume', String(num));
     if (this.bgmMuted && num > 0) {
       this.bgmMuted = false;
-      localStorage.setItem('jakludo_bgm_muted', 'false');
+      prefs.set('jakludo_bgm_muted', 'false');
     }
+    this.updateBgmAudioVolume();
+    this.resumeBgmIfAllowed();
     this.notifyListeners();
   }
 
@@ -142,11 +199,9 @@ class SoundManager {
 
   toggleBgmMute() {
     this.bgmMuted = !this.bgmMuted;
-    localStorage.setItem('jakludo_bgm_muted', String(this.bgmMuted));
+    prefs.set('jakludo_bgm_muted', String(this.bgmMuted));
     this.updateBgmAudioVolume();
-    if (!this.bgmMuted && this.bgmEnabled && this.bgmAudio && this.bgmAudio.paused) {
-      this.bgmAudio.play().catch(() => {});
-    }
+    this.resumeBgmIfAllowed();
     this.notifyListeners();
     return this.bgmMuted;
   }
@@ -155,17 +210,13 @@ class SoundManager {
     return this.bgmMuted;
   }
 
+  // Aktifkan BGM. Musik baru benar-benar berbunyi saat pemain berada di room.
   playBgm() {
     this.init();
     this.bgmEnabled = true;
-    localStorage.setItem('jakludo_bgm_enabled', 'true');
+    prefs.set('jakludo_bgm_enabled', 'true');
     this.updateBgmAudioVolume();
-    if (this.bgmAudio) {
-      const p = this.bgmAudio.play();
-      if (p !== undefined) {
-        p.catch(() => {});
-      }
-    }
+    this.resumeBgmIfAllowed();
     this.notifyListeners();
   }
 
@@ -180,7 +231,7 @@ class SoundManager {
     if (this.isBgmPlaying()) {
       this.pauseBgm();
       this.bgmEnabled = false;
-      localStorage.setItem('jakludo_bgm_enabled', 'false');
+      prefs.set('jakludo_bgm_enabled', 'false');
     } else {
       this.playBgm();
     }
@@ -204,12 +255,12 @@ class SoundManager {
   setSfxVolume(val) {
     const num = Math.max(0, Math.min(1, parseFloat(val) || 0));
     this.sfxVolume = num;
-    localStorage.setItem('jakludo_sfx_volume', String(num));
-    this.updateSfxGain();
+    prefs.set('jakludo_sfx_volume', String(num));
     if (this.sfxMuted && num > 0) {
       this.sfxMuted = false;
-      localStorage.setItem('jakludo_sfx_muted', 'false');
+      prefs.set('jakludo_sfx_muted', 'false');
     }
+    this.updateSfxGain();
     this.notifyListeners();
   }
 
@@ -219,7 +270,7 @@ class SoundManager {
 
   toggleSfxMute() {
     this.sfxMuted = !this.sfxMuted;
-    localStorage.setItem('jakludo_sfx_muted', String(this.sfxMuted));
+    prefs.set('jakludo_sfx_muted', String(this.sfxMuted));
     this.updateSfxGain();
     this.notifyListeners();
     return this.sfxMuted;
@@ -240,15 +291,32 @@ class SoundManager {
       this.bgmMuted = true;
       this.sfxMuted = true;
     }
-    localStorage.setItem('jakludo_bgm_muted', String(this.bgmMuted));
-    localStorage.setItem('jakludo_sfx_muted', String(this.sfxMuted));
+    prefs.set('jakludo_bgm_muted', String(this.bgmMuted));
+    prefs.set('jakludo_sfx_muted', String(this.sfxMuted));
     this.updateBgmAudioVolume();
     this.updateSfxGain();
-    if (!this.bgmMuted && this.bgmEnabled && this.bgmAudio) {
-      this.bgmAudio.play().catch(() => {});
-    }
+    if (this.bgmMuted) this.pauseBgm();
+    else this.resumeBgmIfAllowed();
     this.notifyListeners();
     return this.isAllMuted();
+  }
+
+  // Kembalikan semua pengaturan suara ke default (volume, unmute, BGM aktif)
+  resetDefaults() {
+    this.bgmVolume = DEFAULT_BGM_VOLUME;
+    this.sfxVolume = DEFAULT_SFX_VOLUME;
+    this.bgmMuted = false;
+    this.sfxMuted = false;
+    this.bgmEnabled = true;
+    prefs.set('jakludo_bgm_volume', String(this.bgmVolume));
+    prefs.set('jakludo_sfx_volume', String(this.sfxVolume));
+    prefs.set('jakludo_bgm_muted', 'false');
+    prefs.set('jakludo_sfx_muted', 'false');
+    prefs.set('jakludo_bgm_enabled', 'true');
+    this.updateBgmAudioVolume();
+    this.updateSfxGain();
+    this.resumeBgmIfAllowed();
+    this.notifyListeners();
   }
 
   isAllMuted() {
@@ -494,7 +562,9 @@ class SoundManager {
     lfo.frequency.linearRampToValueAtTime(6, now + 0.55);
     lfoGain.gain.setValueAtTime(130, now);
 
-    lfo.connect(suckOsc.frequency);
+    // Kedalaman vibrato ±130 Hz (sebelumnya LFO tersambung langsung sehingga hanya ±1 Hz)
+    lfo.connect(lfoGain);
+    lfoGain.connect(suckOsc.frequency);
 
     suckGain.gain.setValueAtTime(0.01, now);
     suckGain.gain.linearRampToValueAtTime(0.25, now + 0.08);

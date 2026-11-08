@@ -1491,6 +1491,7 @@ function App() {
                       {/* Compact 3D Interactive Dice */}
                       <div className="mobile-dice-col">
                         <Dice3D
+                          muted
                           value={room.dice}
                           isRolling={room.rolling}
                           canRoll={isTurn && room.dice === null && !room.rolling && !room.animatingMove}

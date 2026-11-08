@@ -1,26 +1,29 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { sound } from './sound';
 
-export default function Dice3D({ value, isRolling, canRoll, onRoll, disabled, playerColor }) {
+// `muted`: dadu kedua (tampilan HP & desktop sama-sama dirender, salah satunya disembunyikan CSS)
+// tidak ikut memutar suara agar suara kocok/mendarat tidak terdengar dobel.
+export default function Dice3D({ value, isRolling, canRoll, onRoll, disabled, playerColor, muted = false }) {
   const [landingBounce, setLandingBounce] = useState(false);
   const prevRollingRef = useRef(false);
 
   useEffect(() => {
+    const wasRolling = prevRollingRef.current;
+    prevRollingRef.current = isRolling;
     if (isRolling) {
-      sound.playRoll();
-    } else if (prevRollingRef.current && value) {
+      if (!muted) sound.playRoll();
+    } else if (wasRolling && value) {
       // Tepat saat selesai kocok dan dadu mendarat pada angka value
-      sound.playDiceLand(value === 6);
+      if (!muted) sound.playDiceLand(value === 6);
       setLandingBounce(true);
       const timer = setTimeout(() => setLandingBounce(false), 480);
       return () => clearTimeout(timer);
     }
-    prevRollingRef.current = isRolling;
-  }, [isRolling, value]);
+  }, [isRolling, value, muted]);
 
   const handleClick = () => {
     if (canRoll && !disabled && !isRolling) {
-      sound.playClick();
+      if (!muted) sound.playClick();
       onRoll();
     }
   };

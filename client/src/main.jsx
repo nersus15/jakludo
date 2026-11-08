@@ -9,7 +9,10 @@ import AudioSettingsModal from './AudioSettingsModal';
 import ShopModal from './ShopModal';
 import { sound } from './sound';
 import { triggerConfetti } from './confetti';
-import { COLORS, COLOR_OFFSETS, SAFE_TRACK_INDICES, COLOR_INFO } from './boardConstants';
+import { COLOR_INFO } from './boardConstants';
+import { storage } from './storage';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { usePwaInstall } from './hooks/usePwaInstall';
 import jakludoLogo from './assets/jakludo-logo.jpg';
 import './style.css';
 
@@ -38,8 +41,8 @@ function App() {
   const lastShieldProtectIdRef = useRef(null);
   const lastForceReturnUseIdRef = useRef(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [authToken, setAuthToken] = useState(localStorage.getItem('jakplayer_token') || localStorage.getItem('joybit_token') || '');
-  const [activeSessionRoom, setActiveSessionRoom] = useState(localStorage.getItem('jakplayer_active_room') || localStorage.getItem('joybit_active_room') || '');
+  const [authToken, setAuthToken] = useState(storage.get('token'));
+  const [activeSessionRoom, setActiveSessionRoom] = useState(storage.get('active_room'));
   const [sidebarTab, setSidebarTab] = useState('score');
   const [memberNotification, setMemberNotification] = useState(null);
   const hasTriggeredWin = useRef(false);
@@ -54,61 +57,15 @@ function App() {
   const chatToastTimerRef = useRef(null);
   const chatEndRef = useRef(null);
   const mobileChatEndRef = useRef(null);
-  const prevChatLenRef = useRef(0);
+  const [chats, setChats] = useState([]);
+  const showChatModalRef = useRef(false);
+  showChatModalRef.current = showChatModal;
 
-  // Status Jaringan, Ping & Indikator Loading Reconnect
-  const [ping, setPing] = useState(null);
-  const [isConnected, setIsConnected] = useState(socket.connected);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [isSlowNetwork, setIsSlowNetwork] = useState(false);
+  const { ping, isConnected, isReconnecting, isSlowNetwork } = useNetworkStatus(socket);
+  const { isInstalled, install: handleInstallApp, showIosInstallGuide, setShowIosInstallGuide } = usePwaInstall({
+    onBeforePrompt: () => sound.playClick()
+  });
 
-  // PWA Install Prompt State & Listener
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
-
-  useEffect(() => {
-    const handleBeforeInstall = e => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
-      setIsInstalled(true);
-    }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
-  }, []);
-
-  const handleInstallApp = async () => {
-    sound.playClick();
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const choiceResult = await deferredPrompt.userChoice;
-      if (choiceResult && choiceResult.outcome === 'accepted') {
-        setIsInstalled(true);
-      }
-      setDeferredPrompt(null);
-    } else {
-      const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
-      if (isIos) {
-        setShowIosInstallGuide(true);
-      } else {
-        alert('Untuk memasang JakLudo di perangkatmu, klik menu browser (titik tiga) lalu pilih "Instal Aplikasi" atau "Tambahkan ke Layar Utama".');
-      }
-    }
-  };
 
   // Verifikasi sesi login saat pertama kali dimuat
   useEffect(() => {
@@ -126,8 +83,7 @@ function App() {
             setCurrentUser(data.user);
             setName(data.user.name);
           } else {
-            localStorage.removeItem('jakplayer_token');
-            localStorage.removeItem('joybit_token');
+            storage.remove('token');
             setAuthToken('');
             setCurrentUser(null);
           }
@@ -138,19 +94,25 @@ function App() {
     }
   }, [authToken]);
 
-  // Coba reconnect otomatis jika ada sesi room aktif yang tersimpan
+  // Gabung (ulang) ke room setiap kali socket tersambung: saat halaman dibuka (link undangan /
+  // sesi tersimpan) dan setelah koneksi sempat putus, karena server memberi socket id baru.
+  const rejoinRef = useRef(null);
+  rejoinRef.current = () => {
+    const savedRoom = storage.get('active_room') || new URLSearchParams(location.search).get('room');
+    if (!savedRoom) return;
+    socket.emit('room:join', {
+      code: savedRoom,
+      sessionId: storage.get('session_id'),
+      token: storage.get('token') || authToken,
+      name: currentUser?.name || name || 'Pemain'
+    });
+  };
+
   useEffect(() => {
-    const savedRoom = localStorage.getItem('jakplayer_active_room') || localStorage.getItem('joybit_active_room') || new URLSearchParams(location.search).get('room');
-    const savedSession = localStorage.getItem('jakplayer_session_id') || localStorage.getItem('joybit_session_id');
-    if (savedRoom) {
-      const token = localStorage.getItem('jakplayer_token') || localStorage.getItem('joybit_token');
-      socket.emit('room:join', {
-        code: savedRoom,
-        sessionId: savedSession,
-        token: token || authToken,
-        name: currentUser?.name || name || 'Pemain'
-      });
-    }
+    const onConnect = () => rejoinRef.current();
+    socket.on('connect', onConnect);
+    if (socket.connected) onConnect();
+    return () => socket.off('connect', onConnect);
   }, [socket]);
 
   useEffect(() => {
@@ -158,11 +120,9 @@ function App() {
       setPlayerId(d.playerId);
       setCode(d.code);
       if (d.sessionId) {
-        localStorage.setItem('jakplayer_session_id', d.sessionId);
-        localStorage.setItem('joybit_session_id', d.sessionId);
+        storage.set('session_id', d.sessionId);
       }
-      localStorage.setItem('jakplayer_active_room', d.code);
-      localStorage.setItem('joybit_active_room', d.code);
+      storage.set('active_room', d.code);
       setActiveSessionRoom(d.code);
       history.replaceState({}, '', `?room=${d.code}`);
       setScreen('room');
@@ -177,8 +137,7 @@ function App() {
       setError('');
 
       if (updatedRoom.winner) {
-        localStorage.removeItem('jakplayer_active_room');
-        localStorage.removeItem('joybit_active_room');
+        storage.remove('active_room');
         setActiveSessionRoom('');
         if (!hasTriggeredWin.current) {
           hasTriggeredWin.current = true;
@@ -192,10 +151,21 @@ function App() {
       // Cek jika pemain sendiri dinyatakan OUT
       const myP = updatedRoom.players?.find(p => p.id === playerId);
       if (myP?.isOut) {
-        localStorage.removeItem('jakplayer_active_room');
-        localStorage.removeItem('joybit_active_room');
+        storage.remove('active_room');
         setActiveSessionRoom('');
       }
+    });
+
+    socket.on('room:chats', list => setChats(Array.isArray(list) ? list : []));
+
+    socket.on('room:chat_message', msg => {
+      setChats(prev => [...prev.slice(-49), msg]);
+      if (msg.senderId === playerId) return;
+      sound.playChatNotification();
+      if (!showChatModalRef.current) setUnreadChats(prev => prev + 1);
+      setChatToast(msg);
+      if (chatToastTimerRef.current) clearTimeout(chatToastTimerRef.current);
+      chatToastTimerRef.current = setTimeout(() => setChatToast(null), 4200);
     });
 
     socket.on('room:reaction', reaction => {
@@ -219,9 +189,15 @@ function App() {
 
     socket.on('room:error', err => {
       setError(err);
+      if (err.includes('tab atau perangkat lain')) {
+        // Sesi diambil alih tab lain: jangan hapus sesi tersimpan yang kini dipakai tab tersebut
+        setRoom(null);
+        setChats([]);
+        setScreen('home');
+        return;
+      }
       if (err.includes('tidak ditemukan') || err.includes('OUT') || err.includes('penuh')) {
-        localStorage.removeItem('jakplayer_active_room');
-        localStorage.removeItem('joybit_active_room');
+        storage.remove('active_room');
         setActiveSessionRoom('');
         if (location.search.includes('room=')) {
           history.replaceState({}, '', location.pathname);
@@ -234,65 +210,14 @@ function App() {
     return () => {
       socket.off('room:joined');
       socket.off('room:update');
+      socket.off('room:chats');
+      socket.off('room:chat_message');
       socket.off('room:reaction');
       socket.off('room:member_joined');
       socket.off('room:error');
     };
   }, [socket, playerId]);
 
-  // Monitoring Kualitas Jaringan, Latensi (Ping), & Indikator Sinyal Realtime
-  useEffect(() => {
-    const onConnect = () => {
-      setIsConnected(true);
-      setIsReconnecting(false);
-    };
-    const onDisconnect = () => {
-      setIsConnected(false);
-      setIsReconnecting(true);
-    };
-    const onConnectError = () => {
-      setIsConnected(false);
-      setIsReconnecting(true);
-    };
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('connect_error', onConnectError);
-
-    if (socket.io) {
-      socket.io.on('reconnect_attempt', () => setIsReconnecting(true));
-      socket.io.on('reconnect', () => {
-        setIsConnected(true);
-        setIsReconnecting(false);
-      });
-    }
-
-    // Ping periodik setiap 3 detik
-    const pingTimer = setInterval(() => {
-      if (socket.connected) {
-        const clientSentTime = Date.now();
-        socket.emit('network:ping', clientSentTime, (serverSentTime) => {
-          const latency = Math.max(1, Date.now() - clientSentTime);
-          setPing(latency);
-          setIsSlowNetwork(latency > 250);
-        });
-      }
-    }, 3000);
-
-    // Initial ping
-    if (socket.connected) {
-      socket.emit('network:ping', Date.now(), (st) => {
-        setPing(Math.max(1, Date.now() - st));
-      });
-    }
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('connect_error', onConnectError);
-      clearInterval(pingTimer);
-    };
-  }, [socket]);
 
   // Peringatan ke pemain lain saat ada user yang mengaktifkan Skill Eliminasi
   useEffect(() => {
@@ -342,33 +267,15 @@ function App() {
     }
   }, [room?.lastForceReturnUse]);
 
-  // Sinkronisasi Chat Realtime, Efek Suara Notifikasi & Toast Pop-Up Pesan
+  // Gulir ke pesan chat terbaru
   useEffect(() => {
-    const chatLen = room?.chats?.length || 0;
-    if (chatLen > prevChatLenRef.current) {
-      const lastMsg = room.chats[chatLen - 1];
-      if (lastMsg && lastMsg.senderId !== playerId) {
-        // Bunyikan nada notifikasi chat yang renyah & jelas
-        sound.playChatNotification();
-
-        if (!showChatModal) {
-          setUnreadChats(prev => prev + 1);
-        }
-
-        // Tampilkan Toast Pop-Up Pesan Masuk Mengambang
-        setChatToast(lastMsg);
-        if (chatToastTimerRef.current) clearTimeout(chatToastTimerRef.current);
-        chatToastTimerRef.current = setTimeout(() => {
-          setChatToast(null);
-        }, 4200);
-      }
-      setTimeout(() => {
-        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        if (mobileChatEndRef.current) mobileChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-      }, 60);
-    }
-    prevChatLenRef.current = chatLen;
-  }, [room?.chats, playerId, showChatModal]);
+    if (chats.length === 0) return;
+    const timer = setTimeout(() => {
+      if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      if (mobileChatEndRef.current) mobileChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [chats]);
 
   const handleSendChat = (e, customText) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -402,21 +309,20 @@ function App() {
   const handleLoginSuccess = (user, token) => {
     setCurrentUser(user);
     setAuthToken(token);
-    localStorage.setItem('jakplayer_token', token);
-    localStorage.setItem('joybit_token', token);
+    storage.set('token', token);
     setName(user.name);
     sound.playWin();
   };
 
   const handleLogout = () => {
+    if (authToken) {
+      fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => {});
+    }
     setCurrentUser(null);
     setAuthToken('');
-    localStorage.removeItem('jakplayer_token');
-    localStorage.removeItem('joybit_token');
-    localStorage.removeItem('jakplayer_active_room');
-    localStorage.removeItem('joybit_active_room');
-    localStorage.removeItem('jakplayer_session_id');
-    localStorage.removeItem('joybit_session_id');
+    storage.remove('token');
+    storage.remove('active_room');
+    storage.remove('session_id');
     setActiveSessionRoom('');
     sound.playClick();
   };
@@ -429,7 +335,7 @@ function App() {
     }
     sound.playClick();
     setError('');
-    const savedSession = localStorage.getItem('jakplayer_session_id') || localStorage.getItem('joybit_session_id');
+    const savedSession = storage.get('session_id');
     socket.emit('room:create', {
       name: currentUser.name,
       username: currentUser.username,
@@ -449,7 +355,7 @@ function App() {
     sound.playClick();
     setError('');
     const cleanCode = c.trim().toUpperCase();
-    const savedSession = localStorage.getItem('jakplayer_session_id') || localStorage.getItem('joybit_session_id');
+    const savedSession = storage.get('session_id');
     socket.emit('room:join', {
       name: currentUser.name,
       username: currentUser.username,
@@ -529,88 +435,11 @@ function App() {
   const safeZonesActive = room?.settings?.safeZones !== false;
   const blackHoleActive = !!room?.settings?.blackHole;
 
-  // Hitung bidak yang dapat dilangkahkan oleh pemain aktif (mengikuti rule 1 bidak per kotak)
-  const movablePawns = useMemo(() => {
-    if (!room || room.dice === null || !isTurn || room.animatingMove) return [];
-    const myPawns = room.pawns[playerId] || [];
-    const movable = [];
-    const myColor = me?.color;
-    const colorIdx = COLORS.indexOf(myColor);
-
-    myPawns.forEach((v, idx) => {
-      // 1. Dari markas (0): Bisa keluar dengan angka 6 atau 1
-      if (v === 0) {
-        if (room.dice === 6 || room.dice === 1) {
-          // Petak start sendiri tidak boleh sudah ditempati bidak sendiri
-          if (myPawns.some((ownV, ownIdx) => ownIdx !== idx && ownV === 1)) return;
-
-          // Jika safe zone aktif, tidak boleh mendarat jika ada lawan di petak start
-          if (safeZonesActive) {
-            const startTrack = COLOR_OFFSETS[colorIdx];
-            for (const opp of room.players) {
-              if (opp.id === playerId) continue;
-              const oppColorIdx = COLORS.indexOf(opp.color);
-              const oppPawns = room.pawns[opp.id] || [];
-              for (const oppV of oppPawns) {
-                if (oppV >= 1 && oppV <= 39) {
-                  const oppTrack = (COLOR_OFFSETS[oppColorIdx] + oppV - 1) % 40;
-                  if (oppTrack === startTrack) return;
-                }
-              }
-            }
-          }
-          movable.push(idx);
-        }
-      } else if (v > 0 && v < 44) {
-        const next = v + room.dice;
-        if (next > 44) return;
-        if (next === 44) {
-          movable.push(idx); // Petak finish boleh menampung semua bidak tamat
-          return;
-        }
-
-        // Tidak boleh ada 2 bidak sendiri dalam satu kotak
-        if (myPawns.some((ownV, ownIdx) => ownIdx !== idx && ownV === next)) return;
-
-        // Jika di lintasan utama (1..39)
-        if (next <= 39) {
-          const targetTrack = (COLOR_OFFSETS[colorIdx] + next - 1) % 40;
-
-          // Aturan: Jika bidak lawan berada di kotak base warnanya, tidak bisa diinjak lawan
-          for (const opp of room.players) {
-            if (opp.id === playerId || opp.isOut) continue;
-            const oppColorIdx = COLORS.indexOf(opp.color);
-            const oppBaseTrack = COLOR_OFFSETS[oppColorIdx];
-            if (targetTrack === oppBaseTrack) {
-              const oppPawns = room.pawns[opp.id] || [];
-              if (oppPawns.some(oppV => oppV >= 1 && oppV <= 39 && ((COLOR_OFFSETS[oppColorIdx] + oppV - 1) % 40) === targetTrack)) {
-                return; // Terhalang oleh bidak lawan yang sedang berada di kotak base warnanya!
-              }
-            }
-          }
-
-          const isTargetSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(targetTrack);
-          if (isTargetSafe) {
-            for (const opp of room.players) {
-              if (opp.id === playerId) continue;
-              const oppColorIdx = COLORS.indexOf(opp.color);
-              const oppPawns = room.pawns[opp.id] || [];
-              for (const oppV of oppPawns) {
-                if (oppV >= 1 && oppV <= 39) {
-                  const oppTrack = (COLOR_OFFSETS[oppColorIdx] + oppV - 1) % 40;
-                  if (oppTrack === targetTrack) return; // Terhalang lawan di safe zone
-                }
-              }
-            }
-          }
-        }
-
-        movable.push(idx);
-      }
-    });
-
-    return movable;
-  }, [room, playerId, isTurn, me, safeZonesActive]);
+  // Bidak yang boleh dijalankan dihitung server (satu sumber aturan main)
+  const movablePawns = useMemo(
+    () => (isTurn && room?.dice !== null && !room?.animatingMove ? room?.movable || [] : []),
+    [room, isTurn]
+  );
 
   // Auto-move: Jika hanya ada 1 bidak yang bisa jalan (tidak ada pilihan lain), jalankan otomatis!
   useEffect(() => {
@@ -632,10 +461,8 @@ function App() {
     const currentCode = room?.code || code;
 
     // 1. Bersihkan semua sesi aktif dari localStorage
-    localStorage.removeItem('jakplayer_active_room');
-    localStorage.removeItem('joybit_active_room');
-    localStorage.removeItem('jakplayer_session_id');
-    localStorage.removeItem('joybit_session_id');
+    storage.remove('active_room');
+    storage.remove('session_id');
     setActiveSessionRoom('');
 
     // 2. Beri tahu server bahwa pemain sengaja keluar
@@ -646,6 +473,7 @@ function App() {
     // 3. Reset state client kembali ke landing page beranda
     sound.setInRoom(false);
     setRoom(null);
+    setChats([]);
     setCode('');
     setPlayerId('');
     setScreen('home');
@@ -750,7 +578,7 @@ function App() {
           <div className="chat-header-title">
             <span>💬</span>
             <strong>Obrolan Room</strong>
-            <span className="chat-count-tag">{(room?.chats || []).length}</span>
+            <span className="chat-count-tag">{chats.length}</span>
           </div>
           {isMobile && (
             <button
@@ -765,13 +593,13 @@ function App() {
 
         {/* Message Feed */}
         <div className="chat-messages-container">
-          {(room?.chats || []).length === 0 ? (
+          {chats.length === 0 ? (
             <div className="chat-empty-hint">
               <span>💬</span>
               <p>Belum ada obrolan. Kirim pesan ke teman bermain!</p>
             </div>
           ) : (
-            (room?.chats || []).map(chat => {
+            chats.map(chat => {
               const isMe = chat.senderId === playerId;
               const senderColor = COLOR_INFO[chat.senderColor]?.hex || '#ff6200';
               return (
@@ -1179,7 +1007,7 @@ function App() {
                     type="button"
                     className="btn-dismiss-session"
                     onClick={() => {
-                      localStorage.removeItem('joybit_active_room');
+                      storage.remove('active_room');
                       setActiveSessionRoom('');
                     }}
                     title="Abaikan sesi ini"
@@ -1539,7 +1367,7 @@ function App() {
                     />
 
                     {/* Force Return Banner: Tampil saat memiliki item Force Return dan sudah minimal 3x injak */}
-                    {isTurn && (me?.inventory?.forceReturn || 0) > 0 && (me?.stompCount || 0) >= 3 && !room?.rolling && !room?.animatingMove && (
+                    {isTurn && (me?.inventory?.forceReturn || 0) > 0 && (me?.stompCount || 0) >= 3 && room?.dice === null && !room?.rolling && !room?.animatingMove && (
                       <div className="skill-control-banner force-return-control-banner">
                         <div className="skill-banner-head">
                           <span className="skill-bolt-anim">⚡</span>
@@ -1574,7 +1402,7 @@ function App() {
                     )}
 
                     {/* Skill Ultimate Banner: Tampil saat 3 bidak finish dan pemain punya poin skill */}
-                    {isTurn && (room?.pawns?.[playerId]?.filter(v => v === 44).length || 0) >= 3 && (me?.skillPoints || 0) > 0 && !room?.rolling && !room?.animatingMove && (
+                    {isTurn && (room?.pawns?.[playerId]?.filter(v => v === 44).length || 0) >= 3 && (me?.skillPoints || 0) > 0 && room?.dice === null && !room?.rolling && !room?.animatingMove && (
                       <div className="skill-control-banner">
                         <div className="skill-banner-head">
                           <span className="skill-bolt-anim">⚡</span>
@@ -2083,8 +1911,7 @@ class ErrorBoundary extends React.Component {
           <button
             style={{ background: '#ff6200', color: '#fff', border: 0, padding: '10px 20px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' }}
             onClick={() => {
-              localStorage.removeItem('jakplayer_active_room');
-              localStorage.removeItem('joybit_active_room');
+              storage.remove('active_room');
               location.href = location.pathname;
             }}
           >

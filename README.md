@@ -41,10 +41,36 @@ Variabel lingkungan:
 
 ## Arsitektur singkat
 
-- `server/rules.js`: aturan main murni (gerak bidak, safe zone, pilihan bot). Server juga mengirim daftar bidak yang boleh jalan (`room.movable`) ke klien, jadi aturan hanya ada di satu tempat.
-- `server/index.js`: room, giliran, timer, event Socket.IO, dan REST API (auth, leaderboard, toko).
-- `server/db.js`: user, sesi (token disimpan sebagai hash), leaderboard, inventaris, dan snapshot room di SQLite (`server/data/jakludo.db`, mode WAL). Data JSON versi lama dipindahkan otomatis saat pertama kali start.
-- `server/backup.js`: backup database tanpa menghentikan server (`npm run backup`).
+```
+server/
+  index.js            bootstrap: Express, Socket.IO, restore room, shutdown
+  db.js               SQLite: user, sesi (token di-hash), leaderboard, stok item, snapshot room
+  backup.js           backup database tanpa menghentikan server (npm run backup)
+  http/routes.js      REST API: auth, leaderboard, room aktif, toko
+  realtime/socket.js  event Socket.IO -> aksi lobby/engine
+  game/
+    config.js         semua angka waktu & batas permainan
+    rules.js          aturan main murni (gerak bidak, safe zone, pilihan bot)
+    store.js          state room, broadcast ke klien, snapshot, siklus hidup room
+    lobby.js          buat room, join/reconnect, bot, pemain keluar/terputus
+    engine.js         giliran, dadu, langkah bidak, skill, pemakaian item
+    inventory.js      stok item per pemain (milik akun vs gratis dari pertandingan)
+  items/
+    index.js          registry & kontrak item
+    *.js              satu file per item toko
+```
+
+Server mengirim daftar bidak yang boleh jalan (`room.movable`) dan katalog item (`/api/shop/items`) ke klien, jadi aturan dan item hanya didefinisikan di satu tempat.
+
+### Menambah item toko baru
+
+1. Buat file baru di `server/items/`, misalnya `double-dice.js`, yang meng-export definisi item: data toko (`id`, `name`, `icon`, `price`, `description`), `kind` (`active` / `passive`), lalu:
+   - `use(ctx)` untuk item aktif (dipakai lewat tombol, sebelum melempar dadu), opsional `target: 'opponentPawn'` dan `canUse(ctx)`;
+   - `hooks` untuk bereaksi pada event permainan (`capture`, `blackHole`).
+   Kontrak lengkap dan helper yang tersedia di `ctx` ada di komentar `server/items/index.js`.
+2. Daftarkan di array `ITEMS` pada `server/items/index.js`.
+
+Toko, inventaris, tombol pemakaian, dan stok di database ikut menyesuaikan tanpa mengubah file lain. Kalau item butuh event permainan baru, tambahkan satu pemanggilan `runItemHooks(room, player, '<event>', data)` di `server/game/engine.js`.
 
 Room aktif berjalan di memori dan disimpan sebagai snapshot ke SQLite setiap ada perubahan, sehingga restart atau deploy ulang tidak menghapus permainan. Pemain tinggal tersambung ulang ke kursinya. Siklus hidup room:
 - Lobby tanpa pemain yang tersambung dihapus setelah 5 menit. Kursi pembuat room ditahan selama room masih ada, kursi pemain lain ditahan 2 menit.

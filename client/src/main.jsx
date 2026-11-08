@@ -160,6 +160,7 @@ function App() {
 
   useEffect(() => {
     socket.on('room:joined', d => {
+      seedEventsRef.current = true;
       setPlayerId(d.playerId);
       setCode(d.code);
       if (d.sessionId) {
@@ -176,12 +177,19 @@ function App() {
     });
 
     socket.on('room:update', updatedRoom => {
+      if (seedEventsRef.current) {
+        seedEventsRef.current = false;
+        lastSkillUnlockIdRef.current = updatedRoom.lastSkillUnlock?.id ?? null;
+        lastShieldProtectIdRef.current = updatedRoom.lastShieldProtect?.id ?? null;
+        lastForceReturnUseIdRef.current = updatedRoom.lastForceReturnUse?.id ?? null;
+        // Kembali ke room yang sudah selesai tidak perlu memutar ulang perayaan menang
+        hasTriggeredWin.current = !!updatedRoom.winner;
+      }
       setRoom(updatedRoom);
       setError('');
 
+      // Sesi room tetap disimpan setelah ada pemenang agar "Main Lagi" bisa tersambung ulang
       if (updatedRoom.winner) {
-        storage.remove('active_room');
-        setActiveSessionRoom('');
         if (!hasTriggeredWin.current) {
           hasTriggeredWin.current = true;
           sound.playWin();
@@ -219,14 +227,16 @@ function App() {
     });
 
     socket.on('room:member_joined', data => {
+      if (data.playerId === socket.id) return; // Notifikasi untuk diri sendiri tidak perlu
       sound.playJoinNotification();
+      const id = Date.now() + Math.random();
       setMemberNotification({
-        id: Date.now(),
+        id,
         text: data.reconnected ? `${data.name} kembali masuk!` : `${data.name} bergabung ke room!`,
         avatar: data.avatar || '🎲'
       });
       setTimeout(() => {
-        setMemberNotification(null);
+        setMemberNotification(prev => (prev?.id === id ? null : prev));
       }, 3500);
     });
 
@@ -246,6 +256,10 @@ function App() {
           history.replaceState({}, '', location.pathname);
           setCode('');
         }
+        // Room sudah tidak ada / tidak bisa dimasuki: jangan biarkan pemain di layar room yang basi
+        setRoom(null);
+        setChats([]);
+        setScreen('home');
       }
       setTimeout(() => setError(''), 5000);
     });
@@ -313,9 +327,13 @@ function App() {
   // Gulir ke pesan chat terbaru
   useEffect(() => {
     if (chats.length === 0) return;
+    // Gulir container chat saja. scrollIntoView ikut menggulir halaman sehingga papan
+    // permainan melompat setiap ada pesan masuk.
     const timer = setTimeout(() => {
-      if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-      if (mobileChatEndRef.current) mobileChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      for (const ref of [chatEndRef, mobileChatEndRef]) {
+        const container = ref.current?.parentElement;
+        if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      }
     }, 60);
     return () => clearTimeout(timer);
   }, [chats]);
@@ -528,10 +546,32 @@ function App() {
     history.replaceState({}, '', location.pathname);
   };
 
+  // Di HP pakai menu bagikan bawaan; selain itu salin ke clipboard (dengan cadangan untuk http/in-app browser)
   const copy = async () => {
+    sound.playClick();
+    if (navigator.share && /android|iphone|ipad|ipod/i.test(navigator.userAgent)) {
+      try {
+        await navigator.share({ title: 'JakLudo', text: `Ayo main JakLudo! Kode room: ${room?.code || code}`, url: invite });
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
     try {
-      sound.playClick();
-      await navigator.clipboard.writeText(invite);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(invite);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = invite;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        const ok = document.execCommand('copy');
+        input.remove();
+        if (!ok) throw new Error('copy failed');
+      }
       setBusy(true);
       setTimeout(() => setBusy(false), 1600);
     } catch {

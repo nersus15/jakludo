@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 
-// Prompt instalasi PWA (Android/desktop) dan panduan manual untuk iOS
+// Prompt instalasi PWA. Jika browser tidak menyediakan prompt otomatis (iOS Safari, Firefox, dll),
+// tampilkan panduan instal manual di dalam aplikasi (installGuide: 'ios' | 'other').
 export function usePwaInstall({ onBeforePrompt } = {}) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
+  const [installGuide, setInstallGuide] = useState(null);
 
   useEffect(() => {
     const handleBeforeInstall = e => {
@@ -34,16 +35,12 @@ export function usePwaInstall({ onBeforePrompt } = {}) {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const choiceResult = await deferredPrompt.userChoice;
-      if (choiceResult && choiceResult.outcome === 'accepted') {
-        setIsInstalled(true);
-      }
+      if (choiceResult && choiceResult.outcome === 'accepted') setIsInstalled(true);
       setDeferredPrompt(null);
-    } else if (/iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase())) {
-      setShowIosInstallGuide(true);
     } else {
-      alert('Untuk memasang JakLudo di perangkatmu, klik menu browser (titik tiga) lalu pilih "Instal Aplikasi" atau "Tambahkan ke Layar Utama".');
+      setInstallGuide(/iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()) ? 'ios' : 'other');
     }
   };
 
-  return { isInstalled, install, showIosInstallGuide, setShowIosInstallGuide };
+  return { isInstalled, install, installGuide, closeInstallGuide: () => setInstallGuide(null) };
 }

@@ -1,0 +1,451 @@
+/* Papan Ludo 11x11, markas, bidak, dan HUD pemain. Warna papan sengaja tetap
+   (bukan token tema) karena papan adalah benda fisik yang sama di mode terang & gelap. */
+
+.ludo-arena-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: var(--board-max, 600px);
+  margin: 0 auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---------- HUD pemain di sudut papan ---------- */
+
+.board-hud-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.player-hud-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.player-hud-card.hud-active-turn {
+  border-color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.player-hud-card.hud-player-out {
+  opacity: 0.55;
+}
+
+.hud-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--pc);
+  color: var(--pc-on);
+  font: 700 1.2rem var(--font-display);
+}
+
+.hud-turn-pulse {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--brand);
+  animation: ring-pulse 1.2s var(--ease) 3;
+}
+
+@keyframes ring-pulse {
+  0% { transform: scale(0.9); opacity: 1; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+.hud-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.hud-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.hud-player-name {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-tag {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1.5;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.you-tag {
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.hud-sub-row {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-active-text { color: var(--brand-text); font-weight: 700; }
+.hud-out-tag,
+.hud-offline-tag { color: var(--danger); font-weight: 700; }
+.hud-auto-tag { color: var(--info); font-weight: 700; }
+
+/* ---------- Grid papan ---------- */
+
+.ludo-board-container {
+  width: 100%;
+}
+
+.ludo-board {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(11, minmax(0, 1fr));
+  grid-template-rows: repeat(11, minmax(0, 1fr));
+  aspect-ratio: 1;
+  width: 100%;
+  background: #ffffff;
+  border: 4px solid #2b2420;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-board);
+  overflow: hidden;
+}
+
+.board-cell,
+.board-center-goal {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1;
+  background: #ffffff;
+  border: 0.5px solid #d6d0c6;
+}
+
+/* Markas 4x4 di tiap sudut */
+.board-base {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.base-green { background: #2ec246; }
+.base-yellow { background: #ffc72c; }
+.base-red { background: #ef4444; }
+.base-blue { background: #1e75d8; }
+
+.board-base.base-active-turn {
+  box-shadow: inset 0 0 0 3px #ffffff;
+}
+
+.base-player-out {
+  opacity: 0.45;
+  filter: grayscale(0.8);
+}
+
+.base-inner-card {
+  width: 76%;
+  height: 76%;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.base-green .base-inner-card { background: #249b38; }
+.base-yellow .base-inner-card { background: #f59e0b; }
+.base-red .base-inner-card { background: #dc2626; }
+.base-blue .base-inner-card { background: #1d4ed8; }
+
+.base-yard {
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  place-items: center;
+}
+
+.yard-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.yard-slot-green { background: #1a752a; }
+.yard-slot-yellow { background: #b45309; }
+.yard-slot-red { background: #b91c1c; }
+.yard-slot-blue { background: #1e3a8a; }
+
+/* Jalur menuju finish & kotak start */
+.cell-home-green,
+.cell-start-green { background: #2ec246; border-color: #249b38; }
+.cell-home-yellow,
+.cell-start-yellow { background: #ffc72c; border-color: #f59e0b; }
+.cell-home-red,
+.cell-start-red { background: #ef4444; border-color: #dc2626; }
+.cell-home-blue,
+.cell-start-blue { background: #1e75d8; border-color: #1d4ed8; }
+
+.cell-icon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(12px, 3vw, 15px);
+  pointer-events: none;
+}
+
+.star-icon {
+  color: #b45309;
+}
+
+.cell-black-hole {
+  background: #2b2420;
+}
+
+/* Finish di tengah */
+.board-center-goal {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.goal-triangle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.goal-green { clip-path: polygon(0 0, 50% 50%, 0 100%); background: #2ec246; }
+.goal-yellow { clip-path: polygon(0 0, 100% 0, 50% 50%); background: #ffc72c; }
+.goal-blue { clip-path: polygon(100% 0, 100% 100%, 50% 50%); background: #1e75d8; }
+.goal-red { clip-path: polygon(0 100%, 100% 100%, 50% 50%); background: #ef4444; }
+
+.goal-counter {
+  position: absolute;
+  color: #ffffff;
+  font: 700 11px var(--font-display);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.goal-green .goal-counter { left: 2px; }
+.goal-yellow .goal-counter { top: 1px; color: #1f1a17; text-shadow: none; }
+.goal-blue .goal-counter { right: 2px; }
+.goal-red .goal-counter { bottom: 1px; }
+
+.goal-center-point {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+/* ---------- Petak tujuan (tombol) ---------- */
+
+.cell-valid-target {
+  z-index: 30;
+  background: #fff1e6;
+  box-shadow: inset 0 0 0 2px #ff6200;
+}
+
+.target-tile {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  z-index: 35;
+}
+
+/* Area sentuh diperluas sampai ±44px tanpa mengubah ukuran petak */
+.target-tile::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+.target-dot {
+  width: 30%;
+  height: 30%;
+  border-radius: 50%;
+  background: #ff6200;
+}
+
+/* ---------- Bidak ---------- */
+
+.pawn-cluster {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.pawn-token {
+  position: relative;
+  width: 82%;
+  height: 82%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  cursor: default;
+  transition: transform 0.2s var(--ease);
+}
+
+.pawn-cluster .pawn-token {
+  grid-area: 1 / 1;
+  pointer-events: auto;
+}
+
+.pawn-red { background: #dc2626; }
+.pawn-green { background: #16a34a; }
+.pawn-yellow { background: #f59e0b; }
+.pawn-blue { background: #2563eb; }
+
+.pawn-inner {
+  font: 700 clamp(12px, 3vw, 14px) var(--font-display);
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
+}
+
+.pawn-yellow .pawn-inner {
+  color: #1f1a17;
+  text-shadow: none;
+}
+
+/* Bidak bertumpuk di satu petak */
+.cluster-size-2 .pawn-token:nth-child(1) { transform: translate(-3px, -3px); }
+.cluster-size-2 .pawn-token:nth-child(2) { transform: translate(3px, 3px); }
+.cluster-size-3 .pawn-token:nth-child(1) { transform: translate(-4px, -4px); }
+.cluster-size-3 .pawn-token:nth-child(3) { transform: translate(4px, 4px); }
+.cluster-size-4 .pawn-token:nth-child(1) { transform: translate(-4px, -4px); }
+.cluster-size-4 .pawn-token:nth-child(2) { transform: translate(4px, -4px); }
+.cluster-size-4 .pawn-token:nth-child(3) { transform: translate(-4px, 4px); }
+.cluster-size-4 .pawn-token:nth-child(4) { transform: translate(4px, 4px); }
+
+/* Bidak yang bisa dijalankan: cincin oranye statis, berdenyut 3x saat pertama muncul */
+.pawn-can-move,
+.pawn-skill-target {
+  cursor: pointer;
+  z-index: 50;
+}
+
+.pawn-can-move {
+  box-shadow: 0 0 0 3px #ff6200, 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.pulse-anim {
+  animation: pawn-nudge 0.6s var(--ease) 3 alternate;
+}
+
+@keyframes pawn-nudge {
+  to { transform: translateY(-3px) scale(1.08); }
+}
+
+/* Area sentuh bidak interaktif diperluas sampai ±44px */
+.pawn-can-move::after,
+.pawn-skill-target::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+}
+
+.pawn-can-move:hover,
+.pawn-skill-target:hover {
+  transform: scale(1.1);
+}
+
+.pawn-skill-target {
+  box-shadow: 0 0 0 3px #b91c1c, 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.pawn-target-crosshair {
+  position: absolute;
+  inset: -2px;
+  display: grid;
+  place-items: center;
+  font-size: 0.9em;
+  pointer-events: none;
+}
+
+.pulse-skill-target {
+  animation: pawn-nudge 0.6s var(--ease) 3 alternate;
+}
+
+/* Lompatan per langkah saat bidak berjalan */
+.pawn-stepping {
+  z-index: 100;
+  pointer-events: none;
+  animation: pawn-hop 0.22s cubic-bezier(0.2, 0.85, 0.35, 1.25) forwards;
+}
+
+@keyframes pawn-hop {
+  0% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-14px) scale(1.2); }
+  100% { transform: translateY(0) scale(1.05); }
+}
+
+/* Bidak di markas: 36px di HP, area sentuh tetap 44px lewat ::after */
+.yard-slot .pawn-token {
+  width: 86%;
+  height: 86%;
+}
+
+.yard-slot .pawn-can-move::after {
+  inset: -6px;
+}
+
+.pawn-token:focus-visible {
+  outline-offset: 3px;
+  z-index: 60;
+}

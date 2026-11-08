@@ -1,0 +1,222 @@
+/* Beranda: perkenalan singkat, lalu kartu untuk mulai bermain sebagai fokus utama */
+
+.home {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--gutter) var(--space-6);
+  display: grid;
+  gap: var(--space-5);
+}
+
+.home__hero {
+  display: grid;
+  gap: var(--space-5);
+  align-items: center;
+}
+
+.home__title {
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.03em;
+}
+
+.home__title-accent {
+  color: var(--brand-text);
+}
+
+.home__lead {
+  margin-top: var(--space-3);
+  max-width: 52ch;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+}
+
+/* Motif empat warna Ludo */
+.color-strip {
+  display: flex;
+  gap: 6px;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.color-strip li {
+  width: 36px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--pc);
+}
+
+.home__art {
+  margin: 0;
+  justify-self: center;
+  width: min(100%, 360px);
+}
+
+.home__art img {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.home__play {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.play-card {
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.play-card__title {
+  font-size: var(--fs-lg);
+}
+
+.play-card__loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-2);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.join-form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.code-input {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.code-input::placeholder {
+  font-family: var(--font-body);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.active-rooms {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.active-room {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-color: var(--brand-soft-border);
+  background: var(--brand-soft);
+}
+
+.active-room__info {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.active-room__info .dot {
+  margin-top: 7px;
+}
+
+.active-room .btn {
+  flex: 1 1 140px;
+}
+
+.home__links {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.link-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  transition: background-color 0.15s var(--ease);
+}
+
+.link-card:hover {
+  background: var(--surface-2);
+}
+
+.link-card > span:last-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.link-card__icon {
+  font-size: 1.5rem;
+}
+
+/* HP & tablet: kartu untuk mulai main tampil sebelum gambar logo (fokus utama layar) */
+@media (max-width: 1099px) {
+  .home__hero {
+    display: contents;
+  }
+
+  .home__intro { order: 1; }
+  .home__play { order: 2; }
+
+  .home__art {
+    order: 3;
+    width: min(100%, 280px);
+  }
+}
+
+@media (min-width: 768px) {
+  .home {
+    padding-top: var(--space-7);
+  }
+
+  .home__links {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .home {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    align-items: start;
+    column-gap: var(--space-7);
+  }
+
+  .home__hero {
+    grid-template-columns: 1fr;
+  }
+
+  .home__art {
+    justify-self: start;
+    width: 300px;
+    grid-row: 1;
+  }
+}

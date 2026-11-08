@@ -1,0 +1,519 @@
+/* Kerangka aplikasi: header, footer, toast, bar koneksi */
+
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--space-3);
+  top: -80px;
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: var(--space-3);
+}
+
+/* ---------- Header ---------- */
+
+.app-header,
+.game-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--gutter);
+  padding-top: max(var(--space-2), env(safe-area-inset-top));
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.brand__logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.brand__name {
+  font: 700 var(--fs-lg) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.brand__accent {
+  color: var(--brand-text);
+}
+
+.app-header__actions,
+.game-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Poin & indikator sinyal hanya di layar yang cukup lebar; di HP ada di menu akun */
+.app-header__points,
+.net {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .app-header__points {
+    display: inline-flex;
+  }
+}
+
+@media (min-width: 768px) {
+  .net {
+    display: inline-flex;
+  }
+}
+
+/* Saat koneksi bermasalah indikator selalu tampil */
+.net.net--offline,
+.net.net--poor {
+  display: inline-flex;
+}
+
+.net {
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-2);
+  min-height: 32px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.net__bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+
+.net__bar {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+
+.net__bar:nth-child(1) { height: 4px; }
+.net__bar:nth-child(2) { height: 6px; }
+.net__bar:nth-child(3) { height: 9px; }
+.net__bar:nth-child(4) { height: 12px; }
+
+.net--good .net__bar.is-lit,
+.net--checking .net__bar.is-lit { background: var(--success); }
+.net--fair .net__bar.is-lit { background: var(--warning); }
+.net--poor .net__bar.is-lit { background: var(--danger); }
+.net--offline { color: var(--danger); background: var(--danger-soft); }
+
+@media (max-width: 767px) {
+  /* Di HP cukup batang sinyal, tanpa teks */
+  .net__text {
+    display: none;
+  }
+}
+
+/* ---------- Menu akun ---------- */
+
+.account {
+  position: relative;
+}
+
+.account__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.account__avatar {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.account__name {
+  display: none;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+
+@media (min-width: 768px) {
+  .account__name {
+    display: inline;
+  }
+}
+
+.account__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  z-index: 60;
+  width: min(280px, calc(100vw - 2 * var(--gutter)));
+  padding: var(--space-2);
+  box-shadow: var(--shadow-2);
+  animation: rise-in 0.15s var(--ease);
+}
+
+.account__profile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-1);
+}
+
+.account__profile .badge {
+  margin-top: var(--space-1);
+}
+
+.account__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  font-weight: 600;
+}
+
+.account__item:hover {
+  background: var(--surface-2);
+}
+
+.account__item--danger {
+  color: var(--danger);
+}
+
+/* ---------- Header permainan ---------- */
+
+.game-header__room {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
+
+.game-header__room .badge {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .game-header__room .badge {
+    display: inline-flex;
+  }
+}
+
+.code-text {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* ---------- Bar koneksi terputus ---------- */
+
+.reconnect-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--gutter);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Toast ---------- */
+
+.toasts {
+  position: fixed;
+  left: 50%;
+  top: calc(64px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  z-index: 90;
+  width: min(420px, calc(100vw - 2 * var(--gutter)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-height: var(--tap);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  pointer-events: auto;
+  animation: rise-in 0.2s var(--ease);
+}
+
+.toast__icon {
+  font-size: 1.25rem;
+}
+
+.toast--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.toast--chat {
+  padding: var(--space-1);
+  gap: var(--space-1);
+}
+
+.toast__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.toast__main:hover {
+  background: var(--surface-2);
+}
+
+.toast__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toast__text > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
+.toast__sender {
+  color: var(--pc-text, var(--text));
+}
+
+.avatar--sm {
+  width: 32px;
+  height: 32px;
+}
+
+.icon-btn--plain {
+  border-color: transparent;
+  background: transparent;
+}
+
+/* Reaksi emoji dari pemain */
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--pc, var(--border));
+  box-shadow: var(--shadow-1);
+  animation: reaction-pop 2.6s var(--ease) forwards;
+}
+
+.reaction__emoji {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.reaction__name {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+@keyframes reaction-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  12% { opacity: 1; transform: scale(1.05); }
+  20% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-12px); }
+}
+
+/* ---------- Footer & layar lain ---------- */
+
+.app-footer {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--gutter);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.loading-screen,
+.crash {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--gutter);
+  text-align: center;
+}
+
+.loading-screen {
+  flex-direction: row;
+  color: var(--text-2);
+}
+
+.state-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-2);
+}
+
+p.state-msg {
+  flex-direction: row;
+  justify-content: center;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.section-head h2,
+.panel-section__title {
+  font-size: var(--fs-md);
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.chip {
+  flex-shrink: 0;
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--surface-2);
+}
+
+.count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #ffffff;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .count-badge {
+    color: #1f1a17;
+  }
+}
+
+/* Tampilkan/sembunyikan per ukuran layar */
+.show-desktop {
+  display: none;
+}
+
+@media (min-width: 1100px) {
+  .show-desktop {
+    display: block;
+  }
+
+  .hide-desktop {
+    display: none;
+  }
+}

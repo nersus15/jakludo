@@ -4,33 +4,26 @@ import { itemStock } from './items';
 
 // Daftar item yang dimiliki pemain beserta progresnya (mis. 2/3 injakan menuju Force Return gratis)
 export function InventoryChips({ catalog, player }) {
+  if (catalog.length === 0) return <p className="muted">Memuat item...</p>;
   return (
-    <div className="game-inventory-chips">
+    <ul className="inventory">
       {catalog.map(item => {
         const stock = itemStock(player, item.id);
         return (
-          <div
-            key={item.id}
-            className={`inv-chip ${stock.count ? 'has-item' : 'zero-item'}`}
-            title={item.highlight || item.description}
-          >
-            <span className="inv-chip-emoji">{item.icon}</span>
-            <div className="inv-chip-details">
-              <span className="inv-chip-label">{item.name}</span>
-              <strong className="inv-chip-qty">
-                {stock.count} buah
-                {stock.earned > 0 && <span className="inv-stomp-tag"> (+{stock.earned} gratis)</span>}
-                {stock.progress && (
-                  <span className="inv-stomp-tag">
-                    {' '}({stock.progress.value}/{stock.progress.max})
-                  </span>
-                )}
-              </strong>
-            </div>
-          </div>
+          <li key={item.id} className={`inventory__item ${stock.count ? 'has-stock' : ''}`} title={item.highlight || item.description}>
+            <span className="inventory__icon" aria-hidden="true">{item.icon}</span>
+            <span className="inventory__text">
+              <strong>{item.name}</strong>
+              <span className="muted">
+                {stock.count} dimiliki
+                {stock.earned > 0 ? ` (${stock.earned} gratis)` : ''}
+                {stock.progress ? ` · ${stock.progress.value}/${stock.progress.max} ${stock.progress.label}` : ''}
+              </span>
+            </span>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 
@@ -43,38 +36,32 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
     const stock = itemStock(player, item.id);
     const isTargeting = targetingItemId === item.id;
     return (
-      <div key={item.id} className="skill-control-banner force-return-control-banner">
-        <div className="skill-banner-head">
-          <span className="skill-bolt-anim">{item.icon}</span>
-          <div className="skill-banner-text">
-            <strong>{item.icon} {item.name.toUpperCase()} SIAP DIPAKAI!</strong>
-            <small>
-              Tersisa <strong>{stock.count}</strong>x
-              {stock.earned > 0 ? ` (${stock.earned} gratis dari pertandingan ini)` : ''}
-            </small>
+      <section key={item.id} className="action-card card" aria-label={item.name}>
+        <div className="action-card__head">
+          <span className="action-card__icon" aria-hidden="true">{item.icon}</span>
+          <div>
+            <strong>{item.name} siap dipakai</strong>
+            <p className="muted">
+              Tersisa {stock.count}x{stock.earned > 0 ? `, ${stock.earned} gratis dari pertandingan ini` : ''}.
+            </p>
           </div>
         </div>
-
-        <div className="skill-banner-actions">
+        <div className="action-card__buttons">
           <button
             type="button"
-            className={`btn-use-skill btn-force-active ${isTargeting ? 'targeting-active' : ''}`}
+            className="btn btn--primary"
+            aria-pressed={item.target ? isTargeting : undefined}
             onClick={() => {
               sound.playClick();
               if (item.target) onToggleTarget(isTargeting ? null : item.id);
               else onUse(item.id, null);
             }}
           >
-            {isTargeting ? '❌ Batal Pilih Target' : `${item.icon} Gunakan ${item.name}`}
+            {isTargeting ? 'Batal pilih target' : `Pakai ${item.name}`}
           </button>
         </div>
-
-        {isTargeting && (
-          <div className="skill-target-help">
-            🎯 <em>Klik bidak lawan manapun di arena untuk memakai {item.name}!</em>
-          </div>
-        )}
-      </div>
+        {isTargeting && <p className="action-card__hint">Ketuk bidak lawan di lintasan untuk memakai {item.name}.</p>}
+      </section>
     );
   });
 }

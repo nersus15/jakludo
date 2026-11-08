@@ -1,0 +1,11 @@
+/* Urutan: token -> dasar -> kerangka -> layar -> komponen. Font dimuat dari index.html. */
+@import './tokens.css';
+@import './base.css';
+@import './layout.css';
+@import './modal.css';
+@import './home.css';
+@import './lobby.css';
+@import './game.css';
+@import './board.css';
+@import './dice.css';
+@import './dialogs.css';

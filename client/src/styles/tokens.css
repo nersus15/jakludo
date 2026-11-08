@@ -1,0 +1,128 @@
+/* Token desain JakLudo. Semua nilai warna, jarak, radius, dan bayangan berasal dari sini
+   (lihat DESIGN.md). Rasio kontras teks sudah dihitung terhadap --surface dan --bg. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Permukaan */
+  --bg: #f7f4ef;
+  --surface: #ffffff;
+  --surface-2: #f3efe8;
+  --surface-3: #ebe5db;
+  --border: #e4ddd2;
+  --border-strong: #cfc6b8;
+  --overlay: rgba(31, 26, 23, 0.55);
+
+  /* Teks: 17.2 / 7.8 / 5.8 : 1 di atas --surface */
+  --text: #1f1a17;
+  --text-2: #57514b;
+  --text-3: #6b645d;
+
+  /* Aksen JakLudo */
+  --brand: #ff6200;
+  --brand-hover: #ff7a24;
+  --brand-pressed: #e85800;
+  --on-brand: #1f1a17;
+  --brand-text: #b8470a;
+  --brand-soft: #fff1e6;
+  --brand-soft-border: #ffd2b0;
+
+  /* Status */
+  --danger: #b91c1c;
+  --danger-soft: #fdecec;
+  --success: #166534;
+  --success-soft: #e9f7ee;
+  --info: #1d4ed8;
+  --info-soft: #eaf0fe;
+  --warning: #854d0e;
+  --warning-soft: #fdf4dc;
+
+  /* Warna pemain (papan) dan versi teksnya (lolos 4.5:1 di atas putih) */
+  --p-red: #ef4444;
+  --p-green: #2ec246;
+  --p-yellow: #ffc72c;
+  --p-blue: #1e75d8;
+  --p-red-text: #b91c1c;
+  --p-green-text: #166534;
+  --p-yellow-text: #854d0e;
+  --p-blue-text: #1d4ed8;
+
+  /* Huruf */
+  --font-body: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk', 'DM Sans', system-ui, sans-serif;
+  --fs-xs: 0.75rem;   /* 12px: ukuran teks terkecil */
+  --fs-sm: 0.875rem;  /* 14px */
+  --fs-md: 1rem;      /* 16px */
+  --fs-lg: 1.25rem;   /* 20px */
+  --fs-xl: 1.75rem;   /* 28px */
+  --fs-2xl: clamp(2rem, 6vw, 3.25rem);
+
+  /* Jarak */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --gutter: 16px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+
+  /* Bayangan: hanya dua tingkat */
+  --shadow-1: 0 1px 2px rgba(31, 26, 23, 0.06), 0 2px 8px rgba(31, 26, 23, 0.05);
+  --shadow-2: 0 12px 32px rgba(31, 26, 23, 0.18);
+  --shadow-board: 0 18px 40px rgba(31, 26, 23, 0.22);
+
+  --focus: #1d4ed8;
+  --tap: 44px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --gutter: 24px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14110f;
+    --surface: #1f1b18;
+    --surface-2: #2a2521;
+    --surface-3: #352f2a;
+    --border: #3a332d;
+    --border-strong: #51483f;
+    --overlay: rgba(0, 0, 0, 0.65);
+
+    --text: #f5f1ec;
+    --text-2: #c9c1b8;
+    --text-3: #a69d93;
+
+    --brand-text: #ff8a3d;
+    --brand-soft: #3a2415;
+    --brand-soft-border: #6b3a17;
+
+    --danger: #f87171;
+    --danger-soft: #3b1d1d;
+    --success: #4ade80;
+    --success-soft: #16301f;
+    --info: #93c5fd;
+    --info-soft: #172640;
+    --warning: #facc15;
+    --warning-soft: #352c10;
+
+    --p-red-text: #f87171;
+    --p-green-text: #4ade80;
+    --p-yellow-text: #facc15;
+    --p-blue-text: #60a5fa;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55);
+    --shadow-board: 0 18px 40px rgba(0, 0, 0, 0.55);
+    --focus: #93c5fd;
+  }
+}

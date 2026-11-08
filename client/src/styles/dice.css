@@ -1,0 +1,139 @@
+/* Dadu 3D. Ukuran diatur lewat --dice agar bisa mengecil di HP. */
+
+.dice-wrapper {
+  --dice: 64px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+@media (min-width: 1100px) {
+  .dice-wrapper {
+    --dice: 76px;
+  }
+}
+
+.dice-button {
+  display: grid;
+  place-items: center;
+  width: calc(var(--dice) + 24px);
+  height: calc(var(--dice) + 32px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+.dice-button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.dice-button.is-ready:hover .dice-stage {
+  transform: scale(1.06);
+}
+
+.dice-button.is-ready {
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
+.dice-stage {
+  position: relative;
+  display: block;
+  width: var(--dice);
+  height: var(--dice);
+  perspective: 700px;
+  transition: transform 0.2s var(--ease);
+}
+
+.dice-stage.landing-bounce {
+  animation: dice-land 0.45s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+
+.dice-cube {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.35s var(--ease);
+}
+
+.dice-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 14%;
+  border-radius: 22%;
+  background: #ffffff;
+  border: 2px solid #d6d0c6;
+}
+
+.face-1 { transform: rotateY(0deg) translateZ(calc(var(--dice) / 2)); }
+.face-2 { transform: rotateY(90deg) translateZ(calc(var(--dice) / 2)); }
+.face-3 { transform: rotateX(90deg) translateZ(calc(var(--dice) / 2)); }
+.face-4 { transform: rotateX(-90deg) translateZ(calc(var(--dice) / 2)); }
+.face-5 { transform: rotateY(-90deg) translateZ(calc(var(--dice) / 2)); }
+.face-6 { transform: rotateY(180deg) translateZ(calc(var(--dice) / 2)); }
+
+.dice-cube.show-1 { transform: rotateX(0deg) rotateY(0deg); }
+.dice-cube.show-2 { transform: rotateY(-90deg); }
+.dice-cube.show-3 { transform: rotateX(-90deg); }
+.dice-cube.show-4 { transform: rotateX(90deg); }
+.dice-cube.show-5 { transform: rotateY(90deg); }
+.dice-cube.show-6 { transform: rotateY(180deg); }
+
+.dice-cube.rolling-3d {
+  animation: dice-tumble 0.75s cubic-bezier(0.2, 0.1, 0.25, 1) infinite;
+}
+
+@keyframes dice-tumble {
+  0% { transform: rotateX(0) rotateY(0) rotateZ(0) translateY(0); }
+  25% { transform: rotateX(270deg) rotateY(180deg) rotateZ(90deg) translateY(-14px); }
+  50% { transform: rotateX(540deg) rotateY(360deg) rotateZ(180deg) translateY(-20px); }
+  75% { transform: rotateX(810deg) rotateY(540deg) rotateZ(270deg) translateY(-8px); }
+  100% { transform: rotateX(1080deg) rotateY(720deg) rotateZ(360deg) translateY(0); }
+}
+
+@keyframes dice-land {
+  0% { transform: translateY(-12px); }
+  50% { transform: translateY(2px) scale(1.04, 0.96); }
+  100% { transform: translateY(0); }
+}
+
+.dice-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  width: 70%;
+  height: 10px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.3) 0%, transparent 70%);
+}
+
+.pip {
+  display: block;
+  width: 70%;
+  height: 70%;
+  margin: auto;
+  border-radius: 50%;
+  background: #2b2420;
+}
+
+.pip-red {
+  width: 90%;
+  height: 90%;
+  background: #dc2626;
+}
+
+.pip-center { grid-column: 2; grid-row: 2; }
+.pip-top-left { grid-column: 1; grid-row: 1; }
+.pip-top-right { grid-column: 3; grid-row: 1; }
+.pip-middle-left { grid-column: 1; grid-row: 2; }
+.pip-middle-right { grid-column: 3; grid-row: 2; }
+.pip-bottom-left { grid-column: 1; grid-row: 3; }
+.pip-bottom-right { grid-column: 3; grid-row: 3; }

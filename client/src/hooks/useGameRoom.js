@@ -272,17 +272,20 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     return () => clearTimeout(timer);
   }, [isTurn, room?.dice, room?.rolling, room?.animatingMove, movablePawns, movePawn]);
 
-  const selectTarget = (targetPlayerId, targetPawnIdx) => {
+  // Stabil (lewat ref) supaya papan yang di-memo tidak ikut render ulang tiap state lain berubah
+  const itemTargetingRef = useRef(itemTargeting);
+  itemTargetingRef.current = itemTargeting;
+  const selectTarget = useCallback((targetPlayerId, targetPawnIdx) => {
     sound.playClick();
     const target = { playerId: targetPlayerId, pawnIdx: targetPawnIdx };
-    if (itemTargeting) {
-      socket.emit('game:use_item', { itemId: itemTargeting, target });
+    if (itemTargetingRef.current) {
+      socket.emit('game:use_item', { itemId: itemTargetingRef.current, target });
       setItemTargeting(null);
     } else {
       socket.emit('game:use_skill', { target });
       setSkillTargeting(false);
     }
-  };
+  }, [socket]);
 
   const actions = {
     createRoom,

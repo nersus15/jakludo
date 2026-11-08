@@ -21,7 +21,7 @@ export default function TurnPanel({ room, playerId, isTurn, canAct, currentTurnP
   const myPawns = room.pawns[playerId] || [];
 
   return (
-    <section className={`turn-panel card ${isTurn ? 'is-my-turn' : ''}`} aria-label="Giliran">
+    <section className={`turn-panel card ${isTurn ? 'is-my-turn card--focus' : ''}`} aria-label="Giliran">
       <div className="turn-panel__main">
         <Dice3D
           value={room.dice}

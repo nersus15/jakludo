@@ -17,7 +17,8 @@
 
 .home__title {
   font-size: var(--fs-2xl);
-  letter-spacing: -0.03em;
+  font-weight: 700;
+  line-height: 1.05;
 }
 
 .home__title-accent {
@@ -31,20 +32,22 @@
   font-size: var(--fs-md);
 }
 
-/* Motif empat warna Ludo */
+/* Motif identitas: empat keping Ludo bergaris tinta, berjajar seperti di markas */
 .color-strip {
   display: flex;
-  gap: 6px;
-  margin: var(--space-4) 0 0;
+  gap: 10px;
+  margin: var(--space-5) 0 0;
   padding: 0;
   list-style: none;
 }
 
 .color-strip li {
-  width: 36px;
-  height: 8px;
-  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   background: var(--pc);
+  border: 2px solid var(--ink-line);
+  box-shadow: 0 2px 0 var(--ink-shadow);
 }
 
 .home__art {
@@ -53,11 +56,20 @@
   width: min(100%, 360px);
 }
 
+.home__art {
+  padding: 10px;
+  background: var(--surface);
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-2);
+  /* sedikit miring: kartu yang diletakkan di atas meja */
+  transform: rotate(-2deg);
+}
+
 .home__art img {
   width: 100%;
   height: auto;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
+  border-radius: calc(var(--radius-lg) - 8px);
 }
 
 .home__play {
@@ -73,7 +85,7 @@
 }
 
 .play-card__title {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
 }
 
 .play-card__loading {
@@ -130,8 +142,9 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-4);
-  border-color: var(--brand-soft-border);
+  border-color: var(--ink-line);
   background: var(--brand-soft);
+  box-shadow: var(--lift-1);
 }
 
 .active-room__info {
@@ -166,7 +179,7 @@
 }
 
 .link-card:hover {
-  background: var(--surface-2);
+  border-color: var(--ink-line);
 }
 
 .link-card > span:last-child {

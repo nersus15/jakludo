@@ -88,7 +88,7 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
 
   return (
     <main className="lobby" id="main">
-      <section className="lobby__code card">
+      <section className="lobby__code card card--focus">
         <p className="muted">Kode room</p>
         <p className="lobby__code-value code-text" aria-label={`Kode room ${room.code.split('').join(' ')}`}>{room.code}</p>
         <p className="muted lobby__code-hint">Bagikan kode atau link ini ke teman. Maksimal 4 pemain.</p>

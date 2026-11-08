@@ -25,8 +25,8 @@ h2,
 h3 {
   margin: 0;
   font-family: var(--font-display);
+  font-weight: 600;
   line-height: 1.15;
-  letter-spacing: -0.01em;
 }
 
 p {
@@ -87,7 +87,9 @@ textarea {
   border: 0;
 }
 
-/* ---------- Tombol ---------- */
+/* ---------- Tombol ----------
+   Motif "keping cetak": garis tinta + bayangan keras di bawah. Saat ditekan tombol turun
+   dan bayangannya hilang, seperti menekan keping di atas meja. */
 
 .btn {
   display: inline-flex;
@@ -97,26 +99,22 @@ textarea {
   min-height: var(--tap);
   padding: 0 var(--space-4);
   border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  font-weight: 700;
-  font-size: var(--fs-sm);
-  line-height: 1.2;
+  border: 2px solid transparent;
+  font: 600 var(--fs-md) / 1.2 var(--font-display);
   text-align: center;
   text-decoration: none;
-  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.1s var(--ease);
-}
-
-.btn:active:not(:disabled) {
-  transform: translateY(1px);
+  transition: background-color 0.15s var(--ease), transform 0.08s var(--ease), box-shadow 0.08s var(--ease);
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .btn--primary {
   background: var(--brand);
   color: var(--on-brand);
+  border-color: var(--ink-line);
+  box-shadow: var(--lift-1);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -125,16 +123,24 @@ textarea {
 
 .btn--primary:active:not(:disabled) {
   background: var(--brand-pressed);
+  transform: translateY(3px);
+  box-shadow: none;
 }
 
 .btn--secondary {
   background: var(--surface);
-  border-color: var(--border-strong);
+  border-color: var(--ink-line);
   color: var(--text);
+  box-shadow: var(--lift-1);
 }
 
 .btn--secondary:hover:not(:disabled) {
   background: var(--surface-2);
+}
+
+.btn--secondary:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: none;
 }
 
 .btn--ghost {
@@ -143,13 +149,13 @@ textarea {
 }
 
 .btn--ghost:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--surface-3);
   color: var(--text);
 }
 
 .btn--danger {
   background: var(--surface);
-  border-color: var(--border-strong);
+  border-color: var(--danger);
   color: var(--danger);
 }
 
@@ -162,8 +168,8 @@ textarea {
 }
 
 .btn--lg {
-  min-height: 52px;
-  font-size: var(--fs-md);
+  min-height: 56px;
+  font-size: var(--fs-lg);
 }
 
 /* Tombol ikon persegi 44px */
@@ -174,21 +180,22 @@ textarea {
   height: var(--tap);
   flex-shrink: 0;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   background: var(--surface);
   font-size: 1.15rem;
   line-height: 1;
   position: relative;
-  transition: background-color 0.15s var(--ease);
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .icon-btn:hover {
-  background: var(--surface-2);
+  border-color: var(--ink-line);
 }
 
 .icon-btn[aria-pressed='true'],
 .icon-btn[aria-expanded='true'] {
   background: var(--surface-3);
+  border-color: var(--ink-line);
 }
 
 /* ---------- Input ---------- */
@@ -198,7 +205,7 @@ textarea {
   min-height: var(--tap);
   padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
+  border: 2px solid var(--ink-line);
   background: var(--surface);
   color: var(--text);
 }
@@ -207,13 +214,19 @@ textarea {
   color: var(--text-3);
 }
 
-/* ---------- Kartu & teks bantu ---------- */
+/* ---------- Kartu ----------
+   .card        : kartu biasa, datar (tanpa bayangan) agar halaman tidak "mengambang"
+   .card--focus : satu kartu fokus per layar, bergaris tinta dengan bayangan cetak */
 
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-1);
+}
+
+.card--focus {
+  border-color: var(--ink-line);
+  box-shadow: var(--lift-2);
 }
 
 .muted {
@@ -275,7 +288,8 @@ textarea {
   background: var(--pc, var(--surface-3));
   color: var(--pc-on, var(--text));
   /* 19px tebal = teks besar menurut WCAG, cukup 3:1 di atas warna pemain */
-  font: 700 1.2rem var(--font-display);
+  font: 600 1.2rem var(--font-display);
+  border: 2px solid var(--ink-line);
 }
 
 .spinner {

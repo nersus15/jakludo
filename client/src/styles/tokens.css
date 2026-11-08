@@ -1,61 +1,65 @@
-/* Token desain JakLudo. Semua nilai warna, jarak, radius, dan bayangan berasal dari sini
-   (lihat DESIGN.md). Rasio kontras teks sudah dihitung terhadap --surface dan --bg. */
+/* Token desain JakLudo: "papan permainan hangat" (lihat DESIGN.md).
+   Tema dipilih lewat atribut data-theme di <html> ("light" | "dark"); default terang.
+   Rasio kontras teks sudah dihitung terhadap --surface dan --bg. */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  /* Permukaan */
-  --bg: #f7f4ef;
-  --surface: #ffffff;
-  --surface-2: #f3efe8;
-  --surface-3: #ebe5db;
-  --border: #e4ddd2;
-  --border-strong: #cfc6b8;
-  --overlay: rgba(31, 26, 23, 0.55);
+  /* Meja & kartu: krem hangat seperti kertas papan Ludo */
+  --bg: #f5ecdc;
+  --surface: #fffaf1;
+  --surface-2: #f7eedd;
+  --surface-3: #efe2cb;
+  --border: #e3d4bb;
+  --overlay: rgba(43, 36, 32, 0.55);
 
-  /* Teks: 17.2 / 7.8 / 5.8 : 1 di atas --surface */
-  --text: #1f1a17;
-  --text-2: #57514b;
-  --text-3: #6b645d;
+  /* Tinta: garis tepi kartu, tombol, dan papan (motif identitas) */
+  --ink: #2b2420;
+  --ink-line: #2b2420;
+  --ink-shadow: #2b2420;
 
-  /* Aksen JakLudo */
+  /* Teks: 14.7 / 7.6 / 5.8 : 1 di atas --surface */
+  --text: #2b2420;
+  --text-2: #5c4f45;
+  --text-3: #6e6054;
+
+  /* Aksen JakLudo (oranye wordmark logo) */
   --brand: #ff6200;
   --brand-hover: #ff7a24;
   --brand-pressed: #e85800;
-  --on-brand: #1f1a17;
-  --brand-text: #b8470a;
-  --brand-soft: #fff1e6;
-  --brand-soft-border: #ffd2b0;
+  --on-brand: #2b2420;
+  --brand-text: #b0430a;
+  --brand-soft: #ffe3cc;
 
   /* Status */
-  --danger: #b91c1c;
-  --danger-soft: #fdecec;
+  --danger: #b42318;
+  --danger-soft: #fde4df;
   --success: #166534;
-  --success-soft: #e9f7ee;
+  --success-soft: #dff3e4;
   --info: #1d4ed8;
-  --info-soft: #eaf0fe;
-  --warning: #854d0e;
-  --warning-soft: #fdf4dc;
+  --info-soft: #e3ebfd;
+  --warning: #7c4a03;
+  --warning-soft: #fdefc7;
 
-  /* Warna pemain (papan) dan versi teksnya (lolos 4.5:1 di atas putih) */
+  /* Warna pemain (papan) dan versi teksnya (lolos 4.5:1) */
   --p-red: #ef4444;
   --p-green: #2ec246;
   --p-yellow: #ffc72c;
   --p-blue: #1e75d8;
-  --p-red-text: #b91c1c;
+  --p-red-text: #b42318;
   --p-green-text: #166534;
-  --p-yellow-text: #854d0e;
+  --p-yellow-text: #7c4a03;
   --p-blue-text: #1d4ed8;
 
-  /* Huruf */
-  --font-body: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Space Grotesk', 'DM Sans', system-ui, sans-serif;
-  --fs-xs: 0.75rem;   /* 12px: ukuran teks terkecil */
-  --fs-sm: 0.875rem;  /* 14px */
-  --fs-md: 1rem;      /* 16px */
-  --fs-lg: 1.25rem;   /* 20px */
-  --fs-xl: 1.75rem;   /* 28px */
-  --fs-2xl: clamp(2rem, 6vw, 3.25rem);
+  /* Huruf: Fredoka (bulat, senada huruf logo) untuk judul & angka, Nunito untuk isi */
+  --font-body: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Fredoka', 'Nunito', system-ui, sans-serif;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.75rem;
+  --fs-2xl: clamp(2.25rem, 8vw, 3.75rem);
 
   /* Jarak */
   --space-1: 4px;
@@ -68,14 +72,16 @@
   --gutter: 16px;
 
   /* Radius */
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
 
-  /* Bayangan: hanya dua tingkat */
-  --shadow-1: 0 1px 2px rgba(31, 26, 23, 0.06), 0 2px 8px rgba(31, 26, 23, 0.05);
-  --shadow-2: 0 12px 32px rgba(31, 26, 23, 0.18);
-  --shadow-board: 0 18px 40px rgba(31, 26, 23, 0.22);
+  /* Bayangan "cetak": tepi keras menempel, seperti kartu/keping di atas meja.
+     Hanya untuk elemen utama (tombol utama, kartu fokus, dialog); sisanya tanpa bayangan. */
+  --lift-1: 0 3px 0 var(--ink-shadow);
+  --lift-2: 0 5px 0 var(--ink-shadow);
+  --shadow-pop: 0 18px 40px rgba(43, 36, 32, 0.22);
+  --shadow-board: 0 6px 0 var(--ink-shadow), 0 18px 36px rgba(43, 36, 32, 0.18);
 
   --focus: #1d4ed8;
   --tap: 44px;
@@ -88,41 +94,43 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14110f;
-    --surface: #1f1b18;
-    --surface-2: #2a2521;
-    --surface-3: #352f2a;
-    --border: #3a332d;
-    --border-strong: #51483f;
-    --overlay: rgba(0, 0, 0, 0.65);
+/* Meja malam: permukaan cokelat gelap, garis kontrol cokelat terang agar tetap terlihat (≥3:1) */
+:root[data-theme='dark'] {
+  color-scheme: dark;
 
-    --text: #f5f1ec;
-    --text-2: #c9c1b8;
-    --text-3: #a69d93;
+  --bg: #1a1512;
+  --surface: #262019;
+  --surface-2: #2f2720;
+  --surface-3: #3a3028;
+  --border: #3d332b;
+  --overlay: rgba(0, 0, 0, 0.65);
 
-    --brand-text: #ff8a3d;
-    --brand-soft: #3a2415;
-    --brand-soft-border: #6b3a17;
+  --ink: #f6eee3;
+  --ink-line: #8a7562;
+  --ink-shadow: #0b0907;
 
-    --danger: #f87171;
-    --danger-soft: #3b1d1d;
-    --success: #4ade80;
-    --success-soft: #16301f;
-    --info: #93c5fd;
-    --info-soft: #172640;
-    --warning: #facc15;
-    --warning-soft: #352c10;
+  --text: #f6eee3;
+  --text-2: #d3c6b6;
+  --text-3: #b0a292;
 
-    --p-red-text: #f87171;
-    --p-green-text: #4ade80;
-    --p-yellow-text: #facc15;
-    --p-blue-text: #60a5fa;
+  --brand-text: #ff8a3d;
+  --brand-soft: #3d2614;
 
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55);
-    --shadow-board: 0 18px 40px rgba(0, 0, 0, 0.55);
-    --focus: #93c5fd;
-  }
+  --danger: #f87171;
+  --danger-soft: #3b1d1a;
+  --success: #4ade80;
+  --success-soft: #16301f;
+  --info: #93c5fd;
+  --info-soft: #172640;
+  --warning: #facc15;
+  --warning-soft: #352c10;
+
+  --p-red-text: #f87171;
+  --p-green-text: #4ade80;
+  --p-yellow-text: #facc15;
+  --p-blue-text: #60a5fa;
+
+  --shadow-pop: 0 18px 40px rgba(0, 0, 0, 0.6);
+  --shadow-board: 0 6px 0 var(--ink-shadow), 0 18px 36px rgba(0, 0, 0, 0.5);
+  --focus: #93c5fd;
 }

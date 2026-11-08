@@ -40,7 +40,7 @@
   padding: var(--space-2) var(--gutter);
   padding-top: max(var(--space-2), env(safe-area-inset-top));
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 2px solid var(--border);
 }
 
 .brand {
@@ -54,13 +54,13 @@
   width: 40px;
   height: 40px;
   border-radius: 10px;
+  border: 2px solid var(--ink-line);
   object-fit: cover;
   flex-shrink: 0;
 }
 
 .brand__name {
-  font: 700 var(--fs-lg) / 1 var(--font-display);
-  letter-spacing: -0.02em;
+  font: 700 1.5rem / 1 var(--font-display);
   white-space: nowrap;
 }
 
@@ -123,7 +123,7 @@
 .net__bar {
   width: 3px;
   border-radius: 1px;
-  background: var(--border-strong);
+  background: var(--ink-line);
 }
 
 .net__bar:nth-child(1) { height: 4px; }
@@ -158,8 +158,13 @@
   min-width: var(--tap);
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   background: var(--surface);
+}
+
+.account__trigger:hover,
+.account__trigger[aria-expanded='true'] {
+  border-color: var(--ink-line);
 }
 
 .account__avatar {
@@ -190,7 +195,8 @@
   z-index: 60;
   width: min(280px, calc(100vw - 2 * var(--gutter)));
   padding: var(--space-2);
-  box-shadow: var(--shadow-2);
+  border-color: var(--ink-line);
+  box-shadow: var(--lift-2), var(--shadow-pop);
   animation: rise-in 0.15s var(--ease);
 }
 
@@ -253,7 +259,7 @@
 .code-text {
   font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 /* ---------- Bar koneksi terputus ---------- */
@@ -294,8 +300,8 @@
   min-height: var(--tap);
   border-radius: var(--radius-md);
   background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-2);
+  border: 2px solid var(--ink-line);
+  box-shadow: var(--lift-1), var(--shadow-pop);
   font-size: var(--fs-sm);
   font-weight: 600;
   pointer-events: auto;
@@ -377,7 +383,7 @@
   border-radius: 999px;
   background: var(--surface);
   border: 2px solid var(--pc, var(--border));
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--lift-1);
   animation: reaction-pop 2.6s var(--ease) forwards;
 }
 
@@ -470,15 +476,15 @@ p.state-msg {
   min-height: var(--tap);
   padding: 0 var(--space-3);
   border-radius: 999px;
-  border: 1px solid var(--border-strong);
+  border: 2px solid var(--border);
   background: var(--surface);
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
 }
 
 .chip:hover {
-  background: var(--surface-2);
+  border-color: var(--ink-line);
 }
 
 .count-badge {
@@ -514,6 +520,13 @@ p.state-msg {
   }
 
   .hide-desktop {
+    display: none;
+  }
+}
+
+/* HP sempit: cukup logo (logo sudah memuat tulisan JakLudo) agar tombol header tidak menimpa */
+@media (max-width: 419px) {
+  .brand__name {
     display: none;
   }
 }

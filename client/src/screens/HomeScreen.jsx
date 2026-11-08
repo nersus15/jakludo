@@ -53,7 +53,7 @@ export default function HomeScreen({ user, checkingAuth, code, error, activeRoom
           </div>
         )}
 
-        <div className="play-card card">
+        <div className="play-card card card--focus">
           {checkingAuth ? (
             <p className="play-card__loading" role="status">
               <span className="spinner" aria-hidden="true" /> Memeriksa sesi login...

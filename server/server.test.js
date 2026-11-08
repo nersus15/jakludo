@@ -262,6 +262,43 @@ test('pemain yang terputus di tengah giliran tidak langsung dimainkan sistem', a
   assert.equal(room.players[0].autoPlayCount, 0);
 });
 
+test('room aktif muncul di daftar pembuatnya dan kursinya ditahan saat terputus', async () => {
+  const u = await register('pembuat_room');
+  const others = await register('teman_main');
+  const host = await connect();
+  host.emit('room:create', { token: u.token });
+  const { code } = await once(host, 'room:joined');
+  const friend = await connect();
+  friend.emit('room:join', { code, token: others.token });
+  await once(friend, 'room:joined');
+  const room = rooms.get(code);
+
+  host.disconnect();
+  await wait(100);
+  assert.equal(room.players.length, 2, 'kursi pembuat room tetap ada');
+  assert.equal(room.lobbyRemovals.size, 0, 'kursi pembuat room tidak dijadwalkan dilepas');
+
+  const res = await fetch(`${url}/api/rooms/active`, { headers: { Authorization: `Bearer ${u.token}` } });
+  const body = await res.json();
+  const listed = body.rooms.find(r => r.code === code);
+  assert.ok(listed, 'room tampil di daftar room aktif');
+  assert.equal(listed.isCreator, true);
+
+  const back = await connect();
+  back.emit('room:join', { code, token: u.token });
+  const rejoined = await once(back, 'room:joined');
+  assert.equal(rejoined.reconnected, true);
+  assert.equal(room.host, back.id, 'pembuat room kembali menjadi host');
+});
+
+test('lobby yang ditinggal semua pemain tetap ada (dijadwalkan dihapus setelah 5 menit)', async () => {
+  const { code, sockets, room } = await createRoomWith(['Solo']);
+  sockets[0].socket.disconnect();
+  await wait(100);
+  assert.equal(rooms.get(code), room, 'room tidak langsung dihapus');
+  assert.ok(room.cleanupTimer, 'penghapusan dijadwalkan');
+});
+
 test('data JSON lama dipindahkan ke SQLite saat pertama kali start', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-migrate-'));
   fs.writeFileSync(path.join(dir, 'users.json'), JSON.stringify([

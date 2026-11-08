@@ -443,8 +443,8 @@ function joinRoom(socket, code, payload) {
     existingPlayer.autoPlayCount = 0;
     cancelLobbyRemoval(room, existingPlayer);
     if (user?.inventory) existingPlayer.inventory = { ...user.inventory };
-    if (room.host === oldSocketId) {
-      room.host = socket.id;
+    if (room.host === oldSocketId || isCreator(room, existingPlayer)) {
+      room.host = socket.id; // Pembuat room selalu mendapatkan kembali peran host
     } else if (!room.players.some(p => p.id === room.host && p.connected)) {
       reassignHost(room);
     }
@@ -504,8 +504,13 @@ function joinRoom(socket, code, payload) {
     }
   };
 
+  if (isFirstPlayer) {
+    room.creatorUserId = player.userId;
+    room.creatorSessionId = player.sessionId;
+  }
   room.players.push(player);
   room.pawns[socket.id] = [0, 0, 0, 0];
+  cancelCleanup(room);
   socket.join(room.code);
   socket.data.room = room.code;
 
@@ -576,20 +581,14 @@ function handleDeparture(socket, r, { intentional }) {
     if (intentional) {
       addHistory(r, `${departing.name} keluar dari ruang tunggu.`);
       removeLobbyPlayer(r, departing);
-      return;
+    } else {
+      departing.disconnectedAt = Date.now();
+      holdLobbySeat(r, departing);
+      addHistory(r, `⚠️ ${departing.name} terputus dari ruang tunggu, menunggu tersambung ulang...`);
+      if (r.host === socket.id) reassignHost(r);
+      emitRoom(r);
     }
-    // Koneksi putus di lobby: kursi ditahan sebentar agar bisa tersambung ulang
-    departing.connected = false;
-    departing.disconnectedAt = Date.now();
-    addHistory(r, `⚠️ ${departing.name} terputus dari ruang tunggu, menunggu tersambung ulang...`);
-    if (r.host === socket.id) reassignHost(r);
-    r.lobbyRemovals.set(departing, setTimeout(() => {
-      r.lobbyRemovals.delete(departing);
-      if (rooms.get(r.code) !== r || r.started || departing.connected) return;
-      addHistory(r, `${departing.name} meninggalkan ruang tunggu.`);
-      removeLobbyPlayer(r, departing);
-    }, LOBBY_SEAT_GRACE_MS));
-    emitRoom(r);
+    if (rooms.get(r.code) === r && !hasConnectedHuman(r)) scheduleCleanup(r);
     return;
   }
 
@@ -602,10 +601,7 @@ function handleDeparture(socket, r, { intentional }) {
     departing.sessionId = null;
     addHistory(r, `🚪 ${departing.name} keluar dari permainan (menyerah).`);
 
-    if (!r.players.some(p => !p.isBot && !p.isOut)) {
-      deleteRoom(r);
-      return;
-    }
+    if (deleteIfAllHumansOut(r)) return;
     if (r.host === socket.id) reassignHost(r);
 
     if (!r.winner && wasActive) {
@@ -623,7 +619,6 @@ function handleDeparture(socket, r, { intentional }) {
     if (!r.winner && r.players[r.turn]?.id === departing.id) triggerTurn(r);
   }
 
-  if (!hasConnectedHuman(r)) scheduleCleanup(r);
   emitRoom(r);
 }
 
@@ -703,6 +698,7 @@ function executeAutoPlay(room, player) {
     player.autoPlayCount = 3;
     addHistory(room, `❌ ${player.name} dinyatakan OUT (batas 3x auto-play tercapai tanpa respon).`);
     room.message = `❌ ${player.name} dinyatakan OUT!`;
+    if (deleteIfAllHumansOut(room)) return;
     advanceTurn(room);
     return;
   }
@@ -1364,6 +1360,29 @@ app.get('/api/auth/me', (req, res) => {
     return res.status(401).json({ success: false, error: 'Unauthorized / Sesi telah kedaluwarsa.' });
   }
   res.json({ success: true, user: { ...db.sanitizeUser(user), isLudoKing: db.checkIsLudoKing(user.id) } });
+});
+
+// Room yang masih aktif milik user (dibuat atau diikuti), agar bisa masuk lagi dari perangkat mana pun
+app.get('/api/rooms/active', (req, res) => {
+  const user = db.getUserByToken(bearerToken(req));
+  if (!user) return res.status(401).json({ success: false, error: 'Silakan login terlebih dahulu.' });
+
+  const list = [];
+  for (const r of rooms.values()) {
+    if (r.winner) continue;
+    const me = r.players.find(p => p.userId === user.id && !p.left && !p.isOut);
+    if (!me) continue;
+    list.push({
+      code: r.code,
+      started: r.started,
+      isCreator: r.creatorUserId === user.id,
+      myColor: me.color,
+      players: r.players.map(p => ({ name: p.name, color: p.color, isBot: !!p.isBot, connected: !!p.isBot || !!p.connected })),
+      updatedAt: r.updatedAt || 0
+    });
+  }
+  list.sort((a, b) => b.updatedAt - a.updatedAt);
+  res.json({ success: true, rooms: list });
 });
 
 app.get('/api/leaderboard', (req, res) => {

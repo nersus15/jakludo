@@ -53,6 +53,9 @@ function App() {
   const [sidebarTab, setSidebarTab] = useState('score');
   const [memberNotification, setMemberNotification] = useState(null);
   const hasTriggeredWin = useRef(false);
+  const [activeRooms, setActiveRooms] = useState([]);
+  // Saat baru masuk/kembali ke room, event lama (skill, item) tidak boleh diputar ulang
+  const seedEventsRef = useRef(false);
 
   // Fitur Chat Realtime & Skill Unlock Alert
   const [skillUnlockNotice, setSkillUnlockNotice] = useState(null);
@@ -100,6 +103,39 @@ function App() {
         });
     }
   }, [authToken]);
+
+  // Daftar room aktif milik user (dibuat atau diikuti) di halaman depan, agar bisa masuk lagi
+  // ke room lama dari perangkat mana pun tanpa membuat room baru.
+  useEffect(() => {
+    if (screen !== 'home' || !authToken) {
+      setActiveRooms([]);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      fetch('/api/rooms/active', { headers: { Authorization: `Bearer ${authToken}` } })
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => {
+          if (cancelled || !data?.success) return;
+          setActiveRooms(data.rooms);
+          const saved = storage.get('active_room');
+          if (saved && !data.rooms.some(r => r.code === saved)) {
+            storage.remove('active_room');
+            setActiveSessionRoom('');
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    const onVisible = () => document.visibilityState === 'visible' && load();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [screen, authToken]);
 
   // Gabung (ulang) ke room setiap kali socket tersambung: saat halaman dibuka (link undangan /
   // sesi tersimpan) dan setelah koneksi sempat putus, karena server memberi socket id baru.
@@ -992,38 +1028,34 @@ function App() {
               </div>
             )}
 
-            {/* Sesi Pertandingan yang Masih Berlangsung */}
-            {activeSessionRoom && (
-              <div className="active-match-banner">
+            {/* Room yang masih aktif milik user: bisa masuk lagi tanpa membuat room baru */}
+            {activeRooms.map(r => (
+              <div key={r.code} className="active-match-banner">
                 <div className="active-match-left">
                   <span className="active-pulse-dot" />
                   <div>
-                    <strong>Pertandingan Sedang Berlangsung!</strong>
-                    <p>Kamu masih memiliki sesi aktif di Room <strong>{activeSessionRoom}</strong>.</p>
+                    <strong>
+                      {r.started ? 'Pertandingan Sedang Berlangsung!' : 'Ruang Tunggu Masih Terbuka'}
+                      {r.isCreator ? ' · Room buatanmu' : ''}
+                    </strong>
+                    <p>
+                      Room <strong>{r.code}</strong> · {r.players.filter(p => !p.isBot).length} pemain
+                      {r.players.some(p => p.isBot) ? ` + ${r.players.filter(p => p.isBot).length} bot` : ''}
+                      {' · '}{r.players.filter(p => !p.isBot && p.connected).length} online
+                    </p>
                   </div>
                 </div>
                 <div className="active-match-actions">
                   <button
                     type="button"
                     className="primary btn-rejoin-pulse"
-                    onClick={() => join(activeSessionRoom)}
+                    onClick={() => join(r.code)}
                   >
-                    Lanjutkan Permainan ↗
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-dismiss-session"
-                    onClick={() => {
-                      storage.remove('active_room');
-                      setActiveSessionRoom('');
-                    }}
-                    title="Abaikan sesi ini"
-                  >
-                    ✕
+                    {r.started ? 'Lanjutkan Permainan ↗' : 'Masuk Lagi ↗'}
                   </button>
                 </div>
               </div>
-            )}
+            ))}
 
             <div className="home-card">
               {currentUser ? (

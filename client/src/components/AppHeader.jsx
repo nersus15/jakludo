@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ThemeToggle from './ThemeToggle';
 import { NetworkIndicator } from './NetworkStatus';
 import { sound } from '../sound';
-import jakludoLogo from '../assets/jakludo-logo.jpg';
+import jakludoLogo from '../assets/jakludo-logo-sm.webp';
 
 function soundIcon(audio) {
   if (audio.bgmMuted && audio.sfxMuted) return '🔇';

@@ -39,6 +39,12 @@ const BOT_NAMES = { red: 'Bot Merah', green: 'Bot Hijau', yellow: 'Bot Kuning', 
 const EMOJIS = ['🎲', '🔥', '👏', '😂', '😭', '👑', '⚡', '🎯'];
 const ROOM_IDLE_TTL_MS = 5 * 60 * 1000;
 const TURN_TIMEOUT_MS = 15000;
+// Pemain yang koneksinya putus diberi waktu tersambung ulang sebelum gilirannya dimainkan sistem
+const DISCONNECTED_TURN_DELAY_MS = 8000;
+// Pemain yang terputus baru bisa dinyatakan OUT setelah offline selama ini (bukan karena sinyal goyang)
+const OFFLINE_OUT_MS = 2 * 60 * 1000;
+// Kursi di lobby ditahan selama ini setelah koneksi putus
+const LOBBY_SEAT_GRACE_MS = 30 * 1000;
 
 const makeRoomCode = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 const makeSessionId = () => 'sess_' + crypto.randomBytes(12).toString('hex');
@@ -160,6 +166,7 @@ function clearRoomTimers(r) {
 function deleteRoom(room) {
   clearRoomTimers(room);
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  for (const timer of room.lobbyRemovals.values()) clearTimeout(timer);
   rooms.delete(room.code);
 }
 
@@ -181,6 +188,23 @@ function scheduleCleanup(room) {
 function cancelCleanup(room) {
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
   room.cleanupTimer = null;
+}
+
+function removeLobbyPlayer(room, player) {
+  room.players = room.players.filter(p => p !== player);
+  delete room.pawns[player.id];
+  if (!room.players.some(p => !p.isBot)) {
+    deleteRoom(room);
+    return;
+  }
+  if (room.host === player.id) reassignHost(room);
+  emitRoom(room);
+}
+
+function cancelLobbyRemoval(room, player) {
+  const timer = room.lobbyRemovals.get(player);
+  if (timer) clearTimeout(timer);
+  room.lobbyRemovals.delete(player);
 }
 
 function reassignHost(room) {
@@ -240,6 +264,7 @@ function createRoom(socket, payload) {
     message: 'Menunggu pemain bergabung...',
     history: [],
     chats: [],
+    lobbyRemovals: new Map(),
     settings: { safeZones: true, blackHole: false },
     botTimeout: null,
     rollTimer: null,
@@ -296,7 +321,9 @@ function joinRoom(socket, code, payload) {
 
     existingPlayer.id = socket.id;
     existingPlayer.connected = true;
+    existingPlayer.disconnectedAt = null;
     existingPlayer.autoPlayCount = 0;
+    cancelLobbyRemoval(room, existingPlayer);
     if (user?.inventory) existingPlayer.inventory = { ...user.inventory };
     if (room.host === oldSocketId) {
       room.host = socket.id;
@@ -427,15 +454,23 @@ function handleDeparture(socket, r, { intentional }) {
   if (!departing) return;
 
   if (!r.started) {
-    r.players = r.players.filter(p => p.id !== socket.id);
-    delete r.pawns[socket.id];
-    addHistory(r, intentional ? `${departing.name} keluar dari ruang tunggu.` : `${departing.name} meninggalkan ruang tunggu.`);
-
-    if (!r.players.some(p => !p.isBot)) {
-      deleteRoom(r);
+    cancelLobbyRemoval(r, departing);
+    if (intentional) {
+      addHistory(r, `${departing.name} keluar dari ruang tunggu.`);
+      removeLobbyPlayer(r, departing);
       return;
     }
+    // Koneksi putus di lobby: kursi ditahan sebentar agar bisa tersambung ulang
+    departing.connected = false;
+    departing.disconnectedAt = Date.now();
+    addHistory(r, `⚠️ ${departing.name} terputus dari ruang tunggu, menunggu tersambung ulang...`);
     if (r.host === socket.id) reassignHost(r);
+    r.lobbyRemovals.set(departing, setTimeout(() => {
+      r.lobbyRemovals.delete(departing);
+      if (rooms.get(r.code) !== r || r.started || departing.connected) return;
+      addHistory(r, `${departing.name} meninggalkan ruang tunggu.`);
+      removeLobbyPlayer(r, departing);
+    }, LOBBY_SEAT_GRACE_MS));
     emitRoom(r);
     return;
   }
@@ -464,6 +499,7 @@ function handleDeparture(socket, r, { intentional }) {
       }
     }
   } else {
+    departing.disconnectedAt = Date.now();
     addHistory(r, `⚠️ ${departing.name} keluar web/terputus (dimainkan bot sementara).`);
     if (r.host === socket.id) reassignHost(r);
     if (!r.winner && r.players[r.turn]?.id === departing.id) triggerTurn(r);
@@ -478,6 +514,8 @@ function handleDeparture(socket, r, { intentional }) {
 // ==========================================
 
 function startGame(r) {
+  for (const timer of r.lobbyRemovals.values()) clearTimeout(timer);
+  r.lobbyRemovals.clear();
   clearRoomTimers(r);
   cancelCleanup(r);
   resetRoomEvents(r);
@@ -539,8 +577,10 @@ function executeAutoPlay(room, player) {
   if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
   if (room.players[room.turn]?.id !== player.id) return;
 
-  // Jika pemain sudah 3x berturut-turut tanpa respon, nyatakan OUT
-  if ((player.autoPlayCount || 0) >= 3) {
+  // OUT setelah 3x auto-play berturut-turut: langsung jika pemain online tapi diam (AFK),
+  // atau jika sudah offline cukup lama. Sinyal yang goyang sebentar tidak membuat pemain OUT.
+  const offlineTooLong = !player.connected && Date.now() - (player.disconnectedAt || 0) >= OFFLINE_OUT_MS;
+  if ((player.autoPlayCount || 0) >= 3 && (player.connected || offlineTooLong)) {
     player.isOut = true;
     player.autoPlayCount = 3;
     addHistory(room, `❌ ${player.name} dinyatakan OUT (batas 3x auto-play tercapai tanpa respon).`);
@@ -549,7 +589,7 @@ function executeAutoPlay(room, player) {
     return;
   }
 
-  player.autoPlayCount = (player.autoPlayCount || 0) + 1;
+  player.autoPlayCount = Math.min(3, (player.autoPlayCount || 0) + 1);
   addHistory(room, `🤖 [Auto-Play ${player.autoPlayCount}/3] Bidak ${player.name} dijalankan otomatis oleh sistem.`);
 
   if (room.dice === null) {
@@ -593,8 +633,8 @@ function triggerTurn(room) {
     return;
   }
 
-  // Pemain manusia: terputus -> auto-play cepat, online -> batas waktu 15 detik
-  const delay = currentPlayer.connected ? TURN_TIMEOUT_MS : 1200;
+  // Pemain manusia: online -> batas waktu 15 detik, terputus -> tunggu sebentar agar sempat tersambung ulang
+  const delay = currentPlayer.connected ? TURN_TIMEOUT_MS : DISCONNECTED_TURN_DELAY_MS;
   room.turnTimer = roomTimeout(room, () => {
     if (room.players[room.turn]?.id === currentPlayer.id) executeAutoPlay(room, currentPlayer);
   }, delay);
@@ -714,7 +754,53 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 
     if (newVal >= 1 && newVal <= 39) {
       const trackPos = getTrackIndex(colorIdx, newVal);
+      const isSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos);
 
+      // 1. Makan bidak lawan. Ini dicek lebih dulu, termasuk di petak Black Hole:
+      //    lawan yang bertahan di sana (memakai perisai) tetap bisa dimakan dan tetap memberi bonus giliran.
+      if (!isSafe) {
+        for (const opponent of room.players) {
+          // Bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
+          if (opponent.id === currentPlayer.id) continue;
+          const oppColorIdx = COLORS.indexOf(opponent.color);
+          const oppPawns = room.pawns[opponent.id];
+          if (!oppPawns) continue;
+
+          for (let j = 0; j < 4; j++) {
+            const oppVal = oppPawns[j];
+            if (oppVal < 1 || oppVal > 39) continue;
+            const oppTrack = getTrackIndex(oppColorIdx, oppVal);
+            if (oppTrack !== trackPos) continue;
+            if (oppTrack === COLOR_OFFSETS[oppColorIdx]) continue; // Kebal di kotak base warnanya
+
+            oppPawns[j] = 0;
+            captured = true;
+            currentPlayer.stompCount = (currentPlayer.stompCount || 0) + 1;
+
+            capturedInfo = {
+              id: Date.now() + Math.random(),
+              attacker: currentPlayer.name,
+              defender: opponent.name,
+              color: opponent.color,
+              defenderIsOut: !!opponent.isOut,
+              trackPos
+            };
+            addHistory(room, `⚔️ ${currentPlayer.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}! (Injakan: ${currentPlayer.stompCount})`);
+
+            if (currentPlayer.inventory?.forceReturn > 0 && currentPlayer.stompCount >= 3) {
+              room.lastForceReturnReady = {
+                id: Date.now() + Math.random(),
+                playerId: currentPlayer.id,
+                playerName: currentPlayer.name,
+                time: Date.now()
+              };
+              addHistory(room, `⚡ FORCE RETURN SIAP! ${currentPlayer.name} telah 3x menginjak lawan! Hak eliminasi langsung aktif!`);
+            }
+          }
+        }
+      }
+
+      // 2. Efek Black Hole pada bidak yang baru mendarat
       if (room.settings?.blackHole && BLACK_HOLE_INDICES.includes(trackPos)) {
         if (currentPlayer.inventory?.blackholeShield > 0) {
           currentPlayer.inventory.blackholeShield -= 1;
@@ -743,50 +829,6 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
           };
           addHistory(room, `🕳️ Bidak ${pawnIdx + 1} milik ${currentPlayer.name} menginjak Black Hole dan tersedot kembali ke Base!`);
           room.message = `🕳️ Bidak ${currentPlayer.name} tersedot Black Hole ke base!`;
-        }
-      } else {
-        const isSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos);
-
-        if (!isSafe) {
-          for (const opponent of room.players) {
-            // Bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
-            if (opponent.id === currentPlayer.id) continue;
-            const oppColorIdx = COLORS.indexOf(opponent.color);
-            const oppPawns = room.pawns[opponent.id];
-            if (!oppPawns) continue;
-
-            for (let j = 0; j < 4; j++) {
-              const oppVal = oppPawns[j];
-              if (oppVal < 1 || oppVal > 39) continue;
-              const oppTrack = getTrackIndex(oppColorIdx, oppVal);
-              if (oppTrack !== trackPos) continue;
-              if (oppTrack === COLOR_OFFSETS[oppColorIdx]) continue; // Kebal di kotak base warnanya
-
-              oppPawns[j] = 0;
-              captured = true;
-              currentPlayer.stompCount = (currentPlayer.stompCount || 0) + 1;
-
-              capturedInfo = {
-                id: Date.now() + Math.random(),
-                attacker: currentPlayer.name,
-                defender: opponent.name,
-                color: opponent.color,
-                defenderIsOut: !!opponent.isOut,
-                trackPos
-              };
-              addHistory(room, `⚔️ ${currentPlayer.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}! (Injakan: ${currentPlayer.stompCount})`);
-
-              if (currentPlayer.inventory?.forceReturn > 0 && currentPlayer.stompCount >= 3) {
-                room.lastForceReturnReady = {
-                  id: Date.now() + Math.random(),
-                  playerId: currentPlayer.id,
-                  playerName: currentPlayer.name,
-                  time: Date.now()
-                };
-                addHistory(room, `⚡ FORCE RETURN SIAP! ${currentPlayer.name} telah 3x menginjak lawan! Hak eliminasi langsung aktif!`);
-              }
-            }
-          }
         }
       }
     }
@@ -839,7 +881,7 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
         addHistory(room, `🎯 ${currentPlayer.name} memasukkan bidak ke tengah (bonus lempar dadu & jalan lagi)!`);
       } else if (captured) {
         currentPlayer.accumulatedThisTurn = false;
-        room.message = `⚔️ Bidak lawan berhasil dieliminasi! ${currentPlayer.name} dapat giliran jalan lagi sekali!`;
+        room.message = `⚔️ Bidak lawan berhasil dieliminasi! ${currentPlayer.name} dapat giliran jalan lagi sekali!${room.lastBlackHole ? ' (Bidakmu sendiri tersedot Black Hole.)' : ''}`;
         addHistory(room, `⚔️ ${currentPlayer.name} mengeliminasi bidak lawan (bonus lempar dadu & jalan lagi)!`);
       } else {
         room.message = `Dapat angka 6! ${currentPlayer.name} dapat melempar dadu sekali lagi.`;

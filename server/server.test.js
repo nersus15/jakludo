@@ -222,3 +222,57 @@ test('file data rusak tidak diperlakukan sebagai kosong', () => {
   assert.ok(fs.readdirSync(dir).some(f => f.startsWith('users.json.corrupt-')));
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('memakan bidak lawan di petak Black Hole tetap memberi bonus giliran', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  a.emit('room:update_settings', { blackHole: true });
+  await wait(30);
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const [pa, pb] = room.players;
+  // Merah val 2 + 3 = val 5 -> track 4 (Black Hole). Hijau val 35 -> track (10 + 34) % 40 = 4.
+  room.pawns[pa.id] = [2, 0, 0, 0];
+  room.pawns[pb.id] = [35, 0, 0, 0];
+  room.dice = 3;
+  a.emit('game:move', { pawn: 0 });
+  await wait(3 * 220 + 600);
+  assert.equal(room.pawns[pb.id][0], 0, 'bidak lawan harus kembali ke markas');
+  assert.equal(room.turn, 0, 'pemain yang memakan harus mendapat giliran lagi');
+  assert.equal(room.dice, null);
+});
+
+test('koneksi putus di lobby tidak langsung menghapus kursi', async () => {
+  const { code, sockets, room } = await createRoomWith(['A', 'B']);
+  const colorB = room.players[1].color;
+  sockets[1].socket.disconnect();
+  await wait(80);
+  assert.equal(room.players.length, 2);
+  assert.equal(room.players[1].connected, false);
+
+  const again = await connect();
+  again.emit('room:join', { code, sessionId: sockets[1].sessionId, name: 'B' });
+  const rejoined = await once(again, 'room:joined');
+  assert.equal(rejoined.reconnected, true);
+  assert.equal(room.players[1].connected, true);
+  assert.equal(room.players[1].color, colorB);
+});
+
+test('pemain yang terputus di tengah giliran tidak langsung dimainkan sistem', async () => {
+  const { code, sockets, room } = await createRoomWith(['A', 'B']);
+  sockets[0].socket.emit('game:start');
+  await wait(80);
+  sockets[0].socket.disconnect(); // giliran A, lalu sinyal putus
+  await wait(2500);
+  assert.equal(room.players[0].autoPlayCount, 0, 'auto-play tidak boleh langsung mengambil giliran');
+  assert.equal(room.dice, null);
+
+  const again = await connect();
+  again.emit('room:join', { code, sessionId: sockets[0].sessionId, name: 'A' });
+  await once(again, 'room:joined');
+  again.emit('game:roll');
+  await wait(900);
+  assert.notEqual(room.dice, null, 'pemain bisa melempar dadu sendiri setelah tersambung ulang');
+  assert.equal(room.players[0].autoPlayCount, 0);
+});

@@ -1,7 +1,7 @@
 # ==========================================
 # STAGE 1: Build Client (Vite + React)
 # ==========================================
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ RUN npm run build
 # ==========================================
 # STAGE 2: Production Runner
 # ==========================================
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 
 WORKDIR /app
 
@@ -40,7 +40,7 @@ COPY --from=builder /app/dist ./dist
 COPY server/ ./server/
 RUN rm -f server/*.test.js
 
-# Siapkan direktori data JSON milik user non-root `node` (uid 1000)
+# Siapkan direktori database SQLite milik user non-root `node` (uid 1000)
 RUN mkdir -p /app/server/data && chown -R node:node /app/server/data
 USER node
 

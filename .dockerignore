@@ -15,5 +15,6 @@ dist
 
 
 # Data runtime & output lokal tidak ikut ke image
-server/data/*.json
+server/data/*
+!server/data/.gitkeep
 graphify-out

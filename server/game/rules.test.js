@@ -54,6 +54,35 @@ test('isPawnIndex hanya menerima bilangan bulat 0..3', () => {
   for (const bad of [-1, 4, 1.5, '1', 'abc', null, undefined, NaN]) assert.equal(isPawnIndex(bad), false);
 });
 
+// ---------- Bot ----------
+
+test('bot memilih bidak yang aman daripada mendarat tepat di depan lawan', () => {
+  // Merah bidak 0 di val 3 (track 2), bidak 1 di val 20 (track 19). Dadu 2.
+  // Bidak 0 -> track 4: ada hijau di track 1 (val 32, jarak 3) -> berisiko.
+  // Bidak 1 -> track 21: tidak ada lawan di belakangnya -> aman.
+  const room = makeRoom({ a: [3, 20, 0, 0], b: [32, 0, 0, 0] });
+  assert.equal(getTrackIndex(1, 32), 1);
+  assert.equal(chooseBestPawn(room, room.players[0], 2), 1);
+});
+
+test('bot lebih memilih memakan bidak lawan yang sudah jauh', () => {
+  // Dadu 3: bidak 0 (val 2) -> track 4 memakan hijau val 35 (jauh); bidak 1 (val 10) -> track 12 memakan hijau val 3 (dekat markas)
+  const room = makeRoom({ a: [2, 10, 0, 0], b: [35, 3, 0, 0] }, { safeZones: false });
+  assert.equal(chooseBestPawn(room, room.players[0], 3), 0);
+});
+
+test('bot memasukkan bidak ke jalur finish yang aman jika lawan mengejar', () => {
+  // Bidak 0 di val 37 dikejar hijau (track 33 = val 24), dadu 4 -> val 41 (jalur finish)
+  const room = makeRoom({ a: [37, 5, 0, 0], b: [24, 0, 0, 0] });
+  assert.equal(chooseBestPawn(room, room.players[0], 4), 0);
+});
+
+test('bot menghindari Black Hole jika tidak punya perisai', () => {
+  // Dadu 3: bidak 0 (val 2) -> track 4 = Black Hole; bidak 1 (val 20) -> track 22 = petak biasa
+  const room = makeRoom({ a: [2, 20, 0, 0], b: [0, 0, 0, 0] }, { safeZones: true, blackHole: true });
+  assert.equal(chooseBestPawn(room, room.players[0], 3), 1);
+});
+
 // ---------- Black Hole acak ----------
 
 test('Black Hole acak pindah di ruasnya sendiri dan menghindari bidak, petak aman, dan start', () => {

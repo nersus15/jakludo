@@ -126,41 +126,113 @@ function relocateBlackHoles(room, random = Math.random) {
   });
 }
 
+// ==========================================
+// BOT: menimbang untung-rugi setiap langkah
+// ==========================================
+
+// Bobot keputusan bot. Nilai bidak = seberapa jauh ia sudah berjalan (makin jauh, makin mahal hilang).
+const AI = {
+  progress: 1,          // per langkah maju
+  leaveBase: 30,        // mengeluarkan bidak dari markas
+  enterHome: 45,        // masuk jalur finish (tidak bisa diinjak lagi)
+  finish: 120,          // bidak sampai finish
+  captureBase: 50,      // memakan bidak lawan
+  captureProgress: 1.5, // ditambah sejauh apa bidak lawan sudah berjalan
+  riskWeight: 1,        // kerugian = peluang dimakan x nilai bidak
+  blackHole: 40         // mendarat di Black Hole tanpa perisai
+};
+
+const pawnWorth = val => val + 20;
+
+// Peluang sebuah petak lintasan dimakan lawan di giliran berikutnya. Setiap bidak lawan yang
+// berada 1-6 langkah di belakang petak (dan belum berbelok ke jalur finishnya) punya peluang 1/6.
+function captureRisk(room, player, trackPos) {
+  if (trackPos === null) return 0;
+  const safeZonesActive = room.settings?.safeZones !== false;
+  if (safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos)) return 0;
+
+  let chance = 0;
+  for (const opp of room.players) {
+    if (opp.id === player.id || opp.isOut) continue;
+    const oppColorIdx = COLORS.indexOf(opp.color);
+    for (const v of room.pawns[opp.id] || []) {
+      if (v >= 1 && v <= 39) {
+        const distance = (trackPos - getTrackIndex(oppColorIdx, v) + 40) % 40;
+        if (distance >= 1 && distance <= 6 && v + distance <= 39) chance += 1 / 6;
+      } else if (v === 0 && !safeZonesActive && trackPos === COLOR_OFFSETS[oppColorIdx]) {
+        chance += 2 / 6; // lawan keluar markas dengan 1 atau 6 tepat di petak ini
+      }
+    }
+  }
+  return Math.min(chance, 1);
+}
+
+// Nilai sebuah langkah dari sudut pandang pemain: untung (maju, makan, aman, finish) dikurangi rugi
+function evaluateMove(room, player, pawnIdx, dice) {
+  const pawns = room.pawns[player.id];
+  const colorIdx = COLORS.indexOf(player.color);
+  const from = pawns[pawnIdx];
+  const to = from === 0 ? 1 : from + dice;
+  const fromTrack = getTrackIndex(colorIdx, from);
+  const toTrack = getTrackIndex(colorIdx, to);
+  let score = 0;
+
+  score += (to - from) * AI.progress;
+  if (from === 0) score += AI.leaveBase + (pawns.filter(v => v >= 1 && v < FINISH).length === 0 ? 20 : 0);
+  if (to === FINISH) score += AI.finish;
+  else if (from <= 39 && to >= 40) score += AI.enterHome;
+
+  if (toTrack !== null) {
+    const victim = opponentPawnAt(room, player, toTrack);
+    const safeZonesActive = room.settings?.safeZones !== false;
+    if (victim && !(safeZonesActive && SAFE_TRACK_INDICES.includes(toTrack))) {
+      score += AI.captureBase + victim.val * AI.captureProgress;
+    }
+  }
+
+  // Selisih risiko: lepas dari ancaman di posisi sekarang vs ancaman di posisi baru
+  const riskNow = fromTrack !== null ? captureRisk(room, player, fromTrack) : 0;
+  const riskNext = toTrack !== null ? captureRisk(room, player, toTrack) : 0;
+  score += riskNow * pawnWorth(from) * AI.riskWeight;
+  score -= riskNext * pawnWorth(to) * AI.riskWeight;
+
+  if (room.settings?.blackHole && toTrack !== null && getBlackHoles(room).includes(toTrack)) {
+    const shielded = (player.items?.blackholeShield?.owned || 0) + (player.items?.blackholeShield?.earned || 0) > 0;
+    score -= shielded ? 5 : AI.blackHole + pawnWorth(to);
+  }
+
+  return score;
+}
+
+function opponentPawnAt(room, player, trackPos) {
+  for (const opp of room.players) {
+    if (opp.id === player.id) continue;
+    const oppColorIdx = COLORS.indexOf(opp.color);
+    const pawns = room.pawns[opp.id] || [];
+    for (let i = 0; i < pawns.length; i++) {
+      if (pawns[i] >= 1 && pawns[i] <= 39 && getTrackIndex(oppColorIdx, pawns[i]) === trackPos) {
+        return { player: opp, pawnIdx: i, val: pawns[i] };
+      }
+    }
+  }
+  return null;
+}
+
+// Pilih langkah dengan nilai tertinggi; seri dipecah dengan bidak yang paling jauh
 function chooseBestPawn(room, player, dice) {
-  const currentPawns = room.pawns[player.id];
-  if (!currentPawns) return null;
+  if (!room.pawns[player.id]) return null;
   const movable = getMovablePawns(room, player, dice);
   if (movable.length === 0) return null;
 
-  const colorIdx = COLORS.indexOf(player.color);
-  const safeZonesActive = room.settings?.safeZones !== false;
-  let bestPawn = movable[0];
-  let highestScore = -Infinity;
-
-  for (const pIdx of movable) {
-    const val = currentPawns[pIdx];
-    const next = val === 0 ? 1 : val + dice;
-    let score = next;
-
-    if (next === FINISH) score += 600;
-    if (val === 0) score += 300;
-
-    if (next >= 1 && next <= 39) {
-      const trackPos = getTrackIndex(colorIdx, next);
-      const isTargetSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos);
-      if (isTargetSafe) {
-        score += 150;
-      } else if (opponentOnTrack(room, player, trackPos, { skipOut: true })) {
-        score += 1000; // Prioritas utama: Makan lawan!
-      }
-    }
-
-    if (score > highestScore) {
-      highestScore = score;
-      bestPawn = pIdx;
+  let best = null;
+  for (const pawnIdx of movable) {
+    const score = evaluateMove(room, player, pawnIdx, dice);
+    const progress = room.pawns[player.id][pawnIdx];
+    if (!best || score > best.score || (score === best.score && progress > best.progress)) {
+      best = { pawnIdx, score, progress };
     }
   }
-  return bestPawn;
+  return best.pawnIdx;
 }
 
 // Validasi indeks bidak dari payload klien
@@ -180,6 +252,8 @@ module.exports = {
   getMovablePawns,
   getBlackHoles,
   relocateBlackHoles,
+  captureRisk,
+  evaluateMove,
   chooseBestPawn,
   isPawnIndex
 };

@@ -15,6 +15,7 @@ import { useAuth } from './hooks/useAuth';
 import { useGameRoom } from './hooks/useGameRoom';
 import { useActiveRooms } from './hooks/useActiveRooms';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useTheme } from './hooks/useTheme';
 import { usePwaInstall } from './hooks/usePwaInstall';
 import { useItemCatalog } from './items';
 import { sound } from './sound';
@@ -30,6 +31,7 @@ export default function App() {
     onNeedLogin: () => setModal('auth')
   });
   const network = useNetworkStatus(game.socket);
+  const theme = useTheme();
   const pwa = usePwaInstall({ onBeforePrompt: () => sound.playClick() });
   const activeRooms = useActiveRooms({ enabled: game.screen === 'home', authToken: auth.authToken });
   const itemCatalog = useItemCatalog();
@@ -64,6 +66,7 @@ export default function App() {
           audio={audio}
           network={network}
           onOpenShop={open('shop')}
+          theme={theme}
           onOpenAudio={openAudio}
           onLeave={game.actions.leaveRoom}
         />
@@ -73,6 +76,7 @@ export default function App() {
           audio={audio}
           network={network}
           onOpenShop={open('shop')}
+          theme={theme}
           onOpenAudio={openAudio}
           onOpenAuth={open('auth')}
           onOpenLeaderboard={open('leaderboard')}

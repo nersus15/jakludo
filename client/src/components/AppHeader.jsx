@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import ThemeToggle from './ThemeToggle';
 import { NetworkIndicator } from './NetworkStatus';
 import { sound } from '../sound';
 import jakludoLogo from '../assets/jakludo-logo.jpg';
@@ -70,7 +71,7 @@ function AccountMenu({ user, onOpenLeaderboard, onLogout }) {
 }
 
 // Header beranda & lobby. Di HP hanya ikon 44px agar tidak melebar keluar layar.
-export default function AppHeader({ user, audio, network, onOpenShop, onOpenAudio, onOpenAuth, onOpenLeaderboard, onLogout }) {
+export default function AppHeader({ user, audio, network, theme, onOpenShop, onOpenAudio, onOpenAuth, onOpenLeaderboard, onLogout }) {
   return (
     <header className="app-header">
       <div className="brand">
@@ -102,6 +103,7 @@ export default function AppHeader({ user, audio, network, onOpenShop, onOpenAudi
         <button type="button" className="icon-btn" aria-label="Pengaturan suara" title="Pengaturan suara" onClick={onOpenAudio}>
           <span aria-hidden="true">{soundIcon(audio)}</span>
         </button>
+        <ThemeToggle theme={theme} />
         {user ? (
           <AccountMenu user={user} onOpenLeaderboard={onOpenLeaderboard} onLogout={onLogout} />
         ) : (

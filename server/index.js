@@ -1,32 +1,122 @@
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const db = require('./db');
+const {
+  COLORS,
+  COLOR_OFFSETS,
+  SAFE_TRACK_INDICES,
+  BLACK_HOLE_INDICES,
+  FINISH,
+  getTrackIndex,
+  nextFreeColor,
+  canPawnMove,
+  getMovablePawns,
+  chooseBestPawn,
+  isPawnIndex
+} = require('./rules');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+// Set TRUST_PROXY=1 jika server berada di belakang Nginx agar req.ip memakai X-Forwarded-For
+if (process.env.TRUST_PROXY && process.env.TRUST_PROXY !== '0') {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+}
+// Klien dilayani dari origin yang sama (Vite dev memakai proxy). CORS hanya dibuka bila diminta.
+const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : null;
+if (corsOrigin) app.use(cors({ origin: corsOrigin }));
+app.use(express.json({ limit: '10kb' }));
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  maxHttpBufferSize: 16 * 1024,
+  ...(corsOrigin ? { cors: { origin: corsOrigin } } : {})
+});
 
 const rooms = new Map();
-const COLORS = ['red', 'green', 'yellow', 'blue'];
-const COLOR_OFFSETS = [0, 10, 20, 30];
-const SAFE_TRACK_INDICES = [0, 6, 10, 16, 20, 26, 30, 36];
-const BLACK_HOLE_INDICES = [4, 14, 24, 34];
-const BOT_NAMES = ['Bot Merah', 'Bot Hijau', 'Bot Kuning', 'Bot Biru'];
+const BOT_NAMES = { red: 'Bot Merah', green: 'Bot Hijau', yellow: 'Bot Kuning', blue: 'Bot Biru' };
+const EMOJIS = ['🎲', '🔥', '👏', '😂', '😭', '👑', '⚡', '🎯'];
+const ROOM_IDLE_TTL_MS = 5 * 60 * 1000;
+const TURN_TIMEOUT_MS = 15000;
 
 const makeRoomCode = () => Math.random().toString(36).slice(2, 7).toUpperCase();
+const makeSessionId = () => 'sess_' + crypto.randomBytes(12).toString('hex');
+
+// ==========================================
+// UTILITAS: rate limit, handler & timer yang aman
+// ==========================================
+
+function createLimiter({ windowMs, max }) {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, h] of hits) if (h.reset < now) hits.delete(k);
+  }, windowMs).unref();
+  return key => {
+    const now = Date.now();
+    let h = hits.get(key);
+    if (!h || h.reset < now) {
+      h = { count: 0, reset: now + windowMs };
+      hits.set(key, h);
+    }
+    h.count++;
+    return h.count <= max;
+  };
+}
+
+const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
+const registerLimiter = createLimiter({ windowMs: 60 * 60 * 1000, max: 10 });
+const chatLimiter = createLimiter({ windowMs: 5000, max: 5 });
+const reactionLimiter = createLimiter({ windowMs: 5000, max: 8 });
+
+// Payload dari klien tidak bisa dipercaya: selalu objek, dan error di handler
+// tidak boleh menjatuhkan proses (yang akan menghapus semua room).
+function on(socket, event, handler) {
+  socket.on(event, (...args) => {
+    const cb = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+    const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+    try {
+      handler(payload, cb);
+    } catch (err) {
+      console.error(`[socket ${event}]`, err);
+    }
+  });
+}
+
+function roomTimeout(room, fn, ms) {
+  return setTimeout(() => {
+    if (rooms.get(room.code) !== room) return;
+    try {
+      fn();
+    } catch (err) {
+      console.error(`[room ${room.code}] timer error`, err);
+    }
+  }, ms);
+}
+
+// ==========================================
+// STATE ROOM
+// ==========================================
+
+function publicPlayer(p) {
+  const { sessionId, ...rest } = p; // sessionId adalah rahasia reconnect, jangan disiarkan
+  return rest;
+}
 
 function publicRoom(r) {
+  const current = r.players[r.turn];
+  const movable = r.started && !r.winner && r.dice !== null && !r.rolling && !r.animatingMove && current
+    ? getMovablePawns(r, current, r.dice)
+    : [];
   return {
     code: r.code,
-    players: r.players,
+    host: r.host,
+    players: r.players.map(publicPlayer),
     started: r.started,
     turn: r.turn,
     dice: r.dice,
+    movable,
     rolling: !!r.rolling,
     animatingMove: r.animatingMove || null,
     winner: r.winner,
@@ -40,7 +130,6 @@ function publicRoom(r) {
     lastShieldProtect: r.lastShieldProtect || null,
     lastForceReturnReady: r.lastForceReturnReady || null,
     lastForceReturnUse: r.lastForceReturnUse || null,
-    chats: r.chats || [],
     history: r.history || [],
     settings: r.settings || { safeZones: true, blackHole: false }
   };
@@ -52,7 +141,6 @@ function emitRoom(room) {
 }
 
 function addHistory(room, text) {
-  if (!room.history) room.history = [];
   room.history.unshift({
     id: Date.now() + Math.random(),
     text,
@@ -61,119 +149,80 @@ function addHistory(room, text) {
   if (room.history.length > 15) room.history.pop();
 }
 
-function getTrackIndex(colorIdx, pawnVal) {
-  if (pawnVal >= 1 && pawnVal <= 39) {
-    return (COLOR_OFFSETS[colorIdx] + pawnVal - 1) % 40;
+function clearRoomTimers(r) {
+  if (!r) return;
+  for (const key of ['botTimeout', 'rollTimer', 'passTimer', 'moveTimer', 'turnTimer']) {
+    if (r[key]) clearTimeout(r[key]);
+    r[key] = null;
   }
-  return null;
 }
 
-// Aturan: Dalam satu kotak tidak bisa ada 2 bidak.
-// - Tidak boleh mendarat di petak yang sudah ada bidak milik sendiri.
-// - Tidak boleh mendarat di petak lawan jika petak tersebut adalah Safe Zone (karena tidak bisa dimakan dan tidak bisa bertumpuk).
-// - Jika petak lawan bukan Safe Zone, mendarat di sana akan memakan bidak lawan (sehingga tetap hanya ada 1 bidak di petak tersebut).
-// - Petak finish (44) adalah tujuan akhir dan boleh menampung semua bidak yang finish.
-function canPawnMove(room, player, pawnIdx, dice) {
-  if (!room || !player || dice === null || dice === undefined) return false;
-  const currentPawns = room.pawns[player.id];
-  if (!currentPawns) return false;
-
-  const val = currentPawns[pawnIdx];
-  const colorIdx = COLORS.indexOf(player.color);
-  const safeZonesActive = room.settings?.safeZones !== false;
-
-  // Bidak di markas (0): bisa keluar dengan angka 6 atau 1
-  if (val === 0) {
-    if (dice !== 6 && dice !== 1) return false;
-    const newVal = 1;
-
-    // Cek apakah petak start sudah ditempati oleh bidak sendiri
-    if (currentPawns.some((v, idx) => idx !== pawnIdx && v === newVal)) {
-      return false; // Terhalang oleh bidak sendiri di petak start
-    }
-
-    // Cek jika ditempati lawan dan Safe Zone aktif
-    const startTrack = COLOR_OFFSETS[colorIdx];
-    if (safeZonesActive) {
-      for (const opp of room.players) {
-        if (opp.id === player.id) continue;
-        const oppColorIdx = COLORS.indexOf(opp.color);
-        const oppPawns = room.pawns[opp.id] || [];
-        for (const oppVal of oppPawns) {
-          if (oppVal >= 1 && oppVal <= 39) {
-            if (getTrackIndex(oppColorIdx, oppVal) === startTrack) {
-              return false; // Terhalang oleh lawan di zona aman petak start
-            }
-          }
-        }
-      }
-    }
-
-    return true;
-  }
-
-  // Bidak di lintasan atau jalur finish (1..43)
-  if (val > 0 && val < 44) {
-    const newVal = val + dice;
-    if (newVal > 44) return false;
-    if (newVal === 44) return true; // Kotak finish boleh menampung semua bidak tamat
-
-    // 1. Cek apakah ada bidak sendiri di petak tujuan
-    if (currentPawns.some((v, idx) => idx !== pawnIdx && v === newVal)) {
-      return false; // Tidak boleh ada 2 bidak sendiri dalam satu kotak
-    }
-
-    // 2. Jika di lintasan utama (1..39), cek aturan proteksi petak base lawan & Safe Zone
-    if (newVal <= 39) {
-      const targetTrack = getTrackIndex(colorIdx, newVal);
-
-      // Aturan: Jika bidak lawan berada di kotak base warnanya, tidak bisa diinjak lawan
-      for (const opp of room.players) {
-        if (opp.id === player.id || opp.isOut) continue;
-        const oppColorIdx = COLORS.indexOf(opp.color);
-        const oppBaseTrack = COLOR_OFFSETS[oppColorIdx];
-        if (targetTrack === oppBaseTrack) {
-          const oppPawns = room.pawns[opp.id] || [];
-          if (oppPawns.some(v => v >= 1 && v <= 39 && getTrackIndex(oppColorIdx, v) === targetTrack)) {
-            return false; // Bidak lawan di kotak base warnanya kebal dan tidak bisa diinjak!
-          }
-        }
-      }
-
-      const isTargetSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(targetTrack);
-
-      if (isTargetSafe) {
-        for (const opp of room.players) {
-          if (opp.id === player.id) continue;
-          const oppColorIdx = COLORS.indexOf(opp.color);
-          const oppPawns = room.pawns[opp.id] || [];
-          for (const oppVal of oppPawns) {
-            if (oppVal >= 1 && oppVal <= 39) {
-              if (getTrackIndex(oppColorIdx, oppVal) === targetTrack) {
-                return false; // Petak aman sudah diisi lawan, tidak bisa bertumpuk dan tidak bisa dimakan
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return true;
-  }
-
-  return false;
+function deleteRoom(room) {
+  clearRoomTimers(room);
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  rooms.delete(room.code);
 }
 
-function getMovablePawns(room, player, dice) {
-  if (!room || !player || !dice) return [];
-  const result = [];
-  for (let i = 0; i < 4; i++) {
-    if (canPawnMove(room, player, i, dice)) {
-      result.push(i);
-    }
-  }
-  return result;
+function hasConnectedHuman(room) {
+  return room.players.some(p => !p.isBot && p.connected && !p.left);
 }
+
+// Room yang sudah selesai atau ditinggal semua manusia dihapus setelah 5 menit
+function scheduleCleanup(room) {
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  room.cleanupTimer = setTimeout(() => {
+    room.cleanupTimer = null;
+    if (rooms.get(room.code) !== room) return;
+    if (room.winner || !hasConnectedHuman(room)) deleteRoom(room);
+  }, ROOM_IDLE_TTL_MS);
+  room.cleanupTimer.unref();
+}
+
+function cancelCleanup(room) {
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  room.cleanupTimer = null;
+}
+
+function reassignHost(room) {
+  const next = room.players.find(p => !p.isBot && p.connected && !p.left);
+  if (!next) return;
+  room.players.forEach(p => { p.isHost = p === next; });
+  room.host = next.id;
+}
+
+function resetPlayerForGame(p) {
+  p.autoPlayCount = 0;
+  p.isOut = false;
+  p.stompCount = 0;
+  p.skillPoints = 0;
+  p.skillUnlocked = false;
+  p.finishedCount = 0;
+  p.accumulatedThisTurn = false;
+  if (p.userId) {
+    const fresh = db.sanitizeUser(db.getUserById(p.userId));
+    if (fresh) p.inventory = { ...fresh.inventory };
+  }
+}
+
+function resetRoomEvents(r) {
+  r.dice = null;
+  r.rolling = false;
+  r.animatingMove = null;
+  r.winner = null;
+  r.consecutiveSixes = 0;
+  r.lastCapture = null;
+  r.lastBlackHole = null;
+  r.lastGoal = null;
+  r.lastSkillUse = null;
+  r.lastSkillUnlock = null;
+  r.lastShieldProtect = null;
+  r.lastForceReturnReady = null;
+  r.lastForceReturnUse = null;
+}
+
+// ==========================================
+// LOBBY: CREATE / JOIN / BOT
+// ==========================================
 
 function createRoom(socket, payload) {
   let code;
@@ -187,19 +236,11 @@ function createRoom(socket, payload) {
     players: [],
     started: false,
     turn: 0,
-    dice: null,
-    rolling: false,
-    animatingMove: null,
-    winner: null,
     pawns: {},
     message: 'Menunggu pemain bergabung...',
     history: [],
     chats: [],
-    lastSkillUnlock: null,
-    consecutiveSixes: 0,
-    settings: {
-      safeZones: true // Default: Zona Aman Aktif
-    },
+    settings: { safeZones: true, blackHole: false },
     botTimeout: null,
     rollTimer: null,
     passTimer: null,
@@ -207,67 +248,64 @@ function createRoom(socket, payload) {
     turnTimer: null,
     cleanupTimer: null
   };
+  resetRoomEvents(room);
   rooms.set(code, room);
-  return joinRoom(socket, code, payload);
-}
-
-function clearRoomTimers(r) {
-  if (!r) return;
-  if (r.botTimeout) clearTimeout(r.botTimeout);
-  if (r.rollTimer) clearTimeout(r.rollTimer);
-  if (r.passTimer) clearTimeout(r.passTimer);
-  if (r.moveTimer) clearTimeout(r.moveTimer);
-  if (r.turnTimer) clearTimeout(r.turnTimer);
-  if (r.cleanupTimer) clearTimeout(r.cleanupTimer);
+  joinRoom(socket, code, payload);
 }
 
 function joinRoom(socket, code, payload) {
   const room = rooms.get(String(code || '').toUpperCase());
   if (!room) return socket.emit('room:error', 'Room tidak ditemukan. Periksa kembali kode room.');
 
-  let rawName = typeof payload === 'object' ? payload.name : payload;
-  let token = typeof payload === 'object' ? payload.token : null;
-  let user = token ? db.getUserByToken(token) : null;
-  let sessionId = typeof payload === 'object' ? payload.sessionId : null;
+  // Socket yang masih tercatat di room lain harus keluar dulu
+  if (socket.data.room && socket.data.room !== room.code) {
+    const prev = rooms.get(socket.data.room);
+    if (prev) handleDeparture(socket, prev, { intentional: false });
+    socket.leave(socket.data.room);
+    delete socket.data.room;
+  }
 
-  const finalUsername = user?.username || (typeof payload === 'object' ? payload.username : null) || rawName || 'Pemain';
-  const finalName = user?.name || String(rawName || finalUsername).trim().slice(0, 18) || 'Pemain';
-  const isKing = db.checkIsLudoKing(finalUsername);
+  const user = typeof payload.token === 'string' ? db.getUserByToken(payload.token) : null;
+  const sessionId = typeof payload.sessionId === 'string' && payload.sessionId ? payload.sessionId : null;
+  const rawName = typeof payload.name === 'string' ? payload.name : '';
+  const finalName = user?.name || rawName.trim().slice(0, 18) || 'Pemain';
 
-  // CEK APAKAH INI RECONNECT PEMAIN YANG SUDAH TERDAFTAR DI ROOM
+  // Reconnect hanya lewat bukti yang tidak bisa ditebak: sessionId rahasia atau token login
   const existingPlayer = room.players.find(p =>
-    (sessionId && p.sessionId === sessionId) ||
-    (p.userId && user && p.userId === user.id) ||
-    (p.username && p.username.toLowerCase() === finalUsername.toLowerCase())
+    !p.isBot && ((sessionId && p.sessionId === sessionId) || (user && p.userId === user.id))
   );
 
   if (existingPlayer) {
     if (existingPlayer.isOut) {
-      return socket.emit('room:error', 'Kamu telah dinyatakan OUT dari pertandingan ini (3x tidak merespon).');
+      return socket.emit('room:error', 'Kamu telah dinyatakan OUT dari pertandingan ini.');
     }
 
-    // Re-bind socket ID dan data session pemain lama
     const oldSocketId = existingPlayer.id;
+    if (oldSocketId !== socket.id) {
+      // Room dibuka di tab/perangkat lain: putuskan socket lama dari room
+      const oldSocket = io.sockets.sockets.get(oldSocketId);
+      if (oldSocket) {
+        oldSocket.leave(room.code);
+        delete oldSocket.data.room;
+        oldSocket.emit('room:error', 'Room ini dibuka di tab atau perangkat lain.');
+      }
+      room.pawns[socket.id] = room.pawns[oldSocketId] || [0, 0, 0, 0];
+      delete room.pawns[oldSocketId];
+      if (room.winner === oldSocketId) room.winner = socket.id;
+    }
+
     existingPlayer.id = socket.id;
     existingPlayer.connected = true;
-    existingPlayer.autoPlayCount = 0; // Reset hitungan auto-play karena user sudah aktif kembali
-    if (user?.inventory) {
-      existingPlayer.inventory = { ...user.inventory };
-    }
-
-    // Pindahkan bidak dari socket ID lama ke socket ID baru
-    if (room.pawns[oldSocketId]) {
-      room.pawns[socket.id] = room.pawns[oldSocketId];
-      if (oldSocketId !== socket.id) {
-        delete room.pawns[oldSocketId];
-      }
-    } else if (!room.pawns[socket.id]) {
-      room.pawns[socket.id] = [0, 0, 0, 0];
-    }
-
+    existingPlayer.autoPlayCount = 0;
+    if (user?.inventory) existingPlayer.inventory = { ...user.inventory };
     if (room.host === oldSocketId) {
       room.host = socket.id;
+    } else if (!room.players.some(p => p.id === room.host && p.connected)) {
+      reassignHost(room);
     }
+    room.players.forEach(p => { p.isHost = p.id === room.host; });
+    cancelCleanup(room);
+    if (room.winner) scheduleCleanup(room);
 
     socket.join(room.code);
     socket.data.room = room.code;
@@ -280,6 +318,7 @@ function joinRoom(socket, code, payload) {
       isLudoKing: existingPlayer.isLudoKing,
       reconnected: true
     });
+    socket.emit('room:chats', room.chats);
     io.to(room.code).emit('room:member_joined', {
       name: existingPlayer.name,
       avatar: existingPlayer.avatar,
@@ -288,28 +327,26 @@ function joinRoom(socket, code, payload) {
     });
     emitRoom(room);
 
-    // Jika giliran pemain ini sedang aktif, perbarui timer agar pemain bisa langsung jalan
     if (room.started && room.players[room.turn]?.id === socket.id) {
       triggerTurn(room);
     }
     return;
   }
 
-  // Jika bukan pemain lama dan permainan sudah dimulai
   if (room.started) return socket.emit('room:error', 'Permainan sudah dimulai.');
   if (room.players.length >= 4) return socket.emit('room:error', 'Room sudah penuh (maksimal 4 pemain).');
 
-  const assignedSessionId = sessionId || ('sess_' + Math.random().toString(36).slice(2, 10));
-
+  const isKing = db.checkIsLudoKing(user?.id);
+  const isFirstPlayer = room.players.length === 0;
   const player = {
     id: socket.id,
-    sessionId: assignedSessionId,
+    sessionId: makeSessionId(),
     userId: user?.id || null,
-    username: finalUsername,
+    username: user?.username || null,
     name: finalName,
     avatar: user?.avatar || '🎲',
-    color: COLORS[room.players.length],
-    isHost: room.players.length === 0,
+    color: nextFreeColor(room.players),
+    isHost: room.host === socket.id,
     isBot: false,
     isLudoKing: isKing,
     connected: true,
@@ -317,12 +354,10 @@ function joinRoom(socket, code, payload) {
     isOut: false,
     stompCount: 0,
     inventory: {
-      blackholeShield: (user?.inventory && user.inventory.blackholeShield) || 0,
-      forceReturn: (user?.inventory && user.inventory.forceReturn) || 0
+      blackholeShield: user?.inventory?.blackholeShield || 0,
+      forceReturn: user?.inventory?.forceReturn || 0
     }
   };
-
-  const isFirstPlayer = room.players.length === 0;
 
   room.players.push(player);
   room.pawns[socket.id] = [0, 0, 0, 0];
@@ -333,12 +368,12 @@ function joinRoom(socket, code, payload) {
   socket.emit('room:joined', {
     code: room.code,
     playerId: socket.id,
-    sessionId: assignedSessionId,
+    sessionId: player.sessionId,
     isLudoKing: isKing,
     reconnected: false
   });
+  socket.emit('room:chats', room.chats);
 
-  // Saat member baru bergabung via kode (bukan saat pembuat room pertama kali inisialisasi)
   if (!isFirstPlayer) {
     io.to(room.code).emit('room:member_joined', {
       name: player.name,
@@ -353,11 +388,11 @@ function joinRoom(socket, code, payload) {
 
 function addBot(room, hostSocketId) {
   if (!room || room.started || room.players.length >= 4 || room.host !== hostSocketId) return;
-  const botId = 'bot_' + Math.random().toString(36).slice(2, 9);
-  const color = COLORS[room.players.length];
+  const botId = 'bot_' + crypto.randomBytes(5).toString('hex');
+  const color = nextFreeColor(room.players);
   const bot = {
     id: botId,
-    name: BOT_NAMES[room.players.length] || `Bot ${room.players.length + 1}`,
+    name: BOT_NAMES[color],
     color,
     isHost: false,
     isBot: true,
@@ -365,10 +400,7 @@ function addBot(room, hostSocketId) {
     autoPlayCount: 0,
     isOut: false,
     stompCount: 0,
-    inventory: {
-      blackholeShield: 0,
-      forceReturn: 0
-    }
+    inventory: { blackholeShield: 0, forceReturn: 0 }
   };
   room.players.push(bot);
   room.pawns[botId] = [0, 0, 0, 0];
@@ -378,12 +410,82 @@ function addBot(room, hostSocketId) {
 
 function removeBot(room, hostSocketId) {
   if (!room || room.started || room.host !== hostSocketId) return;
-  const lastIdx = room.players.length - 1;
-  if (lastIdx > 0 && room.players[lastIdx].isBot) {
-    const removed = room.players.pop();
-    delete room.pawns[removed.id];
-    addHistory(room, `${removed.name} dikeluarkan.`);
-    emitRoom(room);
+  for (let i = room.players.length - 1; i > 0; i--) {
+    if (room.players[i].isBot) {
+      const [removed] = room.players.splice(i, 1);
+      delete room.pawns[removed.id];
+      addHistory(room, `${removed.name} dikeluarkan.`);
+      emitRoom(room);
+      return;
+    }
+  }
+}
+
+// Pemain keluar (intentional = klik keluar/menyerah) atau koneksi terputus
+function handleDeparture(socket, r, { intentional }) {
+  const departing = r.players.find(p => p.id === socket.id);
+  if (!departing) return;
+
+  if (!r.started) {
+    r.players = r.players.filter(p => p.id !== socket.id);
+    delete r.pawns[socket.id];
+    addHistory(r, intentional ? `${departing.name} keluar dari ruang tunggu.` : `${departing.name} meninggalkan ruang tunggu.`);
+
+    if (!r.players.some(p => !p.isBot)) {
+      deleteRoom(r);
+      return;
+    }
+    if (r.host === socket.id) reassignHost(r);
+    emitRoom(r);
+    return;
+  }
+
+  departing.connected = false;
+
+  if (intentional) {
+    const wasActive = !departing.isOut;
+    departing.isOut = true;
+    departing.left = true;
+    departing.sessionId = null;
+    addHistory(r, `🚪 ${departing.name} keluar dari permainan (menyerah).`);
+
+    if (!r.players.some(p => !p.isBot && !p.isOut)) {
+      deleteRoom(r);
+      return;
+    }
+    if (r.host === socket.id) reassignHost(r);
+
+    if (!r.winner && wasActive) {
+      const activeRemaining = r.players.filter(p => !p.isOut);
+      if (activeRemaining.length === 1) {
+        declareWinner(r, activeRemaining[0]);
+      } else if (r.players[r.turn]?.id === departing.id) {
+        advanceTurn(r);
+      }
+    }
+  } else {
+    addHistory(r, `⚠️ ${departing.name} keluar web/terputus (dimainkan bot sementara).`);
+    if (r.host === socket.id) reassignHost(r);
+    if (!r.winner && r.players[r.turn]?.id === departing.id) triggerTurn(r);
+  }
+
+  if (!hasConnectedHuman(r)) scheduleCleanup(r);
+  emitRoom(r);
+}
+
+// ==========================================
+// ALUR PERMAINAN
+// ==========================================
+
+function startGame(r) {
+  clearRoomTimers(r);
+  cancelCleanup(r);
+  resetRoomEvents(r);
+  r.started = true;
+  r.turn = 0;
+  for (const p of r.players) {
+    r.pawns[p.id] = [0, 0, 0, 0];
+    resetPlayerForGame(p);
   }
 }
 
@@ -395,36 +497,26 @@ function declareWinner(room, winnerPlayer) {
   room.message = `🏆 SELAMAT! ${winnerPlayer.name} MENANG!`;
   addHistory(room, `🎉 ${winnerPlayer.name} berhasil memenangkan pertandingan JakLudo!`);
 
-  // Catat statistik match ke database & update ranking
-  db.recordMatchResult({
-    winnerPlayerId: winnerPlayer.id,
-    winnerUsername: winnerPlayer.username || winnerPlayer.name,
-    players: room.players
-  });
-
-  // Update status isLudoKing pemain di dalam room
+  db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players });
   room.players.forEach(p => {
-    p.isLudoKing = db.checkIsLudoKing(p.username);
+    p.isLudoKing = db.checkIsLudoKing(p.userId);
   });
 
   io.emit('leaderboard:update', db.getLeaderboard());
   emitRoom(room);
+  scheduleCleanup(room);
 }
 
 function advanceTurn(room) {
   if (!room || !room.started || room.winner) return;
   clearRoomTimers(room);
 
-  // Cek apakah masih ada pemain aktif yang belum OUT
   const activePlayers = room.players.filter(p => !p.isOut);
   if (activePlayers.length <= 1) {
-    if (activePlayers.length === 1) {
-      declareWinner(room, activePlayers[0]);
-    }
+    if (activePlayers.length === 1) declareWinner(room, activePlayers[0]);
     return;
   }
 
-  // Cari giliran berikutnya yang pemainnya BELUM OUT
   let nextTurn = (room.turn + 1) % room.players.length;
   let attempts = 0;
   while (room.players[nextTurn]?.isOut && attempts < room.players.length) {
@@ -437,89 +529,26 @@ function advanceTurn(room) {
   room.consecutiveSixes = 0;
   room.players.forEach(p => { p.accumulatedThisTurn = false; });
   const nextPlayer = room.players[room.turn];
-
-  if (nextPlayer && !nextPlayer.isOut) {
-    room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/3)` : ''}.`;
-  }
+  room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/3)` : ''}.`;
 
   emitRoom(room);
   triggerTurn(room);
-}
-
-function chooseBestPawn(room, player, dice) {
-  const currentPawns = room.pawns[player.id];
-  if (!currentPawns) return null;
-  const movable = getMovablePawns(room, player, dice);
-  if (movable.length === 0) return null;
-
-  const colorIdx = COLORS.indexOf(player.color);
-  const safeZonesActive = room.settings?.safeZones !== false;
-  let bestPawn = movable[0];
-  let highestScore = -Infinity;
-
-  for (const pIdx of movable) {
-    const val = currentPawns[pIdx];
-    const next = val === 0 ? 1 : val + dice;
-    let score = next;
-
-    if (next === 44) score += 600;
-    if (val === 0 && (dice === 6 || dice === 1)) score += 300;
-
-    if (next >= 1 && next <= 39) {
-      const trackPos = getTrackIndex(colorIdx, next);
-      const isTargetSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos);
-
-      if (!isTargetSafe) {
-        for (const opp of room.players) {
-          if (opp.id === player.id || opp.isOut) continue;
-          const oppColorIdx = COLORS.indexOf(opp.color);
-          const oppPawns = room.pawns[opp.id] || [];
-          for (let j = 0; j < 4; j++) {
-            if (oppPawns[j] >= 1 && oppPawns[j] <= 39) {
-              if (getTrackIndex(oppColorIdx, oppPawns[j]) === trackPos) {
-                score += 1000; // Prioritas utama: Makan lawan!
-              }
-            }
-          }
-        }
-      } else {
-        score += 150;
-      }
-    }
-
-    if (score > highestScore) {
-      highestScore = score;
-      bestPawn = pIdx;
-    }
-  }
-
-  return bestPawn;
 }
 
 function executeAutoPlay(room, player) {
   if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
   if (room.players[room.turn]?.id !== player.id) return;
 
-  // Jika pemain sudah 3x berturut-turut tanpa respon dan belum kembali, nyatakan OUT
+  // Jika pemain sudah 3x berturut-turut tanpa respon, nyatakan OUT
   if ((player.autoPlayCount || 0) >= 3) {
     player.isOut = true;
     player.autoPlayCount = 3;
     addHistory(room, `❌ ${player.name} dinyatakan OUT (batas 3x auto-play tercapai tanpa respon).`);
     room.message = `❌ ${player.name} dinyatakan OUT!`;
-
-    const remainingActive = room.players.filter(p => !p.isOut);
-    if (remainingActive.length <= 1) {
-      if (remainingActive.length === 1) {
-        declareWinner(room, remainingActive[0]);
-      }
-      return;
-    }
-
     advanceTurn(room);
     return;
   }
 
-  // Tambah hitungan autoPlayCount
   player.autoPlayCount = (player.autoPlayCount || 0) + 1;
   addHistory(room, `🤖 [Auto-Play ${player.autoPlayCount}/3] Bidak ${player.name} dijalankan otomatis oleh sistem.`);
 
@@ -527,9 +556,7 @@ function executeAutoPlay(room, player) {
     handleRoll(room, player.id, true);
   } else {
     const bestPawn = chooseBestPawn(room, player, room.dice);
-    if (bestPawn !== null) {
-      handleMove(room, player.id, bestPawn, true);
-    }
+    if (bestPawn !== null) handleMove(room, player.id, bestPawn, true);
   }
 }
 
@@ -546,11 +573,9 @@ function triggerTurn(room) {
     return;
   }
 
-  // Jika bot komputer murni
   if (currentPlayer.isBot) {
     if (room.dice === null) {
-      room.botTimeout = setTimeout(() => {
-        if (!rooms.has(room.code)) return;
+      room.botTimeout = roomTimeout(room, () => {
         if (room.players[room.turn]?.id === currentPlayer.id && room.dice === null && !room.animatingMove) {
           handleRoll(room, currentPlayer.id);
         }
@@ -558,8 +583,7 @@ function triggerTurn(room) {
     } else {
       const bestPawn = chooseBestPawn(room, currentPlayer, room.dice);
       if (bestPawn !== null) {
-        room.botTimeout = setTimeout(() => {
-          if (!rooms.has(room.code)) return;
+        room.botTimeout = roomTimeout(room, () => {
           if (room.players[room.turn]?.id === currentPlayer.id && room.dice !== null && !room.animatingMove) {
             handleMove(room, currentPlayer.id, bestPawn);
           }
@@ -569,27 +593,12 @@ function triggerTurn(room) {
     return;
   }
 
-  // Jika pemain manusia:
-  if (!currentPlayer.connected) {
-    // Pemain sedang terputus / keluar web: tunggu 1.2 detik lalu jalankan otomatis
-    room.turnTimer = setTimeout(() => {
-      if (!rooms.has(room.code)) return;
-      if (room.players[room.turn]?.id === currentPlayer.id && !currentPlayer.connected) {
-        executeAutoPlay(room, currentPlayer);
-      }
-    }, 1200);
-  } else {
-    // Pemain online: beri batas waktu 15 detik sebelum dimainkan bot
-    room.turnTimer = setTimeout(() => {
-      if (!rooms.has(room.code)) return;
-      if (room.players[room.turn]?.id === currentPlayer.id) {
-        executeAutoPlay(room, currentPlayer);
-      }
-    }, 15000);
-  }
+  // Pemain manusia: terputus -> auto-play cepat, online -> batas waktu 15 detik
+  const delay = currentPlayer.connected ? TURN_TIMEOUT_MS : 1200;
+  room.turnTimer = roomTimeout(room, () => {
+    if (room.players[room.turn]?.id === currentPlayer.id) executeAutoPlay(room, currentPlayer);
+  }, delay);
 }
-
-const triggerBotTurn = triggerTurn; // Alias kompatibilitas
 
 function handleRoll(room, playerId, isAuto = false) {
   if (!room || !room.started || room.winner) return;
@@ -599,13 +608,9 @@ function handleRoll(room, playerId, isAuto = false) {
 
   if (room.turnTimer) clearTimeout(room.turnTimer);
 
-  // Jika pemain mengocok sendiri secara manual, reset hitungan autoPlayCount
-  if (!isAuto && !currentPlayer.isBot) {
-    currentPlayer.autoPlayCount = 0;
-  }
+  if (!isAuto && !currentPlayer.isBot) currentPlayer.autoPlayCount = 0;
 
-  // Jika pemain memiliki skill eliminasi dan memilih melempar dadu (tidak memakai skill giliran ini),
-  // poin skill diakumulasikan per 2 kali lipat!
+  // Pemain yang memegang skill eliminasi tetapi memilih melempar dadu: poin skill diakumulasi 2x
   if (currentPlayer.skillUnlocked && (currentPlayer.skillPoints || 0) > 0 && !currentPlayer.accumulatedThisTurn) {
     currentPlayer.skillPoints = currentPlayer.skillPoints * 2;
     currentPlayer.accumulatedThisTurn = true;
@@ -617,17 +622,12 @@ function handleRoll(room, playerId, isAuto = false) {
   emitRoom(room);
 
   if (room.rollTimer) clearTimeout(room.rollTimer);
-  room.rollTimer = setTimeout(() => {
-    if (!rooms.has(room.code)) return;
+  room.rollTimer = roomTimeout(room, () => {
     room.rolling = false;
-    const roll = 1 + Math.floor(Math.random() * 6);
+    const roll = 1 + crypto.randomInt(6);
     room.dice = roll;
 
-    if (roll === 6) {
-      room.consecutiveSixes = (room.consecutiveSixes || 0) + 1;
-    } else {
-      room.consecutiveSixes = 0;
-    }
+    room.consecutiveSixes = roll === 6 ? (room.consecutiveSixes || 0) + 1 : 0;
 
     if (room.consecutiveSixes >= 3) {
       room.message = `${currentPlayer.name} dapat angka 6 tiga kali berturut-turut! Giliran hangus.`;
@@ -642,12 +642,8 @@ function handleRoll(room, playerId, isAuto = false) {
       room.message = `${currentPlayer.name} mendapatkan angka ${roll}, tetapi tidak ada bidak yang dapat melangkah.`;
       addHistory(room, `${currentPlayer.name} melempar dadu: ${roll} (tidak ada langkah valid)`);
       emitRoom(room);
-
       if (room.passTimer) clearTimeout(room.passTimer);
-      room.passTimer = setTimeout(() => {
-        if (!rooms.has(room.code)) return;
-        advanceTurn(room);
-      }, 1300);
+      room.passTimer = roomTimeout(room, () => advanceTurn(room), 1300);
       return;
     }
 
@@ -655,19 +651,16 @@ function handleRoll(room, playerId, isAuto = false) {
     addHistory(room, `${currentPlayer.name} melempar dadu: ${roll}`);
     emitRoom(room);
 
-    // Jika bot komputer atau auto-play (pemain offline), langsung pilih bidak
     if (currentPlayer.isBot || isAuto || !currentPlayer.connected) {
       const bestPawn = chooseBestPawn(room, currentPlayer, roll);
       if (bestPawn !== null) {
-        room.botTimeout = setTimeout(() => {
-          if (!rooms.has(room.code)) return;
+        room.botTimeout = roomTimeout(room, () => {
           if (room.players[room.turn]?.id === currentPlayer.id && room.dice !== null && !room.animatingMove) {
             handleMove(room, currentPlayer.id, bestPawn, isAuto);
           }
         }, 800);
       }
     } else {
-      // Pemain online: beri batas waktu 15 detik untuk memilih bidak
       triggerTurn(room);
     }
   }, 750);
@@ -678,20 +671,14 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
   const currentPlayer = room.players[room.turn];
   if (!currentPlayer || currentPlayer.id !== playerId || currentPlayer.isOut) return;
   if (room.dice === null) return;
-  if (!Number.isInteger(pawnIdx) || pawnIdx < 0 || pawnIdx > 3) return;
+  if (!isPawnIndex(pawnIdx)) return;
+  if (!canPawnMove(room, currentPlayer, pawnIdx, room.dice)) return;
 
   if (room.turnTimer) clearTimeout(room.turnTimer);
-
-  if (!isAuto && !currentPlayer.isBot) {
-    currentPlayer.autoPlayCount = 0;
-  }
+  if (!isAuto && !currentPlayer.isBot) currentPlayer.autoPlayCount = 0;
 
   const currentPawns = room.pawns[playerId];
   const currentVal = currentPawns[pawnIdx];
-  if (!canPawnMove(room, currentPlayer, pawnIdx, room.dice)) {
-    return;
-  }
-
   const colorIdx = COLORS.indexOf(currentPlayer.color);
   const rollVal = room.dice;
   const newVal = currentVal === 0 ? 1 : currentVal + rollVal;
@@ -708,7 +695,6 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
     color: currentPlayer.color
   };
 
-  // Bersihkan event capture/blackhole/goal lama saat langkah baru dimulai
   room.lastCapture = null;
   room.lastBlackHole = null;
   room.lastGoal = null;
@@ -720,23 +706,19 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
   const stepDelay = steps * 220 + 360;
 
   if (room.moveTimer) clearTimeout(room.moveTimer);
-  room.moveTimer = setTimeout(() => {
-    if (!rooms.has(room.code)) return;
+  room.moveTimer = roomTimeout(room, () => {
     room.animatingMove = null;
 
     let captured = false;
     let capturedInfo = null;
 
-    // Cek efek di lintasan (1..39)
     if (newVal >= 1 && newVal <= 39) {
       const trackPos = getTrackIndex(colorIdx, newVal);
 
-      // 1. Fitur Black Hole (jika aktif dan menginjak kotak Black Hole)
       if (room.settings?.blackHole && BLACK_HOLE_INDICES.includes(trackPos)) {
         if (currentPlayer.inventory?.blackholeShield > 0) {
-          // BLACKHOLE SHIELD AKTIF: Bidak tidak tersedot!
           currentPlayer.inventory.blackholeShield -= 1;
-          db.consumeUserItem({ userId: currentPlayer.userId, username: currentPlayer.username, itemType: 'blackholeShield' });
+          db.consumeUserItem({ userId: currentPlayer.userId, itemType: 'blackholeShield' });
 
           room.lastShieldProtect = {
             id: Date.now() + Math.random(),
@@ -750,7 +732,7 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
           addHistory(room, `🛡️ BLACKHOLE SHIELD AKTIF! Bidak ${pawnIdx + 1} milik ${currentPlayer.name} terselamatkan dari Black Hole! (Sisa Perisai: ${currentPlayer.inventory.blackholeShield})`);
           room.message = `🛡️ Blackhole Shield melindungi bidak ${currentPlayer.name}! Bidak aman!`;
         } else {
-          currentPawns[pawnIdx] = 0; // Tersedot langsung kembali ke base!
+          currentPawns[pawnIdx] = 0;
           room.lastBlackHole = {
             id: Date.now() + Math.random(),
             playerId,
@@ -763,12 +745,11 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
           room.message = `🕳️ Bidak ${currentPlayer.name} tersedot Black Hole ke base!`;
         }
       } else {
-        // 2. Cek pemakanan lawan di lintasan
         const isSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos);
 
         if (!isSafe) {
           for (const opponent of room.players) {
-            // Pemain sendiri dilewati; tetapi bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
+            // Bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
             if (opponent.id === currentPlayer.id) continue;
             const oppColorIdx = COLORS.indexOf(opponent.color);
             const oppPawns = room.pawns[opponent.id];
@@ -776,42 +757,33 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 
             for (let j = 0; j < 4; j++) {
               const oppVal = oppPawns[j];
-              if (oppVal >= 1 && oppVal <= 39) {
-                const oppTrack = getTrackIndex(oppColorIdx, oppVal);
-                if (oppTrack === trackPos) {
-                  // Aturan: Jika bidak lawan ada di kotak base warnanya, tidak bisa diinjak lawan!
-                  const isOppBaseStart = oppTrack === COLOR_OFFSETS[oppColorIdx];
-                  if (isOppBaseStart) {
-                    continue; // Kebal di kotak base warnanya sendiri
-                  }
+              if (oppVal < 1 || oppVal > 39) continue;
+              const oppTrack = getTrackIndex(oppColorIdx, oppVal);
+              if (oppTrack !== trackPos) continue;
+              if (oppTrack === COLOR_OFFSETS[oppColorIdx]) continue; // Kebal di kotak base warnanya
 
-                  oppPawns[j] = 0; // Tendang balik ke markas
-                  captured = true;
+              oppPawns[j] = 0;
+              captured = true;
+              currentPlayer.stompCount = (currentPlayer.stompCount || 0) + 1;
 
-                  // Hitung progres injakan bidak lawan untuk Force Return
-                  currentPlayer.stompCount = (currentPlayer.stompCount || 0) + 1;
+              capturedInfo = {
+                id: Date.now() + Math.random(),
+                attacker: currentPlayer.name,
+                defender: opponent.name,
+                color: opponent.color,
+                defenderIsOut: !!opponent.isOut,
+                trackPos
+              };
+              addHistory(room, `⚔️ ${currentPlayer.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}! (Injakan: ${currentPlayer.stompCount})`);
 
-                  capturedInfo = {
-                    id: Date.now() + Math.random(),
-                    attacker: currentPlayer.name,
-                    defender: opponent.name,
-                    color: opponent.color,
-                    defenderIsOut: !!opponent.isOut,
-                    trackPos
-                  };
-                  addHistory(room, `⚔️ ${currentPlayer.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}! (Injakan: ${currentPlayer.stompCount})`);
-
-                  // Notifikasi Force Return aktif jika memiliki item dan mencapai minimal 3x injakan
-                  if (currentPlayer.inventory?.forceReturn > 0 && currentPlayer.stompCount >= 3) {
-                    room.lastForceReturnReady = {
-                      id: Date.now() + Math.random(),
-                      playerId: currentPlayer.id,
-                      playerName: currentPlayer.name,
-                      time: Date.now()
-                    };
-                    addHistory(room, `⚡ FORCE RETURN SIAP! ${currentPlayer.name} telah 3x menginjak lawan! Hak eliminasi langsung aktif!`);
-                  }
-                }
+              if (currentPlayer.inventory?.forceReturn > 0 && currentPlayer.stompCount >= 3) {
+                room.lastForceReturnReady = {
+                  id: Date.now() + Math.random(),
+                  playerId: currentPlayer.id,
+                  playerName: currentPlayer.name,
+                  time: Date.now()
+                };
+                addHistory(room, `⚡ FORCE RETURN SIAP! ${currentPlayer.name} telah 3x menginjak lawan! Hak eliminasi langsung aktif!`);
               }
             }
           }
@@ -819,14 +791,13 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
       }
     }
 
-    const isWinner = currentPawns.every(p => p === 44);
-    if (isWinner) {
+    if (currentPawns.every(p => p === FINISH)) {
       declareWinner(room, currentPlayer);
       return;
     }
 
     let goalInfo = null;
-    const reachedGoal = newVal === 44;
+    const reachedGoal = newVal === FINISH;
     if (reachedGoal) {
       goalInfo = {
         id: Date.now() + Math.random(),
@@ -837,18 +808,14 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
       };
       addHistory(room, `⭐ ${currentPlayer.name} berhasil memasukkan 1 bidak ke garis akhir!`);
 
-      // Cek jumlah bidak finish organik pemain
-      const finishedCount = currentPawns.filter(v => v === 44).length;
+      const finishedCount = currentPawns.filter(v => v === FINISH).length;
       currentPlayer.finishedCount = finishedCount;
 
-      // Fitur Skill: saat pemain sudah berhasil memasukkan tiga buah bidak secara organik
       if (finishedCount === 3 && !currentPlayer.skillUnlocked) {
         currentPlayer.skillUnlocked = true;
-        currentPlayer.skillPoints = 1; // Poin skill awal = 1 kesempatan eliminasi
+        currentPlayer.skillPoints = 1;
         addHistory(room, `⚡ ${currentPlayer.name} BERHASIL MEMASUKKAN 3 BIDAK! SKILL ELIMINASI TERBUKA!`);
         room.message = `⚡ SKILL TERBUKA! ${currentPlayer.name} dapat mengeliminasi 1 bidak lawan!`;
-
-        // Broadcast notifikasi peringatan ke pemain lain
         room.lastSkillUnlock = {
           id: Date.now() + Math.random(),
           playerId: currentPlayer.id,
@@ -859,8 +826,8 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
       }
     }
 
-    // Aturan: Angka 6, Berhasil Masuk Garis Tengah (Goal), ATAU Berhasil Mengeliminasi Bidak Lawan (Capture) memberikan bonus giliran melempar dadu & jalan satu kali lagi!
-    const extraTurn = (rollVal === 6) || reachedGoal || captured;
+    // Angka 6, bidak masuk finish, atau memakan lawan memberi bonus giliran
+    const extraTurn = rollVal === 6 || reachedGoal || captured;
     room.dice = null;
     room.lastCapture = capturedInfo;
     room.lastGoal = goalInfo;
@@ -889,41 +856,70 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
   }, stepDelay);
 }
 
+// Validasi bersama untuk Skill Eliminasi & Force Return.
+// Hanya boleh dipakai SEBELUM melempar dadu agar tidak bisa dipakai untuk mengocok ulang.
+function validateEliminationTarget(socket, r, { targetPlayerId, targetPawnIdx }) {
+  if (!r || !r.started || r.winner || r.rolling || r.animatingMove) return null;
+
+  const currentPlayer = r.players[r.turn];
+  if (!currentPlayer || currentPlayer.id !== socket.id || currentPlayer.isOut) {
+    socket.emit('room:error', 'Sekarang bukan giliranmu.');
+    return null;
+  }
+  if (r.dice !== null) {
+    socket.emit('room:error', 'Skill hanya bisa dipakai sebelum melempar dadu.');
+    return null;
+  }
+
+  const targetPlayer = typeof targetPlayerId === 'string' ? r.players.find(p => p.id === targetPlayerId) : null;
+  if (!targetPlayer || targetPlayer.id === currentPlayer.id) {
+    socket.emit('room:error', 'Pemain target tidak valid.');
+    return null;
+  }
+
+  const oppPawns = r.pawns[targetPlayer.id];
+  if (!oppPawns || !isPawnIndex(targetPawnIdx)) {
+    socket.emit('room:error', 'Bidak target tidak valid.');
+    return null;
+  }
+
+  const oppVal = oppPawns[targetPawnIdx];
+  if (oppVal < 1 || oppVal > 39) {
+    socket.emit('room:error', 'Hanya bidak lawan di lintasan yang dapat dieliminasi.');
+    return null;
+  }
+  return { currentPlayer, targetPlayer, oppPawns };
+}
+
+// ==========================================
+// SOCKET EVENTS
+// ==========================================
+
 io.on('connection', socket => {
-  // Heartbeat Ping/Pong untuk mendeteksi stabilitas sinyal realtime
+  // Heartbeat Ping/Pong untuk mengukur latensi
   socket.on('network:ping', (clientTimestamp, callback) => {
-    if (typeof callback === 'function') {
-      callback(clientTimestamp);
-    }
+    if (typeof callback === 'function') callback(clientTimestamp);
   });
 
-  socket.on('room:create', payload => createRoom(socket, payload));
-  socket.on('room:join', payload => joinRoom(socket, payload?.code, payload));
-  socket.on('leaderboard:get', () => socket.emit('leaderboard:update', db.getLeaderboard()));
+  on(socket, 'room:create', payload => createRoom(socket, payload));
+  on(socket, 'room:join', payload => joinRoom(socket, payload.code, payload));
+  on(socket, 'leaderboard:get', () => socket.emit('leaderboard:update', db.getLeaderboard()));
 
-  // Cek apakah user memiliki room yang masih aktif
-  socket.on('room:check_active', ({ code, sessionId, username }, callback) => {
-    if (!code) return callback && callback({ active: false });
-    const r = rooms.get(String(code).toUpperCase());
-    if (!r) return callback && callback({ active: false });
+  // Cek apakah user memiliki room yang masih aktif (butuh sessionId rahasia atau token)
+  on(socket, 'room:check_active', ({ code, sessionId, token }, callback) => {
+    if (!callback) return;
+    const r = code ? rooms.get(String(code).toUpperCase()) : null;
+    if (!r) return callback({ active: false });
 
+    const user = typeof token === 'string' ? db.getUserByToken(token) : null;
     const player = r.players.find(p =>
-      (sessionId && p.sessionId === sessionId) ||
-      (username && p.username && p.username.toLowerCase() === String(username).toLowerCase())
+      !p.isBot && ((typeof sessionId === 'string' && sessionId && p.sessionId === sessionId) || (user && p.userId === user.id))
     );
-
-    if (!player) return callback && callback({ active: false });
-    return callback && callback({
-      active: true,
-      started: r.started,
-      isOut: !!player.isOut,
-      winner: r.winner,
-      code: r.code
-    });
+    if (!player) return callback({ active: false });
+    callback({ active: true, started: r.started, isOut: !!player.isOut, winner: r.winner, code: r.code });
   });
 
-  // Pengaturan room (misal: Toggle Safe Zone & Black Hole)
-  socket.on('room:update_settings', ({ safeZones, blackHole }) => {
+  on(socket, 'room:update_settings', ({ safeZones, blackHole }) => {
     const r = rooms.get(socket.data.room);
     if (!r || r.host !== socket.id || r.started) return;
     let changed = false;
@@ -937,120 +933,81 @@ io.on('connection', socket => {
       addHistory(r, `⚙️ Host mengatur Black Hole: ${blackHole ? 'AKTIF 🕳️' : 'NONAKTIF'}.`);
       changed = true;
     }
-    if (changed) {
-      emitRoom(r);
-    }
+    if (changed) emitRoom(r);
   });
 
-  socket.on('room:add_bot', () => {
+  on(socket, 'room:add_bot', () => {
     const r = rooms.get(socket.data.room);
     if (r) addBot(r, socket.id);
   });
 
-  socket.on('room:remove_bot', () => {
+  on(socket, 'room:remove_bot', () => {
     const r = rooms.get(socket.data.room);
     if (r) removeBot(r, socket.id);
   });
 
-  socket.on('game:start', () => {
+  on(socket, 'game:start', () => {
     const r = rooms.get(socket.data.room);
-    if (!r || r.host !== socket.id || r.players.length < 2) return;
-    r.started = true;
-    r.turn = 0;
-    r.dice = null;
-    r.winner = null;
-    r.consecutiveSixes = 0;
-    r.animatingMove = null;
-    for (const p of r.players) {
-      p.connected = true;
-      p.autoPlayCount = 0;
-      p.isOut = false;
-    }
+    if (!r || r.host !== socket.id || r.started || r.players.length < 2) return;
+    startGame(r);
     r.message = `Permainan dimulai! Giliran ${r.players[0].name}.`;
     addHistory(r, '🎲 Permainan dimulai!');
     emitRoom(r);
     triggerTurn(r);
   });
 
-  socket.on('game:restart', () => {
+  // Main lagi: hanya setelah ada pemenang. Pemain yang sudah menyerah tidak diikutkan.
+  on(socket, 'game:restart', () => {
     const r = rooms.get(socket.data.room);
-    if (!r || r.host !== socket.id) return;
-    r.started = true;
-    r.turn = 0;
-    r.dice = null;
-    r.rolling = false;
-    r.animatingMove = null;
-    r.winner = null;
-    r.consecutiveSixes = 0;
-    for (const p of r.players) {
-      r.pawns[p.id] = [0, 0, 0, 0];
-      p.connected = true;
-      p.autoPlayCount = 0;
-      p.isOut = false;
+    if (!r || r.host !== socket.id || !r.started || !r.winner) return;
+
+    const remaining = r.players.filter(p => !p.left);
+    if (remaining.length < 2) {
+      return socket.emit('room:error', 'Butuh minimal 2 pemain untuk bermain lagi. Tambahkan bot atau ajak teman.');
     }
+    for (const p of r.players) if (p.left) delete r.pawns[p.id];
+    r.players = remaining;
+
+    startGame(r);
     r.message = `Permainan baru dimulai! Giliran ${r.players[0].name}.`;
     addHistory(r, '🔄 Permainan di-reset.');
     emitRoom(r);
     triggerTurn(r);
   });
 
-  socket.on('game:roll', () => {
+  on(socket, 'game:roll', () => {
     const r = rooms.get(socket.data.room);
     if (r) handleRoll(r, socket.id);
   });
 
-  socket.on('game:move', ({ pawn }) => {
+  on(socket, 'game:move', ({ pawn }) => {
     const r = rooms.get(socket.data.room);
     if (r) handleMove(r, socket.id, pawn);
   });
 
-  // Fitur Skill: Eliminasi 1 bidak lawan pilihan saat sudah memasukkan 3 bidak secara organik
-  socket.on('game:use_skill', ({ targetPlayerId, targetPawnIdx }) => {
+  // Skill: eliminasi 1 bidak lawan setelah memasukkan 3 bidak secara organik
+  on(socket, 'game:use_skill', payload => {
     const r = rooms.get(socket.data.room);
-    if (!r || !r.started || r.winner || r.rolling || r.animatingMove) return;
+    const v = validateEliminationTarget(socket, r, payload);
+    if (!v) return;
+    const { currentPlayer, targetPlayer, oppPawns } = v;
 
-    const currentPlayer = r.players[r.turn];
-    if (!currentPlayer || currentPlayer.id !== socket.id || currentPlayer.isOut) {
-      return socket.emit('room:error', 'Sekarang bukan giliranmu.');
-    }
-
-    const myPawns = r.pawns[currentPlayer.id] || [];
-    const finishedCount = myPawns.filter(v => v === 44).length;
-    if (finishedCount < 3 || !currentPlayer.skillPoints || currentPlayer.skillPoints <= 0) {
+    const finishedCount = r.pawns[currentPlayer.id].filter(x => x === FINISH).length;
+    if (finishedCount < 3 || !(currentPlayer.skillPoints > 0)) {
       return socket.emit('room:error', 'Skill belum terbuka atau poin skill tidak cukup.');
     }
 
-    const targetPlayer = r.players.find(p => p.id === targetPlayerId);
-    if (!targetPlayer || targetPlayer.id === currentPlayer.id) {
-      return socket.emit('room:error', 'Pemain target tidak valid.');
-    }
-
-    const oppPawns = r.pawns[targetPlayer.id];
-    if (!oppPawns || targetPawnIdx < 0 || targetPawnIdx > 3) {
-      return socket.emit('room:error', 'Bidak target tidak valid.');
-    }
-
-    const oppVal = oppPawns[targetPawnIdx];
-    if (oppVal < 1 || oppVal > 39) {
-      return socket.emit('room:error', 'Hanya bidak yang sedang berada di arena lintasan yang dapat dieliminasi.');
-    }
-
-    // Eksekusi eliminasi: tendang bidak lawan kembali ke markas
-    oppPawns[targetPawnIdx] = 0;
-
-    // Aturan: setelah mengeliminasi, poin skill RESET MENJADI 0
+    oppPawns[payload.targetPawnIdx] = 0;
     currentPlayer.skillPoints = 0;
     currentPlayer.skillUnlocked = false;
 
-    const skillEvent = {
+    r.lastSkillUse = {
       id: Date.now() + Math.random(),
       attacker: currentPlayer.name,
       defender: targetPlayer.name,
       color: targetPlayer.color,
-      targetPawnIdx
+      targetPawnIdx: payload.targetPawnIdx
     };
-
-    r.lastSkillUse = skillEvent;
     r.lastCapture = {
       id: Date.now() + Math.random(),
       attacker: currentPlayer.name,
@@ -1060,25 +1017,21 @@ io.on('connection', socket => {
     };
 
     addHistory(r, `⚡ ${currentPlayer.name} MENGGUNAKAN SKILL ELIMINASI: Menendang bidak ${targetPlayer.name} kembali ke markas! Poin skill kembali ke 0.`);
-    r.message = `⚡ ${currentPlayer.name} berhasil mengeliminasi bidak ${targetPlayer.name} dengan SKILL dan dapat giliran jalan lagi!`;
-
-    // Aturan 1: Setelah eliminasi bidak lawan dengan skill, dapat bonus giliran jalan lagi sekali!
-    r.dice = null;
+    r.message = `⚡ ${currentPlayer.name} berhasil mengeliminasi bidak ${targetPlayer.name} dengan SKILL! Silakan lempar dadu.`;
     emitRoom(r);
     triggerTurn(r);
   });
 
-  // Pemain memilih tidak menggunakan skill pada giliran ini (Akumulasi 2x lipat)
-  socket.on('game:accumulate_skill', () => {
+  // Pemain memilih menabung skill pada giliran ini (Akumulasi 2x lipat)
+  on(socket, 'game:accumulate_skill', () => {
     const r = rooms.get(socket.data.room);
     if (!r || !r.started || r.winner || r.rolling || r.animatingMove) return;
 
     const currentPlayer = r.players[r.turn];
     if (!currentPlayer || currentPlayer.id !== socket.id || currentPlayer.isOut) return;
 
-    const myPawns = r.pawns[currentPlayer.id] || [];
-    const finishedCount = myPawns.filter(v => v === 44).length;
-    if (finishedCount < 3 || !currentPlayer.skillPoints || currentPlayer.skillPoints <= 0) return;
+    const finishedCount = (r.pawns[currentPlayer.id] || []).filter(v => v === FINISH).length;
+    if (finishedCount < 3 || !(currentPlayer.skillPoints > 0)) return;
 
     if (!currentPlayer.accumulatedThisTurn) {
       currentPlayer.skillPoints = Math.max(1, currentPlayer.skillPoints) * 2;
@@ -1089,46 +1042,27 @@ io.on('connection', socket => {
     }
   });
 
-  // Fitur Toko / Item: Force Return (Eliminasi Langsung saat sudah 3x menginjak bidak)
-  socket.on('game:use_force_return', ({ targetPlayerId, targetPawnIdx }) => {
+  // Item Toko: Force Return (eliminasi langsung setelah 3x menginjak bidak)
+  on(socket, 'game:use_force_return', payload => {
     const r = rooms.get(socket.data.room);
-    if (!r || !r.started || r.winner || r.rolling || r.animatingMove) return;
+    const v = validateEliminationTarget(socket, r, payload);
+    if (!v) return;
+    const { currentPlayer, targetPlayer, oppPawns } = v;
 
-    const currentPlayer = r.players[r.turn];
-    if (!currentPlayer || currentPlayer.id !== socket.id || currentPlayer.isOut) {
-      return socket.emit('room:error', 'Sekarang bukan giliranmu.');
-    }
-
-    if (!currentPlayer.inventory || !currentPlayer.inventory.forceReturn || currentPlayer.inventory.forceReturn <= 0) {
+    if (!(currentPlayer.inventory?.forceReturn > 0)) {
       return socket.emit('room:error', 'Kamu belum memiliki item Force Return. Beli di Toko seharga 100 poin!');
     }
-
     if ((currentPlayer.stompCount || 0) < 3) {
       return socket.emit('room:error', `Force Return memerlukan minimal 3 kali menginjak bidak lawan. Progresmu: ${currentPlayer.stompCount || 0}/3.`);
     }
 
-    const targetPlayer = r.players.find(p => p.id === targetPlayerId);
-    if (!targetPlayer || targetPlayer.id === currentPlayer.id) {
-      return socket.emit('room:error', 'Pemain target tidak valid.');
-    }
-
-    const oppPawns = r.pawns[targetPlayer.id];
-    if (!oppPawns || targetPawnIdx < 0 || targetPawnIdx > 3) {
-      return socket.emit('room:error', 'Bidak target tidak valid.');
-    }
-
-    const oppVal = oppPawns[targetPawnIdx];
-    if (oppVal < 1 || oppVal > 39) {
-      return socket.emit('room:error', 'Hanya bidak lawan di lintasan yang dapat dieliminasi.');
-    }
-
-    // Eksekusi Force Return: Tendang bidak target kembali ke base!
+    const targetPawnIdx = payload.targetPawnIdx;
     oppPawns[targetPawnIdx] = 0;
     currentPlayer.inventory.forceReturn -= 1;
-    db.consumeUserItem({ userId: currentPlayer.userId, username: currentPlayer.username, itemType: 'forceReturn' });
+    db.consumeUserItem({ userId: currentPlayer.userId, itemType: 'forceReturn' });
     currentPlayer.stompCount = Math.max(0, (currentPlayer.stompCount || 0) - 3);
 
-    const forceEvent = {
+    r.lastForceReturnUse = {
       id: Date.now() + Math.random(),
       attackerId: currentPlayer.id,
       attackerName: currentPlayer.name,
@@ -1137,8 +1071,6 @@ io.on('connection', socket => {
       color: targetPlayer.color,
       targetPawnIdx
     };
-
-    r.lastForceReturnUse = forceEvent;
     r.lastCapture = {
       id: Date.now() + Math.random(),
       attacker: currentPlayer.name,
@@ -1148,31 +1080,26 @@ io.on('connection', socket => {
     };
 
     addHistory(r, `⚡ FORCE RETURN! ${currentPlayer.name} melancarkan serangan eliminasi langsung terhadap bidak ${targetPawnIdx + 1} milik ${targetPlayer.name}! Bidak dipulangkan ke markas!`);
-    r.message = `⚡ Force Return! ${currentPlayer.name} mengeliminasi bidak ${targetPlayer.name} dan dapat giliran lempar dadu lagi!`;
-
-    // Bonus giliran lempar dadu lagi
-    r.dice = null;
+    r.message = `⚡ Force Return! ${currentPlayer.name} mengeliminasi bidak ${targetPlayer.name}! Silakan lempar dadu.`;
     emitRoom(r);
     triggerTurn(r);
   });
 
-  socket.on('game:reaction', ({ emoji }) => {
+  on(socket, 'game:reaction', ({ emoji }) => {
     const r = rooms.get(socket.data.room);
-    if (!r || !emoji) return;
+    if (!r || !EMOJIS.includes(emoji) || !reactionLimiter(socket.id)) return;
     const player = r.players.find(p => p.id === socket.id);
-    if (player) {
-      io.to(r.code).emit('room:reaction', {
-        id: Date.now() + Math.random(),
-        playerId: socket.id,
-        playerName: player.name,
-        color: player.color,
-        emoji
-      });
-    }
+    if (!player) return;
+    io.to(r.code).emit('room:reaction', {
+      id: Date.now() + Math.random(),
+      playerId: socket.id,
+      playerName: player.name,
+      color: player.color,
+      emoji
+    });
   });
 
-  // Fitur Chat Realtime Game Berlangsung
-  socket.on('room:chat', ({ text }) => {
+  on(socket, 'room:chat', ({ text }) => {
     const r = rooms.get(socket.data.room);
     if (!r) return;
     const player = r.players.find(p => p.id === socket.id);
@@ -1180,8 +1107,10 @@ io.on('connection', socket => {
 
     const cleanText = String(text || '').trim().slice(0, 140);
     if (!cleanText) return;
+    if (!chatLimiter(socket.id)) {
+      return socket.emit('room:error', 'Terlalu cepat mengirim pesan. Tunggu sebentar.');
+    }
 
-    if (!r.chats) r.chats = [];
     const chatMsg = {
       id: Date.now() + Math.random(),
       senderId: player.id,
@@ -1192,197 +1121,144 @@ io.on('connection', socket => {
     };
     r.chats.push(chatMsg);
     if (r.chats.length > 50) r.chats.shift();
-    emitRoom(r);
+    io.to(r.code).emit('room:chat_message', chatMsg);
   });
 
-  socket.on('room:leave', ({ code } = {}) => {
-    const roomCode = (code || socket.data.room || '').toUpperCase();
+  on(socket, 'room:leave', ({ code }) => {
+    const roomCode = String(code || socket.data.room || '').toUpperCase();
     const r = rooms.get(roomCode);
-    if (!r) {
-      delete socket.data.room;
-      return;
-    }
-
-    const departingPlayer = r.players.find(p => p.id === socket.id);
-    if (!departingPlayer) {
-      socket.leave(roomCode);
-      delete socket.data.room;
-      return;
-    }
-
-    if (!r.started) {
-      r.players = r.players.filter(p => p.id !== socket.id);
-      delete r.pawns[socket.id];
-      addHistory(r, `${departingPlayer.name} keluar dari ruang tunggu.`);
-
-      const hasHuman = r.players.some(p => !p.isBot);
-      if (!hasHuman || r.players.length === 0) {
-        clearRoomTimers(r);
-        rooms.delete(roomCode);
-      } else {
-        if (r.host === socket.id) {
-          const nextHost = r.players.find(p => !p.isBot) || r.players[0];
-          r.host = nextHost.id;
-          nextHost.isHost = true;
-        }
-        emitRoom(r);
-      }
-    } else {
-      departingPlayer.isOut = true;
-      departingPlayer.connected = false;
-      departingPlayer.sessionId = null;
-      addHistory(r, `🚪 ${departingPlayer.name} keluar dari permainan (menyerah).`);
-
-      const activeHumans = r.players.filter(p => !p.isBot && !p.isOut);
-      if (activeHumans.length === 0) {
-        clearRoomTimers(r);
-        rooms.delete(roomCode);
-      } else {
-        const activeRemaining = r.players.filter(p => !p.isOut);
-        if (activeRemaining.length === 1 && !r.winner) {
-          declareWinner(r, activeRemaining[0]);
-        } else if (r.players[r.turn]?.id === departingPlayer.id) {
-          nextTurn(r);
-        }
-        emitRoom(r);
-      }
-    }
-
+    if (r) handleDeparture(socket, r, { intentional: true });
     socket.leave(roomCode);
     delete socket.data.room;
   });
 
   socket.on('disconnect', () => {
-    const code = socket.data.room;
-    const r = rooms.get(code);
-    if (!r) return;
-
-    const departingPlayer = r.players.find(p => p.id === socket.id);
-    if (!departingPlayer) return;
-
-    // Jika permainan belum dimulai, keluarkan dari ruang tunggu (lobby)
-    if (!r.started) {
-      r.players = r.players.filter(p => p.id !== socket.id);
-      delete r.pawns[socket.id];
-      addHistory(r, `${departingPlayer.name} meninggalkan ruang tunggu.`);
-
-      const hasHuman = r.players.some(p => !p.isBot);
-      if (!hasHuman || r.players.length === 0) {
-        clearRoomTimers(r);
-        rooms.delete(code);
-        return;
-      }
-
-      if (r.host === socket.id) {
-        const nextHost = r.players.find(p => !p.isBot) || r.players[0];
-        r.host = nextHost.id;
-        nextHost.isHost = true;
-      }
-
-      emitRoom(r);
-      return;
-    }
-
-    // GAME SUDAH BERLANGSUNG:
-    // JANGAN hapus pemain/bidak! Tandai disconnected agar pemain bisa reconnect kembali.
-    departingPlayer.connected = false;
-    addHistory(r, `⚠️ ${departingPlayer.name} keluar web/terputus (dimainkan bot sementara).`);
-    emitRoom(r);
-
-    // Jika giliran pemain yang terputus, picu giliran auto-play
-    if (r.players[r.turn]?.id === departingPlayer.id) {
-      triggerTurn(r);
+    try {
+      const r = rooms.get(socket.data.room);
+      if (r) handleDeparture(socket, r, { intentional: false });
+    } catch (err) {
+      console.error('[socket disconnect]', err);
     }
   });
 });
 
+// ==========================================
+// REST APIS: AUTHENTICATION, LEADERBOARD & SHOP
+// ==========================================
+
 app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size }));
 
-// ==========================================
-// REST APIS: AUTHENTICATION & LEADERBOARD
-// ==========================================
+function bearerToken(req) {
+  return String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+}
 
-// 1. Register Akun baru dengan Username Unik & Standar Keamanan Password
-app.post('/api/auth/register', (req, res) => {
+const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+app.post('/api/auth/register', asyncRoute(async (req, res) => {
+  if (!registerLimiter(req.ip)) {
+    return res.status(429).json({ success: false, error: 'Terlalu banyak pendaftaran dari jaringan ini. Coba lagi nanti.' });
+  }
   const { username, password, name } = req.body || {};
-  const result = db.registerUser({ username, password, name });
-  if (result.error) {
-    return res.status(400).json({ success: false, error: result.error });
-  }
-  const isKing = db.checkIsLudoKing(result.user.username);
-  res.json({ success: true, user: { ...result.user, isLudoKing: isKing }, token: result.token });
-});
+  const result = await db.registerUser({ username, password, name });
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+  res.json({ success: true, user: { ...result.user, isLudoKing: db.checkIsLudoKing(result.user.id) }, token: result.token });
+}));
 
-// 2. Login Akun dengan Username & Password
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const { username, password } = req.body || {};
-  const result = db.loginUser({ username, password });
-  if (result.error) {
-    return res.status(400).json({ success: false, error: result.error });
+  const key = `${req.ip}:${String(username || '').toLowerCase()}`;
+  if (!loginLimiter(key)) {
+    return res.status(429).json({ success: false, error: 'Terlalu banyak percobaan login. Coba lagi dalam 10 menit.' });
   }
-  const isKing = db.checkIsLudoKing(result.user.username);
-  res.json({ success: true, user: { ...result.user, isLudoKing: isKing }, token: result.token });
+  const result = await db.loginUser({ username, password });
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+  res.json({ success: true, user: { ...result.user, isLudoKing: db.checkIsLudoKing(result.user.id) }, token: result.token });
+}));
+
+app.post('/api/auth/logout', (req, res) => {
+  db.deleteSession(bearerToken(req));
+  res.json({ success: true });
 });
 
-// 3. Ambil Profil User yang Sedang Login
 app.get('/api/auth/me', (req, res) => {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  const user = db.getUserByToken(token);
+  const user = db.getUserByToken(bearerToken(req));
   if (!user) {
     return res.status(401).json({ success: false, error: 'Unauthorized / Sesi telah kedaluwarsa.' });
   }
-  const isKing = db.checkIsLudoKing(user.username);
-  res.json({ success: true, user: { ...db.sanitizeUser(user), isLudoKing: isKing } });
+  res.json({ success: true, user: { ...db.sanitizeUser(user), isLudoKing: db.checkIsLudoKing(user.id) } });
 });
 
-// 5. Leaderboard & Status Ludo King
 app.get('/api/leaderboard', (req, res) => {
   const leaderboard = db.getLeaderboard();
   const ludoKing = leaderboard[0] && leaderboard[0].isLudoKing ? leaderboard[0] : null;
   res.json({ success: true, leaderboard, ludoKing });
 });
 
-// 6. Katalog Item Toko / Shop JakLudo
 app.get('/api/shop/items', (req, res) => {
   res.json({ success: true, items: db.SHOP_ITEMS });
 });
 
-// 7. Beli Item dari Shop JakLudo (100 Poin)
 app.post('/api/shop/buy', (req, res) => {
-  const authHeader = req.headers.authorization || '';
-  const token = (authHeader.replace(/^Bearer\s+/i, '') || req.body?.token || '').trim();
-  const user = db.getUserByToken(token);
+  const user = db.getUserByToken(bearerToken(req) || String(req.body?.token || ''));
   if (!user) {
     return res.status(401).json({ success: false, error: 'Silakan login terlebih dahulu untuk berbelanja.' });
   }
 
-  const { itemType } = req.body || {};
-  const result = db.buyShopItem({ userId: user.id, username: user.username, itemType });
-  if (result.error) {
-    return res.status(400).json({ success: false, error: result.error });
-  }
+  const result = db.buyShopItem({ userId: user.id, itemType: req.body?.itemType });
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
 
-  // Jika user sedang berada di dalam room aktif, sinkronkan inventory di room
+  // Sinkronkan inventory jika user sedang berada di room aktif
   for (const [, r] of rooms) {
-    const playerInRoom = r.players.find(p => p.userId === user.id || (p.username && p.username.toLowerCase() === user.username.toLowerCase()));
+    const playerInRoom = r.players.find(p => p.userId === user.id);
     if (playerInRoom) {
       playerInRoom.inventory = { ...result.inventory };
       emitRoom(r);
     }
   }
 
-  const isKing = db.checkIsLudoKing(result.user.username);
   res.json({
     success: true,
     message: `Berhasil membeli ${result.item.name}!`,
     item: result.item,
-    user: { ...result.user, isLudoKing: isKing }
+    user: { ...result.user, isLudoKing: db.checkIsLudoKing(user.id) }
   });
 });
+
+app.use('/api', (req, res) => res.status(404).json({ success: false, error: 'Endpoint tidak ditemukan.' }));
+
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large' || err instanceof SyntaxError) {
+    return res.status(400).json({ success: false, error: 'Permintaan tidak valid.' });
+  }
+  console.error('[http]', err);
+  res.status(500).json({ success: false, error: 'Terjadi kesalahan pada server.' });
+});
+
 const dist = path.join(__dirname, '../dist');
 app.use(express.static(dist));
 app.get('*', (req, res) => res.sendFile(path.join(dist, 'index.html')));
 
+// ==========================================
+// PROSES: simpan data saat berhenti, jangan mati karena satu error
+// ==========================================
+
+process.on('uncaughtException', err => {
+  console.error('[uncaughtException]', err);
+  db.flushNow();
+});
+process.on('unhandledRejection', err => {
+  console.error('[unhandledRejection]', err);
+});
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    db.flushNow();
+    process.exit(0);
+  });
+}
+
 const PORT = process.env.PORT || 5172;
-server.listen(PORT, () => console.log(`JakLudo server listening on ${PORT}`));
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`JakLudo server listening on ${PORT}`));
+}
+
+module.exports = { server, io, rooms };

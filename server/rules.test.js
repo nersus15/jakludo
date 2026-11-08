@@ -1,0 +1,55 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { canPawnMove, getMovablePawns, chooseBestPawn, nextFreeColor, getTrackIndex, isPawnIndex } = require('./rules');
+
+function makeRoom(pawnsByPlayer, settings = { safeZones: true }) {
+  const colors = ['red', 'green', 'yellow', 'blue'];
+  const players = Object.keys(pawnsByPlayer).map((id, i) => ({ id, color: colors[i] }));
+  return { players, pawns: pawnsByPlayer, settings };
+}
+
+test('bidak di markas hanya keluar dengan angka 1 atau 6', () => {
+  const room = makeRoom({ a: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+  const a = room.players[0];
+  assert.deepEqual(getMovablePawns(room, a, 3), []);
+  assert.deepEqual(getMovablePawns(room, a, 6), [0, 1, 2, 3]);
+  assert.deepEqual(getMovablePawns(room, a, 1), [0, 1, 2, 3]);
+});
+
+test('tidak boleh mendarat di petak bidak sendiri', () => {
+  const room = makeRoom({ a: [5, 8, 0, 0], b: [0, 0, 0, 0] });
+  assert.equal(canPawnMove(room, room.players[0], 0, 3), false);
+  assert.equal(canPawnMove(room, room.players[0], 0, 4), true);
+});
+
+test('tidak boleh melewati petak finish', () => {
+  const room = makeRoom({ a: [42, 0, 0, 0], b: [0, 0, 0, 0] });
+  assert.equal(canPawnMove(room, room.players[0], 0, 2), true);
+  assert.equal(canPawnMove(room, room.players[0], 0, 3), false);
+});
+
+test('safe zone yang ditempati lawan tidak bisa didarati', () => {
+  // Track 6 adalah safe zone. Merah val 7 -> track 6. Hijau val 37 -> track (10+36)%40 = 6.
+  const room = makeRoom({ a: [3, 0, 0, 0], b: [37, 0, 0, 0] });
+  assert.equal(getTrackIndex(1, 37), 6);
+  assert.equal(canPawnMove(room, room.players[0], 0, 4), false);
+  room.settings.safeZones = false;
+  assert.equal(canPawnMove(room, room.players[0], 0, 4), true);
+});
+
+test('bot memprioritaskan memakan lawan', () => {
+  // Merah: bidak 0 di val 2 (track 1), bidak 1 di val 10 (track 9). Hijau di track 12 (val 3).
+  const room = makeRoom({ a: [2, 10, 0, 0], b: [3, 0, 0, 0] });
+  // dadu 3: bidak 1 -> val 13 -> track 12 = makan lawan
+  assert.equal(chooseBestPawn(room, room.players[0], 3), 1);
+});
+
+test('nextFreeColor memilih warna yang belum dipakai', () => {
+  assert.equal(nextFreeColor([{ color: 'red' }, { color: 'yellow' }]), 'green');
+  assert.equal(nextFreeColor([{ color: 'red' }, { color: 'green' }, { color: 'yellow' }, { color: 'blue' }]), null);
+});
+
+test('isPawnIndex hanya menerima bilangan bulat 0..3', () => {
+  for (const ok of [0, 1, 2, 3]) assert.equal(isPawnIndex(ok), true);
+  for (const bad of [-1, 4, 1.5, '1', 'abc', null, undefined, NaN]) assert.equal(isPawnIndex(bad), false);
+});

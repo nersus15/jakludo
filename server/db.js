@@ -1,91 +1,100 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { promisify } = require('util');
 
-const DATA_DIR = path.join(__dirname, 'data');
+const scrypt = promisify(crypto.scrypt);
+
+const DATA_DIR = process.env.JAKLUDO_DATA_DIR || path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 
-// Pastikan direktori data ada
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
+const STARTER_POINTS = 200;
+const WIN_POINTS = 25;
+const PLAY_POINTS = 5;
+
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-function readJson(file, defaultVal) {
+// ==========================================
+// PENYIMPANAN JSON (cache memori + tulis atomic)
+// ==========================================
+
+// File yang rusak TIDAK boleh diperlakukan sebagai kosong: penulisan berikutnya akan
+// menimpa seluruh data. Simpan salinan lalu hentikan server.
+function loadJson(file, defaultVal) {
+  if (!fs.existsSync(file)) return defaultVal;
+  const content = fs.readFileSync(file, 'utf8').trim();
+  if (!content) return defaultVal;
   try {
-    if (!fs.existsSync(file)) return defaultVal;
-    const content = fs.readFileSync(file, 'utf8').trim();
-    if (!content) return defaultVal;
     return JSON.parse(content);
   } catch (err) {
-    console.error(`Error reading ${file}:`, err);
-    return defaultVal;
+    const backup = `${file}.corrupt-${Date.now()}`;
+    fs.copyFileSync(file, backup);
+    throw new Error(`[DB FATAL] ${file} tidak valid (${err.message}). Salinan disimpan di ${backup}. Perbaiki/pulihkan file sebelum menjalankan server.`);
   }
 }
 
-function writeJson(file, data) {
-  try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error(`[DB WARNING] Gagal menulis ke ${file} (${err.code || err.message}). Pastikan folder server/data memiliki izin write (chmod 777 server/data).`);
-  }
+function writeJsonAtomic(file, data) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(tmp, file);
 }
 
-// Inisialisasi awal Leaderboard data jika kosong
-function initData() {
-  const users = readJson(USERS_FILE, []);
-  const leaderboard = readJson(LEADERBOARD_FILE, []);
+const store = {
+  users: loadJson(USERS_FILE, []),
+  sessions: loadJson(SESSIONS_FILE, {}),
+  leaderboard: loadJson(LEADERBOARD_FILE, [])
+};
+const FILES = { users: USERS_FILE, sessions: SESSIONS_FILE, leaderboard: LEADERBOARD_FILE };
+const dirty = new Set();
+let flushTimer = null;
+let rankedCache = null;
 
-  if (leaderboard.length === 0) {
-    // Seed default leaderboard players untuk visual awal yang menarik
-    const seedPlayers = [
-      {
-        userId: 'seed-1',
-        username: 'ludo_emperor',
-        name: 'Sultan JakLudo',
-        avatar: '👑',
-        wins: 18,
-        matchesPlayed: 24,
-        points: 570, // 18*25 + 24*5
-        authType: 'seed'
-      },
-      {
-        userId: 'seed-2',
-        username: 'queen_dice',
-        name: 'Ratu Dadu',
-        avatar: '🎲',
-        wins: 14,
-        matchesPlayed: 20,
-        points: 450,
-        authType: 'seed'
-      },
-      {
-        userId: 'seed-3',
-        username: 'lucky_roller',
-        name: 'Si Hoki 6',
-        avatar: '🔥',
-        wins: 11,
-        matchesPlayed: 18,
-        points: 365,
-        authType: 'seed'
-      },
-      {
-        userId: 'seed-4',
-        username: 'master_stride',
-        name: 'Langkah Sakti',
-        avatar: '⚡',
-        wins: 8,
-        matchesPlayed: 15,
-        points: 275,
-        authType: 'seed'
-      }
-    ];
-    writeJson(LEADERBOARD_FILE, seedPlayers);
+function flushNow() {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
   }
+  for (const key of [...dirty]) {
+    try {
+      writeJsonAtomic(FILES[key], store[key]);
+      dirty.delete(key);
+    } catch (err) {
+      console.error(`[DB WARNING] Gagal menulis ${FILES[key]} (${err.code || err.message}). Pastikan folder server/data dapat ditulis oleh proses server.`);
+    }
+  }
+  // Coba ulang nanti jika masih ada yang gagal ditulis
+  if (dirty.size > 0) scheduleFlush(5000);
 }
 
-initData();
+function scheduleFlush(delay = 200) {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushNow();
+  }, delay);
+}
+
+function markDirty(key) {
+  dirty.add(key);
+  if (key === 'leaderboard') rankedCache = null;
+  scheduleFlush();
+}
+
+// Seed leaderboard awal untuk visual awal yang menarik
+if (store.leaderboard.length === 0) {
+  store.leaderboard = [
+    { userId: 'seed-1', username: 'ludo_emperor', name: 'Sultan JakLudo', avatar: '👑', wins: 18, matchesPlayed: 24, points: 570, authType: 'seed' },
+    { userId: 'seed-2', username: 'queen_dice', name: 'Ratu Dadu', avatar: '🎲', wins: 14, matchesPlayed: 20, points: 450, authType: 'seed' },
+    { userId: 'seed-3', username: 'lucky_roller', name: 'Si Hoki 6', avatar: '🔥', wins: 11, matchesPlayed: 18, points: 365, authType: 'seed' },
+    { userId: 'seed-4', username: 'master_stride', name: 'Langkah Sakti', avatar: '⚡', wins: 8, matchesPlayed: 15, points: 275, authType: 'seed' }
+  ];
+  markDirty('leaderboard');
+}
 
 // ==========================================
 // STANDARD KEAMANAN PASSWORD & VALIDASI
@@ -112,6 +121,9 @@ function validatePassword(password) {
   if (password.length < 8) {
     return { valid: false, message: 'Password minimal 8 karakter.' };
   }
+  if (password.length > 128) {
+    return { valid: false, message: 'Password maksimal 128 karakter.' };
+  }
   if (!/[a-z]/.test(password)) {
     return { valid: false, message: 'Password harus mengandung minimal 1 huruf kecil.' };
   }
@@ -127,20 +139,20 @@ function validatePassword(password) {
   return { valid: true };
 }
 
-// Scrypt standard NIST/OWASP password hashing
-function hashPassword(password) {
+// Scrypt async agar hashing tidak memblokir event loop game
+async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const derivedKey = crypto.scryptSync(password, salt, 64);
+  const derivedKey = await scrypt(password, salt, 64);
   return `scrypt:${salt}:${derivedKey.toString('hex')}`;
 }
 
-function verifyPassword(password, storedHash) {
+async function verifyPassword(password, storedHash) {
   try {
-    const [algorithm, salt, originalKeyHex] = storedHash.split(':');
+    const [algorithm, salt, originalKeyHex] = String(storedHash).split(':');
     if (algorithm !== 'scrypt' || !salt || !originalKeyHex) return false;
-
-    const derivedKey = crypto.scryptSync(password, salt, 64);
+    const derivedKey = await scrypt(password, salt, 64);
     const originalKey = Buffer.from(originalKeyHex, 'hex');
+    if (originalKey.length !== derivedKey.length) return false;
     return crypto.timingSafeEqual(derivedKey, originalKey);
   } catch (err) {
     console.error('Password verify error:', err);
@@ -149,77 +161,61 @@ function verifyPassword(password, storedHash) {
 }
 
 // ==========================================
-// MANAJEMEN USER & SSO
+// MANAJEMEN USER
 // ==========================================
 
-let inMemoryUsers = null;
-
-function getAllUsers() {
-  if (inMemoryUsers !== null) {
-    return inMemoryUsers;
-  }
-  inMemoryUsers = readJson(USERS_FILE, []);
-  return inMemoryUsers;
-}
-
 function findUserByUsername(username) {
-  const users = getAllUsers();
-  return users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  const lower = String(username).toLowerCase();
+  return store.users.find(u => u.username.toLowerCase() === lower);
 }
 
 function findUserById(id) {
-  const users = getAllUsers();
-  return users.find(u => u.id === id);
+  return store.users.find(u => u.id === id);
 }
 
-function findUserByGoogleId(googleId) {
-  const users = getAllUsers();
-  return users.find(u => u.googleId === googleId);
+function findEntry(userId) {
+  return store.leaderboard.find(b => b.userId === userId);
 }
 
-// Buat akun baru dengan Username & Password
-function registerUser({ username, password, name }) {
+async function registerUser({ username, password, name }) {
   const userValid = validateUsername(username);
   if (!userValid.valid) return { error: userValid.message };
 
   const passValid = validatePassword(password);
   if (!passValid.valid) return { error: passValid.message };
 
-  const existing = findUserByUsername(userValid.cleanUsername);
-  if (existing) {
+  if (findUserByUsername(userValid.cleanUsername)) {
     return { error: 'Username sudah digunakan, silakan pilih username lain.' };
   }
 
-  const users = getAllUsers();
+  const passwordHash = await hashPassword(password);
+
+  // Cek ulang: dua pendaftaran bersamaan bisa lolos cek pertama selama hashing berjalan
+  if (findUserByUsername(userValid.cleanUsername)) {
+    return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+  }
+
+  const cleanName = typeof name === 'string' ? name.trim().slice(0, 18) : '';
   const newUser = {
     id: 'user_' + crypto.randomUUID(),
     username: userValid.cleanUsername,
-    name: (name && name.trim()) || userValid.cleanUsername,
-    passwordHash: hashPassword(password),
+    name: cleanName || userValid.cleanUsername,
+    passwordHash,
     authType: 'password',
     avatar: '🎯',
     createdAt: new Date().toISOString()
   };
 
-  users.push(newUser);
-  inMemoryUsers = users;
-  writeJson(USERS_FILE, users);
-
-  // Buat sesi login otomatis
-  const token = createSession(newUser.id);
-
-  // Pastikan ada entry di leaderboard
+  store.users.push(newUser);
+  markDirty('users');
   ensureLeaderboardEntry(newUser);
 
-  return {
-    user: sanitizeUser(newUser),
-    token
-  };
+  const token = createSession(newUser.id);
+  return { user: sanitizeUser(newUser), token };
 }
 
-// Login dengan Username & Password
-function loginUser({ username, password }) {
-  if (!username || !password) {
+async function loginUser({ username, password }) {
+  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
     return { error: 'Username dan password wajib diisi.' };
   }
 
@@ -228,79 +224,12 @@ function loginUser({ username, password }) {
     return { error: 'Username atau password salah.' };
   }
 
-  const isValid = verifyPassword(password, user.passwordHash);
-  if (!isValid) {
+  if (!(await verifyPassword(password, user.passwordHash))) {
     return { error: 'Username atau password salah.' };
   }
 
   const token = createSession(user.id);
-  return {
-    user: sanitizeUser(user),
-    token
-  };
-}
-
-// Login / Register menggunakan Google SSO
-function loginWithGoogle({ googleId, email, name, picture, chosenUsername }) {
-  if (!googleId || !email) {
-    return { error: 'Data Google SSO tidak valid.' };
-  }
-
-  const users = getAllUsers();
-  let user = findUserByGoogleId(googleId);
-
-  if (user) {
-    // User Google sudah pernah terdaftar
-    const token = createSession(user.id);
-    return { user: sanitizeUser(user), token };
-  }
-
-  // Jika user Google baru, harus ada unique username
-  let targetUsername = chosenUsername;
-  if (!targetUsername) {
-    // Generate default username dari email prefix
-    const prefix = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 15);
-    targetUsername = prefix || 'player';
-  }
-
-  const userValid = validateUsername(targetUsername);
-  if (!userValid.valid) {
-    // Jika format default kurang valid, tambahkan random suffix
-    targetUsername = 'joy_' + Math.floor(1000 + Math.random() * 9000);
-  } else {
-    targetUsername = userValid.cleanUsername;
-  }
-
-  // Cek apakah username unik, jika bentrok tambahkan angka
-  let uniqueUsername = targetUsername;
-  let counter = 1;
-  while (findUserByUsername(uniqueUsername)) {
-    uniqueUsername = `${targetUsername}${counter}`;
-    counter++;
-  }
-
-  const newUser = {
-    id: 'user_goog_' + crypto.randomUUID(),
-    googleId,
-    email,
-    username: uniqueUsername,
-    name: name || uniqueUsername,
-    avatar: picture || '🎲',
-    authType: 'google',
-    createdAt: new Date().toISOString()
-  };
-
-  users.push(newUser);
-  writeJson(USERS_FILE, users);
-
-  ensureLeaderboardEntry(newUser);
-  const token = createSession(newUser.id);
-
-  return {
-    user: sanitizeUser(newUser),
-    token,
-    isNewUser: true
-  };
+  return { user: sanitizeUser(user), token };
 }
 
 // ==========================================
@@ -328,10 +257,7 @@ const SHOP_ITEMS = {
 
 function sanitizeUser(u) {
   if (!u) return null;
-  const board = readJson(LEADERBOARD_FILE, []);
-  const entry = board.find(b => (u.id && b.userId === u.id) || (u.username && b.username.toLowerCase() === u.username.toLowerCase()));
-  const points = entry ? (entry.points || 0) : 0;
-
+  const entry = findEntry(u.id);
   return {
     id: u.id,
     username: u.username,
@@ -339,7 +265,7 @@ function sanitizeUser(u) {
     avatar: u.avatar,
     email: u.email,
     authType: u.authType,
-    points,
+    points: entry ? (entry.points || 0) : 0,
     inventory: {
       blackholeShield: (u.inventory && u.inventory.blackholeShield) || 0,
       forceReturn: (u.inventory && u.inventory.forceReturn) || 0
@@ -351,228 +277,160 @@ function sanitizeUser(u) {
 // SESSION MANAGEMENT (TOKEN)
 // ==========================================
 
-let inMemorySessions = null;
-
-function getSessions() {
-  if (inMemorySessions !== null) {
-    return inMemorySessions;
-  }
-  inMemorySessions = readJson(SESSIONS_FILE, {});
-  return inMemorySessions;
-}
-
 function createSession(userId) {
-  const sessions = getSessions();
   const token = crypto.randomBytes(32).toString('hex');
-  sessions[token] = {
+  store.sessions[token] = {
     userId,
     createdAt: Date.now(),
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 hari
+    expiresAt: Date.now() + SESSION_TTL_MS
   };
-  inMemorySessions = sessions;
-  writeJson(SESSIONS_FILE, sessions);
+  markDirty('sessions');
   return token;
 }
 
 function getUserByToken(token) {
-  if (!token) return null;
-  const sessions = getSessions();
-  const session = sessions[token];
-  if (!session) return null;
+  if (!token || typeof token !== 'string') return null;
+  if (!Object.prototype.hasOwnProperty.call(store.sessions, token)) return null;
+  const session = store.sessions[token];
 
   if (Date.now() > session.expiresAt) {
-    delete sessions[token];
-    inMemorySessions = sessions;
-    writeJson(SESSIONS_FILE, sessions);
+    delete store.sessions[token];
+    markDirty('sessions');
     return null;
   }
-
-  return findUserById(session.userId);
+  return findUserById(session.userId) || null;
 }
+
+function deleteSession(token) {
+  if (typeof token === 'string' && Object.prototype.hasOwnProperty.call(store.sessions, token)) {
+    delete store.sessions[token];
+    markDirty('sessions');
+    return true;
+  }
+  return false;
+}
+
+function pruneExpiredSessions() {
+  const now = Date.now();
+  let removed = 0;
+  for (const [token, s] of Object.entries(store.sessions)) {
+    if (!s || now > s.expiresAt || !findUserById(s.userId)) {
+      delete store.sessions[token];
+      removed++;
+    }
+  }
+  if (removed > 0) markDirty('sessions');
+  return removed;
+}
+
+pruneExpiredSessions();
+setInterval(pruneExpiredSessions, 60 * 60 * 1000).unref();
 
 // ==========================================
 // LEADERBOARD & LUDO KING
 // ==========================================
 
 function ensureLeaderboardEntry(user) {
-  const board = readJson(LEADERBOARD_FILE, []);
-  let existing = board.find(b => b.userId === user.id || b.username.toLowerCase() === user.username.toLowerCase());
-  if (!existing) {
-    board.push({
-      userId: user.id,
-      username: user.username,
-      name: user.name,
-      avatar: user.avatar || '🎲',
-      wins: 0,
-      matchesPlayed: 0,
-      points: 200, // Bonus starter 200 poin untuk belanja di Toko!
-      authType: user.authType
-    });
-    writeJson(LEADERBOARD_FILE, board);
-  } else if (!existing.points || existing.points === 0) {
-    existing.points = 200; // Bonus selamat datang
-    writeJson(LEADERBOARD_FILE, board);
-  }
+  if (findEntry(user.id)) return;
+  store.leaderboard.push({
+    userId: user.id,
+    username: user.username,
+    name: user.name,
+    avatar: user.avatar || '🎲',
+    wins: 0,
+    matchesPlayed: 0,
+    points: STARTER_POINTS, // Bonus starter untuk belanja di Toko (sekali saja)
+    authType: user.authType
+  });
+  markDirty('leaderboard');
 }
 
-// Catat hasil pertandingan selesai
-function recordMatchResult({ winnerPlayerId, winnerUsername, players }) {
+// Catat hasil pertandingan. Hanya akun terdaftar yang mendapat poin, dan hanya
+// jika lawannya mencakup minimal satu manusia lain (menang lawan bot tidak dihitung).
+function recordMatchResult({ winnerPlayerId, players }) {
   if (!players || players.length === 0) return;
+  const humans = players.filter(p => !p.isBot);
+  if (humans.length < 2) return;
 
-  const board = readJson(LEADERBOARD_FILE, []);
+  let changed = false;
+  for (const p of humans) {
+    if (!p.userId) continue;
+    const user = findUserById(p.userId);
+    if (!user) continue;
+    ensureLeaderboardEntry(user);
+    const entry = findEntry(user.id);
 
-  players.forEach(p => {
-    // Cari entry pemain berdasarkan userId atau username
-    const pId = p.userId || p.id;
-    const pUsername = p.username || p.name;
-    let entry = board.find(b => (p.userId && b.userId === p.userId) || b.username.toLowerCase() === pUsername.toLowerCase());
-
-    if (!entry) {
-      entry = {
-        userId: pId,
-        username: pUsername,
-        name: p.name,
-        avatar: p.isBot ? '🤖' : (p.avatar || '🎲'),
-        wins: 0,
-        matchesPlayed: 0,
-        points: 0,
-        authType: p.isBot ? 'bot' : 'player'
-      };
-      board.push(entry);
-    }
-
-    const isWinner = (winnerPlayerId && p.id === winnerPlayerId) || (winnerUsername && p.username === winnerUsername);
     entry.matchesPlayed = (entry.matchesPlayed || 0) + 1;
-    if (isWinner) {
+    if (p.id === winnerPlayerId) {
       entry.wins = (entry.wins || 0) + 1;
-      entry.points = (entry.points || 0) + 25; // 25 Poin per Kemenangan
+      entry.points = (entry.points || 0) + WIN_POINTS;
     } else {
-      entry.points = (entry.points || 0) + 5; // 5 Poin Partisipasi
+      entry.points = (entry.points || 0) + PLAY_POINTS;
     }
-  });
-
-  writeJson(LEADERBOARD_FILE, board);
-  return getLeaderboard();
+    changed = true;
+  }
+  if (changed) markDirty('leaderboard');
 }
 
-// Ambil ranking leaderboard terurut & tentukan LUDO KING (#1)
+// Urutkan: wins -> points -> win rate. Baris bot/tamu lama tidak ditampilkan.
 function getLeaderboard() {
-  const board = readJson(LEADERBOARD_FILE, []);
+  if (rankedCache) return rankedCache;
+  const sorted = store.leaderboard
+    .filter(p => p.authType !== 'bot' && p.authType !== 'player')
+    .sort((a, b) => {
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.points !== a.points) return b.points - a.points;
+      const aRate = a.matchesPlayed > 0 ? a.wins / a.matchesPlayed : 0;
+      const bRate = b.matchesPlayed > 0 ? b.wins / b.matchesPlayed : 0;
+      return bRate - aRate;
+    });
 
-  // Urutkan: Paling banyak Kemenangan (wins) -> Paling banyak Points -> Win Rate
-  const sorted = [...board].sort((a, b) => {
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    if (b.points !== a.points) return b.points - a.points;
-    const aRate = a.matchesPlayed > 0 ? a.wins / a.matchesPlayed : 0;
-    const bRate = b.matchesPlayed > 0 ? b.wins / b.matchesPlayed : 0;
-    return bRate - aRate;
-  });
-
-  // Tandai rank dan identifikasi Sang LUDO KING (#1)
-  const ranked = sorted.map((player, index) => {
+  rankedCache = sorted.map((player, index) => {
     const rank = index + 1;
-    const winRate = player.matchesPlayed > 0
-      ? Math.round((player.wins / player.matchesPlayed) * 100)
-      : 0;
-    const isLudoKing = rank === 1 && player.wins > 0;
-
-    return {
-      ...player,
-      rank,
-      winRate,
-      isLudoKing
-    };
+    const winRate = player.matchesPlayed > 0 ? Math.round((player.wins / player.matchesPlayed) * 100) : 0;
+    return { ...player, rank, winRate, isLudoKing: rank === 1 && player.wins > 0 };
   });
-
-  return ranked;
+  return rankedCache;
 }
 
-// Pembelian item dari Shop/Store
-function buyShopItem({ userId, username, itemType }) {
-  const item = SHOP_ITEMS[itemType];
-  if (!item) {
+function checkIsLudoKing(userId) {
+  if (!userId) return false;
+  const king = getLeaderboard()[0];
+  return !!(king && king.isLudoKing && king.userId === userId);
+}
+
+function buyShopItem({ userId, itemType }) {
+  if (!Object.prototype.hasOwnProperty.call(SHOP_ITEMS, itemType)) {
     return { error: 'Item toko tidak valid.' };
   }
+  const item = SHOP_ITEMS[itemType];
 
-  const users = getAllUsers();
-  let user = null;
-  if (userId) {
-    user = users.find(u => u.id === userId);
-  }
-  if (!user && username) {
-    user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
-  }
-  if (!user) {
-    return { error: 'Pengguna tidak ditemukan.' };
-  }
+  const user = findUserById(userId);
+  if (!user) return { error: 'Pengguna tidak ditemukan.' };
 
-  const board = readJson(LEADERBOARD_FILE, []);
-  let entry = board.find(b => (user.id && b.userId === user.id) || b.username.toLowerCase() === user.username.toLowerCase());
-  if (!entry) {
-    entry = {
-      userId: user.id,
-      username: user.username,
-      name: user.name,
-      avatar: user.avatar || '🎯',
-      wins: 0,
-      matchesPlayed: 0,
-      points: 200,
-      authType: user.authType
-    };
-    board.push(entry);
-  }
-
+  ensureLeaderboardEntry(user);
+  const entry = findEntry(user.id);
   const currentPoints = entry.points || 0;
   if (currentPoints < item.price) {
     return { error: `Poin tidak mencukupi. Diperlukan ${item.price} poin, kamu memiliki ${currentPoints} poin.` };
   }
 
-  // Kurangi saldo poin user
   entry.points = currentPoints - item.price;
-  writeJson(LEADERBOARD_FILE, board);
+  markDirty('leaderboard');
 
-  // Tambah item ke inventaris user
-  if (!user.inventory) {
-    user.inventory = { blackholeShield: 0, forceReturn: 0 };
-  }
+  if (!user.inventory) user.inventory = { blackholeShield: 0, forceReturn: 0 };
   user.inventory[itemType] = (user.inventory[itemType] || 0) + 1;
-  writeJson(USERS_FILE, users);
+  markDirty('users');
 
-  return {
-    success: true,
-    item,
-    points: entry.points,
-    inventory: user.inventory,
-    user: sanitizeUser(user)
-  };
+  return { success: true, item, points: entry.points, inventory: { ...user.inventory }, user: sanitizeUser(user) };
 }
 
-// Penggunaan item di dalam permainan
-function consumeUserItem({ userId, username, itemType }) {
-  if (!itemType) return false;
-  const users = getAllUsers();
-  let user = null;
-  if (userId) {
-    user = users.find(u => u.id === userId);
-  }
-  if (!user && username) {
-    user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
-  }
-  if (!user || !user.inventory || !user.inventory[itemType] || user.inventory[itemType] <= 0) {
-    return false;
-  }
-
+function consumeUserItem({ userId, itemType }) {
+  const user = userId ? findUserById(userId) : null;
+  if (!user || !user.inventory || !(user.inventory[itemType] > 0)) return false;
   user.inventory[itemType] -= 1;
-  writeJson(USERS_FILE, users);
+  markDirty('users');
   return true;
-}
-
-// Cek apakah username tertentu adalah Ludo King saat ini
-function checkIsLudoKing(username) {
-  if (!username) return false;
-  const board = getLeaderboard();
-  const king = board[0];
-  return king && king.isLudoKing && king.username.toLowerCase() === username.toLowerCase();
 }
 
 module.exports = {
@@ -582,14 +440,16 @@ module.exports = {
   verifyPassword,
   registerUser,
   loginUser,
-  loginWithGoogle,
   getUserByToken,
+  getUserById: findUserById,
+  deleteSession,
+  pruneExpiredSessions,
   recordMatchResult,
   getLeaderboard,
   checkIsLudoKing,
   sanitizeUser,
   SHOP_ITEMS,
   buyShopItem,
-  consumeUserItem
+  consumeUserItem,
+  flushNow
 };
-

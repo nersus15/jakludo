@@ -335,7 +335,8 @@ function LudoBoardView({
 
     const trackIdx = TRACK_INDEX_BY_CELL.get(`${r},${c}`) ?? -1;
     const isBlackHole = blackHoleActive && trackIdx !== -1 && blackHoles.includes(trackIdx);
-    const isStar = trackIdx !== -1 && SAFE_TRACK_INDICES.includes(trackIdx);
+    // Petak start tidak diberi bintang: hanya aman bagi pemilik warnanya, bukan zona aman bersama
+    const isStar = trackIdx !== -1 && !startColor && SAFE_TRACK_INDICES.includes(trackIdx);
 
     const cellPawns = pawnsByCoord[`${r},${c}`] || [];
 

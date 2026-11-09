@@ -66,6 +66,10 @@ function publicRoom(r) {
     lastItemEvent: r.lastItemEvent || null,
     lastBlackHoleShift: r.lastBlackHoleShift || null,
     blackHoles: r.settings?.blackHole ? getBlackHoles(r) : [],
+    // Mode acak: sisa pergantian giliran sampai Black Hole pindah (1 = pindah setelah giliran ini)
+    blackHoleShiftIn: r.started && r.settings?.blackHole && r.settings.blackHoleMode === 'random'
+      ? Math.max(1, r.players.filter(p => !p.isOut).length - (r.turnsSinceBlackHoleShift || 0))
+      : null,
     history: r.history || [],
     settings: { blackHoleMode: 'static', ...(r.settings || { safeZones: true, blackHole: false }) }
   };

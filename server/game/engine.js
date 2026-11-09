@@ -102,10 +102,10 @@ function advanceTurn(room) {
   room.turn = next;
   room.dice = null;
   room.consecutiveSixes = 0;
-  shiftBlackHolesEachRound(room, activePlayers.length);
+  const holesShifted = shiftBlackHolesEachRound(room, activePlayers.length);
   room.players.forEach(p => { p.accumulatedThisTurn = false; });
   const nextPlayer = room.players[room.turn];
-  room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/${MAX_AUTO_PLAY})` : ''}.`;
+  room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/${MAX_AUTO_PLAY})` : ''}.${holesShifted ? ' 🕳️ Black Hole pindah tempat!' : ''}`;
 
   emitRoom(room);
   triggerTurn(room);
@@ -114,13 +114,14 @@ function advanceTurn(room) {
 // Mode Black Hole acak: setelah semua pemain aktif mendapat giliran (1 putaran),
 // keempat Black Hole pindah ke petak lain di ruasnya masing-masing.
 function shiftBlackHolesEachRound(room, activeCount) {
-  if (!room.settings?.blackHole || room.settings.blackHoleMode !== 'random') return;
+  if (!room.settings?.blackHole || room.settings.blackHoleMode !== 'random') return false;
   room.turnsSinceBlackHoleShift = (room.turnsSinceBlackHoleShift || 0) + 1;
-  if (room.turnsSinceBlackHoleShift < activeCount) return;
+  if (room.turnsSinceBlackHoleShift < activeCount) return false;
   room.turnsSinceBlackHoleShift = 0;
   room.blackHoles = relocateBlackHoles(room);
   room.lastBlackHoleShift = { id: eventId(), positions: room.blackHoles };
   addHistory(room, '🕳️ Black Hole berpindah tempat!');
+  return true;
 }
 
 // Jadwalkan aksi berikutnya untuk pemain yang sedang mendapat giliran

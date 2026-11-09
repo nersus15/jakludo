@@ -249,6 +249,18 @@
   from { background: #ffffff; transform: scale(0.6); }
 }
 
+/* Petak tujuan yang ternyata Black Hole tetap gelap (tidak tertimpa sorotan tujuan),
+   diberi cincin merah agar pemain sadar sebelum memilih langkah itu */
+.cell-black-hole.cell-valid-target {
+  background: #2b2420;
+  box-shadow: inset 0 0 0 3px #ef4444;
+}
+
+.cell-black-hole .target-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #2b2420;
+}
+
 /* Warna tanpa pemain: markas tetap tergambar tapi redup dan kosong */
 .base-empty .base-inner-card {
   opacity: 0.55;

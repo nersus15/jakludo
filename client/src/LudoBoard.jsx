@@ -362,7 +362,7 @@ function LudoBoardView({
             type="button"
             className="target-tile"
             onClick={() => !room.animatingMove && handlePawnClick(targetInfo.pawnIdx, true)}
-            aria-label={`Jalankan bidak ${targetInfo.pawnIdx + 1} ke petak ini`}
+            aria-label={`Jalankan bidak ${targetInfo.pawnIdx + 1} ke petak ini${isBlackHole ? ' (Black Hole!)' : ''}`}
           >
             <span className="target-dot" aria-hidden="true" />
           </button>
@@ -371,7 +371,7 @@ function LudoBoardView({
         {isStar && safeZonesActive && (
           <span className="cell-icon star-icon" style={counterStyle} aria-hidden="true">★</span>
         )}
-        {isBlackHole && !cellPawns.length && !isValidTarget && (
+        {isBlackHole && !cellPawns.length && (
           <span className="cell-icon blackhole-icon" style={counterStyle} role="img" aria-label="Black Hole">
             🕳️
           </span>

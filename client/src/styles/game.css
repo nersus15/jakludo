@@ -107,6 +107,10 @@
   color: var(--text-2);
 }
 
+.turn-panel__hint {
+  font-size: var(--fs-xs);
+}
+
 .pawn-choices {
   display: flex;
   flex-wrap: wrap;

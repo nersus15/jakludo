@@ -1,194 +1,106 @@
 import React, { useState } from 'react';
+import Modal from './components/Modal';
 import { sound } from './sound';
+import { storage } from './storage';
+import { useItemCatalogState } from './items';
 
 export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, authToken }) {
-  const [purchasing, setPurchasing] = useState(null);
+  const [buying, setBuying] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const catalog = useItemCatalogState();
 
-  if (!isOpen) return null;
+  const points = currentUser?.points ?? 0;
+  const owned = currentUser?.inventory || {};
 
-  const userPoints = currentUser?.points ?? 0;
-  const userInventory = currentUser?.inventory || { blackholeShield: 0, forceReturn: 0 };
-
-  const handleBuy = async (itemType, itemName, price) => {
-    if (!currentUser) {
-      setFeedback({ type: 'error', message: 'Silakan masuk atau daftar akun terlebih dahulu untuk berbelanja.' });
-      return;
-    }
-
-    if (userPoints < price) {
-      sound.playClick();
-      setFeedback({ type: 'error', message: `Poin tidak mencukupi! Kamu memiliki ${userPoints} poin, dibutuhkan ${price} poin.` });
-      return;
-    }
-
-    setPurchasing(itemType);
+  const buy = async item => {
+    setBuying(item.id);
     setFeedback(null);
     sound.playClick();
-
     try {
-      const token = authToken || localStorage.getItem('jakplayer_token') || localStorage.getItem('joybit_token');
       const res = await fetch('/api/shop/buy', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ itemType, token })
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken || storage.get('token')}` },
+        body: JSON.stringify({ itemId: item.id })
       });
-
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : {};
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Gagal melakukan pembelian item.');
-      }
-
-      // Mainkan efek audio sukses belanja
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Pembelian gagal. Coba lagi.');
       sound.playShopPurchase();
-
-      setFeedback({
-        type: 'success',
-        message: `✨ Berhasil membeli ${itemName}! Saldo tersisa: ${data.user?.points ?? (userPoints - price)} poin.`
-      });
-
-      if (onUpdateUser && data.user) {
-        onUpdateUser(data.user);
-      }
+      setFeedback({ type: 'success', message: `${item.name} berhasil dibeli. Sisa poin: ${data.user?.points ?? points - item.price}.` });
+      if (data.user) onUpdateUser?.(data.user);
     } catch (err) {
-      setFeedback({ type: 'error', message: err.message || 'Terjadi kesalahan saat membeli.' });
+      setFeedback({ type: 'error', message: err.message });
     } finally {
-      setPurchasing(null);
+      setBuying(null);
     }
   };
 
-  const ITEMS = [
-    {
-      id: 'blackholeShield',
-      name: 'Blackhole Shield',
-      icon: '🛡️',
-      price: 100,
-      badge: 'Perisai Pasif Otomatis',
-      badgeColor: '#3b82f6',
-      description: 'Melindungi bidakmu dari sedotan Blackhole! Saat bidakmu melangkah ke petak Blackhole, perisai ini otomatis aktif sehingga bidakmu TIDAK tersedot kembali ke markas.',
-      owned: userInventory.blackholeShield || 0,
-      highlight: 'Otomatis aktif saat terkena Blackhole'
-    },
-    {
-      id: 'forceReturn',
-      name: 'Force Return',
-      icon: '⚡',
-      price: 100,
-      badge: 'Skill Eliminasi Aktif',
-      badgeColor: '#f59e0b',
-      description: 'Kekuatan petir eliminasi instan! Setiap kali kamu sudah berhasil menginjak/memakan bidak lawan sebanyak 3 kali, kemampuan Force Return akan menyala. Pilih 1 bidak lawan di arena untuk langsung dipulangkan ke markas + bonus jalan lagi!',
-      owned: userInventory.forceReturn || 0,
-      highlight: 'Aktif saat sudah 3x menginjak bidak lawan'
-    }
-  ];
-
   return (
-    <div className="shop-modal-overlay" onClick={onClose}>
-      <div className="shop-modal-card" onClick={e => e.stopPropagation()}>
-        <button type="button" className="shop-close-btn" onClick={onClose} title="Tutup Toko">
-          ✕
-        </button>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="lg"
+      icon="🏪"
+      title="Toko item"
+      subtitle={currentUser ? `Poin kamu: ${points}` : 'Masuk dulu untuk membeli item.'}
+    >
+      {feedback && (
+        <p className={`alert alert--${feedback.type === 'success' ? 'success' : 'error'} shop__feedback`} role={feedback.type === 'success' ? 'status' : 'alert'}>
+          {feedback.message}
+        </p>
+      )}
 
-        {/* Modal Header */}
-        <div className="shop-header">
-          <div className="shop-header-title-row">
-            <span className="shop-header-icon">🏪</span>
-            <div>
-              <h2>Toko Item JakLudo</h2>
-              <p className="shop-header-sub">Tukarkan poin pertandinganmu dengan item berkekuatan sakti!</p>
-            </div>
-          </div>
-
-          {/* User Points Badge */}
-          <div className="shop-points-badge-box">
-            <span className="shop-points-label">SALDO POIN</span>
-            <div className="shop-points-val">
-              <span className="shop-gem-icon">💎</span>
-              <strong>{userPoints.toLocaleString('id-ID')}</strong>
-              <span className="shop-pts-unit">PTS</span>
-            </div>
-          </div>
+      {catalog.status === 'loading' && (
+        <p className="state-msg" role="status"><span className="spinner" aria-hidden="true" /> Memuat item...</p>
+      )}
+      {catalog.status === 'error' && (
+        <div className="state-msg" role="alert">
+          <p>Daftar item gagal dimuat.</p>
+          <button type="button" className="btn btn--secondary" onClick={catalog.retry}>Coba lagi</button>
         </div>
+      )}
+      {catalog.status === 'ready' && catalog.items.length === 0 && (
+        <p className="state-msg">Belum ada item di toko.</p>
+      )}
 
-        {/* Feedback Alert */}
-        {feedback && (
-          <div className={`shop-feedback-alert ${feedback.type}`}>
-            <span>{feedback.type === 'success' ? '🎉' : '⚠️'}</span>
-            <p>{feedback.message}</p>
-          </div>
-        )}
-
-        {/* Item Cards List */}
-        <div className="shop-items-grid">
-          {ITEMS.map(item => {
-            const canAfford = userPoints >= item.price;
-            const isBuying = purchasing === item.id;
-
-            return (
-              <div key={item.id} className={`shop-item-card card-${item.id}`}>
-                <div className="shop-item-top">
-                  <div className="shop-item-icon-wrap">
-                    <span className="shop-item-icon">{item.icon}</span>
-                  </div>
-                  <div className="shop-item-meta">
-                    <div className="shop-item-badge" style={{ borderColor: item.badgeColor, color: item.badgeColor }}>
-                      {item.badge}
-                    </div>
-                    <h3 className="shop-item-name">{item.name}</h3>
-                    <div className="shop-item-owned-chip">
-                      Dimiliki: <strong>{item.owned}</strong> buah
-                    </div>
-                  </div>
-                </div>
-
-                <p className="shop-item-desc">{item.description}</p>
-
-                <div className="shop-item-highlight">
-                  <span>💡</span> {item.highlight}
-                </div>
-
-                <div className="shop-item-footer">
-                  <div className="shop-price-tag">
-                    <span className="shop-price-gem">💎</span>
-                    <strong className="shop-price-amount">{item.price}</strong>
-                    <span className="shop-price-label">Poin</span>
-                  </div>
-
-                  <button
-                    type="button"
-                    className={`shop-buy-btn ${canAfford ? 'btn-can-afford' : 'btn-disabled'}`}
-                    disabled={!currentUser || !canAfford || isBuying}
-                    onClick={() => handleBuy(item.id, item.name, item.price)}
-                    title={!currentUser ? 'Login terlebih dahulu' : (!canAfford ? 'Poin tidak cukup' : `Beli ${item.name}`)}
-                  >
-                    {isBuying ? (
-                      <span className="shop-btn-loading">Memproses...</span>
-                    ) : (
-                      <span>🛒 Beli Item</span>
-                    )}
-                  </button>
+      <ul className="shop__items">
+        {catalog.items.map(item => {
+          const affordable = points >= item.price;
+          return (
+            <li key={item.id} className="shop-item card">
+              <div className="shop-item__head">
+                <span className="shop-item__icon" aria-hidden="true">{item.icon}</span>
+                <div>
+                  <h3>{item.name}</h3>
+                  <p className="muted">{item.kind === 'active' ? 'Dipakai manual di giliranmu' : 'Bekerja otomatis'} · dimiliki {owned[item.id] || 0}</p>
                 </div>
               </div>
-            );
-          })}
-        </div>
+              <p className="shop-item__desc">{item.description}</p>
+              {item.highlight && <p className="shop-item__note">{item.highlight}</p>}
+              <div className="shop-item__buy">
+                <span className="shop-item__price">💎 {item.price} poin</span>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={!currentUser || !affordable || buying === item.id}
+                  onClick={() => buy(item)}
+                >
+                  {buying === item.id ? 'Membeli...' : !currentUser ? 'Masuk dulu' : affordable ? `Beli ${item.name}` : 'Poin kurang'}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
 
-        {/* Petunjuk Cara Mendapatkan Poin */}
-        <div className="shop-info-footer">
-          <div className="shop-info-title">💡 Cara Mengumpulkan Poin JakLudo:</div>
-          <div className="shop-info-pills">
-            <span className="shop-info-pill">🏆 Menang Game: <strong>+25 Poin</strong></span>
-            <span className="shop-info-pill">🎮 Main Pertandingan: <strong>+5 Poin</strong></span>
-            <span className="shop-info-pill">🎁 Bonus Pengguna: <strong>+200 Poin</strong></span>
-          </div>
-        </div>
-      </div>
-    </div>
+      <section className="shop__earn" aria-labelledby="earn-title">
+        <h3 id="earn-title">Cara dapat poin</h3>
+        <ul>
+          <li>Menang pertandingan: <strong>+25 poin</strong></li>
+          <li>Ikut pertandingan sampai selesai: <strong>+5 poin</strong></li>
+          <li>Bonus akun baru: <strong>200 poin</strong></li>
+        </ul>
+        <p className="muted">Poin hanya dihitung untuk pertandingan bersama minimal satu pemain lain (bukan hanya bot).</p>
+      </section>
+    </Modal>
   );
 }
-

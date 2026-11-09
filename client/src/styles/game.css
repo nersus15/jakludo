@@ -1,0 +1,443 @@
+/* Layar permainan: papan + panel giliran. Satu set kontrol, disusun ulang per breakpoint. */
+
+.game {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-3) var(--space-5);
+  display: grid;
+  /* minmax(0, 1fr): kolom tidak ikut melebar mengikuti isi (mis. baris reaksi yang bisa digulir) */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  /* HP: papan memakai lebar penuh layar dikurangi padding */
+  --board-max: 600px;
+}
+
+.game__board {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+
+.game__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Tablet: papan lebih besar tapi tetap muat bersama panel giliran di layar */
+@media (min-width: 768px) {
+  .game {
+    padding: var(--space-4) var(--gutter) var(--space-6);
+    --board-max: min(640px, calc(100dvh - 330px));
+  }
+
+  .game__panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 760px;
+    width: 100%;
+    justify-self: center;
+  }
+
+  .game__panel > .turn-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Desktop: papan di kiri setinggi layar (header + 2 baris HUD + jarak ≈ 220px), panel di kanan */
+@media (min-width: 1100px) {
+  .game {
+    grid-template-columns: minmax(0, 1fr) 380px;
+    align-items: start;
+    gap: var(--space-5);
+    --board-max: min(680px, calc(100dvh - 220px));
+  }
+
+  .game__board {
+    position: sticky;
+    top: 76px;
+  }
+
+  .game__panel {
+    grid-template-columns: 1fr;
+    max-width: none;
+  }
+}
+
+/* ---------- Panel giliran ---------- */
+
+.turn-panel {
+  min-width: 0;
+  padding: var(--space-3);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.turn-panel.is-my-turn {
+  background: var(--brand-soft);
+}
+
+.turn-panel__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.turn-panel__side {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.turn-panel__who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: 600 var(--fs-lg) var(--font-display);
+  color: var(--pc-text, var(--text));
+}
+
+.turn-panel__status {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.pawn-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pawn-choice {
+  flex: 1 1 96px;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-1) var(--space-3);
+}
+
+.pawn-choice .muted {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.turn-panel__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-top: 2px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+/* Reaksi bisa digulir ke samping di dalam panel; halaman tidak ikut melebar */
+.reaction-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.reaction-row::-webkit-scrollbar {
+  display: none;
+}
+
+.reaction-row .icon-btn {
+  font-size: 1.3rem;
+}
+
+.turn-panel__tools {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ---------- Kartu aksi (skill & item aktif) ---------- */
+
+.action-card {
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+  border-color: var(--ink-line);
+  background: var(--brand-soft);
+  box-shadow: var(--lift-1);
+}
+
+.action-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.action-card__icon {
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.action-card__head p {
+  font-size: var(--fs-sm);
+}
+
+.action-card__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.action-card__buttons .btn {
+  flex: 1 1 140px;
+}
+
+.action-card__hint {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+/* ---------- Inventaris & bagian panel ---------- */
+
+.panel-section {
+  padding: var(--space-3) var(--space-4);
+}
+
+.panel-section__title {
+  margin-bottom: var(--space-3);
+}
+
+.inventory {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.inventory__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.inventory__item:not(.has-stock) .inventory__icon {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+.inventory__icon {
+  font-size: 1.4rem;
+}
+
+.inventory__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Pengumuman di atas papan ---------- */
+
+.notices {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: var(--board-max);
+  margin: 0 auto;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 2px solid var(--ink-line);
+  box-shadow: var(--lift-1);
+  animation: rise-in 0.2s var(--ease);
+}
+
+.notice--good,
+.notice--item {
+  background: var(--brand-soft);
+  border-color: var(--ink-line);
+}
+
+.notice--warn {
+  background: var(--danger-soft);
+}
+
+.notice__icon {
+  font-size: 1.4rem;
+  line-height: 1.4;
+}
+
+.notice__text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.notice__text strong {
+  display: block;
+}
+
+/* ---------- Obrolan ---------- */
+
+.chat {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chat__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-1) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal .chat__list {
+  height: min(46dvh, 380px);
+}
+
+.chat__empty {
+  margin: auto;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+
+.chat__msg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 85%;
+}
+
+.chat__msg.is-mine {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat__meta {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+}
+
+.chat__sender {
+  color: var(--pc-text, var(--text));
+}
+
+.chat__bubble {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.chat__msg.is-mine .chat__bubble {
+  background: var(--brand-soft);
+}
+
+.chat__quick {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.chat__form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ---------- Skor ---------- */
+
+.scoreboard__players {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.score-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.score-row.is-current {
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
+.score-row.is-out {
+  opacity: 0.6;
+}
+
+.score-row__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.score-row__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.score-row__pawns {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--space-4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+@media (min-width: 640px) {
+  .score-row {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .score-row__pawns {
+    grid-column: auto;
+  }
+}
+
+.scoreboard__log-title {
+  font-size: var(--fs-md);
+  margin-bottom: var(--space-2);
+}
+
+.scoreboard__log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+}
+
+.scoreboard__log li {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}

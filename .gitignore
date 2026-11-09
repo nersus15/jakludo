@@ -1,0 +1,23 @@
+# Dependensi & hasil build
+node_modules/
+dist/
+
+# Data runtime (akun, sesi login, leaderboard) - jangan pernah di-commit
+server/data/*.json
+server/data/*.json.migrated-*
+server/data/*.db
+server/data/*.db-*
+server/data/backups/
+server/data/*.tmp
+server/data/*.corrupt-*
+
+# Output tooling lokal
+graphify-out/
+
+# Lain-lain
+.env
+.env.*
+*.log
+.DS_Store
+.idea/
+.vscode/

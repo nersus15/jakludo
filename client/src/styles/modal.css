@@ -1,0 +1,116 @@
+/* Dialog & bottom sheet (komponen Modal) */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  background: var(--overlay);
+  padding: var(--gutter);
+  overflow-y: auto;
+  animation: fade-in 0.15s var(--ease);
+}
+
+.modal-backdrop--dialog {
+  place-items: center;
+}
+
+.modal-backdrop--sheet {
+  align-items: end;
+  justify-items: center;
+  padding: 0;
+}
+
+.modal {
+  position: relative;
+  width: 100%;
+  max-height: calc(100dvh - 2 * var(--gutter));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-lg);
+  border: 2px solid var(--ink-line);
+  box-shadow: var(--lift-2), var(--shadow-pop);
+  outline: none;
+  animation: rise-in 0.2s var(--ease);
+}
+
+.modal--sm { max-width: 400px; }
+.modal--md { max-width: 520px; }
+.modal--lg { max-width: 720px; }
+
+.modal--sheet {
+  max-width: 560px;
+  max-height: min(85dvh, 720px);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (min-width: 768px) {
+  .modal-backdrop--sheet {
+    align-items: center;
+    padding: var(--gutter);
+  }
+
+  .modal--sheet {
+    border-radius: var(--radius-lg);
+  }
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 2px solid var(--border);
+}
+
+.modal__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.modal__titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal__title {
+  font-size: 1.4rem;
+}
+
+.modal__subtitle {
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.modal__body {
+  padding: var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 2px solid var(--border);
+}
+
+.modal__footer .btn {
+  flex: 1 1 160px;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+}

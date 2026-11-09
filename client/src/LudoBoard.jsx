@@ -1,11 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   COLORS,
-  COLOR_INFO,
   START_TILES,
   TRACK_COORDS,
   SAFE_TRACK_INDICES,
-  BLACK_HOLE_INDICES,
   getPawnCoord
 } from './boardConstants';
 import { sound } from './sound';
@@ -26,7 +24,14 @@ function getCornerColors(rotation) {
   }
 }
 
-export default function LudoBoard({
+// Wrapper: room bisa null sebelum data pertama datang. Hook ada di LudoBoardView,
+// jadi return lebih awal di sini tidak melanggar aturan hooks React.
+export default function LudoBoard(props) {
+  if (!props.room) return null;
+  return <LudoBoardView {...props} />;
+}
+
+function LudoBoardView({
   room,
   myPlayerId,
   isMyTurn,
@@ -35,13 +40,19 @@ export default function LudoBoard({
   skillTargeting = false,
   onSelectSkillTarget
 }) {
-  if (!room) return null;
-
-  const currentTurnPlayer = room.players[room.turn];
   const [animPawn, setAnimPawn] = useState(null);
   const activeAnimId = useRef(null);
+  // Event yang sudah ada saat papan pertama kali tampil (mis. saat reconnect) dianggap sudah diputar
+  const lastPlayedCaptureIdRef = useRef(room.lastCapture?.id ?? null);
+  const lastPlayedBlackHoleIdRef = useRef(room.lastBlackHole?.id ?? null);
+  const lastPlayedGoalIdRef = useRef(room.lastGoal?.id ?? null);
+  const lastPlayedSkillIdRef = useRef(room.lastSkillUse?.id ?? null);
+
+  const currentTurnPlayer = room.players[room.turn];
   const safeZonesActive = room.settings?.safeZones !== false;
   const blackHoleActive = !!room.settings?.blackHole;
+  // Posisi Black Hole dikirim server (bisa berpindah tiap putaran pada mode acak)
+  const blackHoles = room.blackHoles || [];
 
   // Perspektif pemain: Base milik pemain lokal selalu berada di pojok kanan bawah
   const myPlayer = room.players?.find(p => p.id === myPlayerId);
@@ -108,6 +119,7 @@ export default function LudoBoard({
     if (stepsSequence.length === 0) return;
 
     let stepIdx = 0;
+    const hopTimers = [];
     setAnimPawn({
       playerId: move.playerId,
       pawnIdx: move.pawnIdx,
@@ -129,9 +141,9 @@ export default function LudoBoard({
           stepIdx
         });
 
-        setTimeout(() => {
+        hopTimers.push(setTimeout(() => {
           setAnimPawn(prev => prev ? { ...prev, isHopping: false } : null);
-        }, 160);
+        }, 160));
       } else {
         clearInterval(stepInterval);
         sound.playStepLand();
@@ -147,6 +159,7 @@ export default function LudoBoard({
 
     return () => {
       clearInterval(stepInterval);
+      hopTimers.forEach(clearTimeout);
     };
   }, [room.animatingMove]);
 
@@ -157,11 +170,6 @@ export default function LudoBoard({
       activeAnimId.current = null;
     }
   }, [room.animatingMove]);
-
-  const lastPlayedCaptureIdRef = useRef(null);
-  const lastPlayedBlackHoleIdRef = useRef(null);
-  const lastPlayedGoalIdRef = useRef(null);
-  const lastPlayedSkillIdRef = useRef(null);
 
   // Cek capture effect (bidak terinjak & dieliminasi lawan) - diputar tepat 1 kali per event
   useEffect(() => {
@@ -252,7 +260,7 @@ export default function LudoBoard({
     return (
       <div
         key={`base-${color}`}
-        className={`board-base base-${color} ${isThisPlayerTurn ? 'base-active-turn' : ''} ${player?.isOut ? 'base-player-out' : ''}`}
+        className={`board-base base-${color} ${isThisPlayerTurn ? 'base-active-turn' : ''} ${player?.isOut ? 'base-player-out' : ''} ${!player ? 'base-empty' : ''}`}
         style={{
           gridRow: `${rStart + 1} / span 4`,
           gridColumn: `${cStart + 1} / span 4`
@@ -270,18 +278,19 @@ export default function LudoBoard({
 
               return (
                 <div key={pawnIdx} className={`yard-slot yard-slot-${color}`}>
-                  {inBase && (
+                  {/* Warna tanpa pemain/bot: markas tetap ada tapi tanpa bidak */}
+                  {inBase && player && (
                     <button
                       type="button"
                       className={`pawn-token pawn-${color} ${canMove ? 'pawn-can-move pulse-anim' : ''}`}
                       onClick={() => handlePawnClick(pawnIdx, canMove)}
                       disabled={!canMove}
-                      title={canMove ? `Klik Bidak ${pawnIdx + 1} untuk melangkah` : `Bidak ${pawnIdx + 1} (di markas)`}
+                      aria-label={canMove ? `Jalankan bidak ${pawnIdx + 1} keluar markas` : `Bidak ${pawnIdx + 1} ${player?.name || ''} di markas`}
                     >
-                      <span className="pawn-inner" style={counterStyle}>
+                      {/* base-yard sudah diputar balik; jangan putar lagi agar angka tidak miring */}
+                      <span className="pawn-inner">
                         {pawnIdx + 1}
                       </span>
-                      {canMove && <span className="pawn-halo" />}
                     </button>
                   )}
                 </div>
@@ -320,7 +329,7 @@ export default function LudoBoard({
     else if (r === 5 && c >= 6 && c <= 9) homeColor = 'blue';
 
     const trackIdx = TRACK_COORDS.findIndex(coord => coord[0] === r && coord[1] === c);
-    const isBlackHole = blackHoleActive && trackIdx !== -1 && BLACK_HOLE_INDICES.includes(trackIdx);
+    const isBlackHole = blackHoleActive && trackIdx !== -1 && blackHoles.includes(trackIdx);
     const isStar = trackIdx !== -1 && SAFE_TRACK_INDICES.includes(trackIdx);
 
     const cellPawns = pawnsByCoord[`${r},${c}`] || [];
@@ -341,26 +350,24 @@ export default function LudoBoard({
         key={`cell-${r}-${c}`}
         className={cellClass}
         style={{ gridRow: r + 1, gridColumn: c + 1 }}
-        onClick={() => {
-          if (isValidTarget && !room.animatingMove) {
-            handlePawnClick(targetInfo.pawnIdx, true);
-          }
-        }}
-        title={isValidTarget ? `Klik untuk melangkah ke kotak ini (Bidak ${targetInfo.pawnIdx + 1})` : undefined}
       >
-        {/* Highlight visual elegan kotak tujuan (Hint Jalur) */}
+        {/* Petak tujuan bidak: tombol asli agar bisa dipilih dengan sentuhan maupun keyboard */}
         {isValidTarget && (
-          <div className="target-tile-highlight" style={counterStyle}>
-            <span className="target-pulse-ring" style={{ borderColor: COLOR_INFO[myColor]?.hex }} />
-            <span className="target-dot" style={{ background: COLOR_INFO[myColor]?.hex }} />
-          </div>
+          <button
+            type="button"
+            className="target-tile"
+            onClick={() => !room.animatingMove && handlePawnClick(targetInfo.pawnIdx, true)}
+            aria-label={`Jalankan bidak ${targetInfo.pawnIdx + 1} ke petak ini`}
+          >
+            <span className="target-dot" aria-hidden="true" />
+          </button>
         )}
 
         {isStar && safeZonesActive && (
-          <span className="cell-icon star-icon" style={counterStyle}>★</span>
+          <span className="cell-icon star-icon" style={counterStyle} aria-hidden="true">★</span>
         )}
         {isBlackHole && !cellPawns.length && !isValidTarget && (
-          <span className="cell-icon blackhole-icon" style={counterStyle} title="Black Hole! Bidak yang menginjak akan tersedot ke Base!">
+          <span className="cell-icon blackhole-icon" style={counterStyle} role="img" aria-label="Black Hole">
             🕳️
           </span>
         )}
@@ -391,18 +398,17 @@ export default function LudoBoard({
                     handlePawnClick(pawnIdx, canMove);
                   }}
                   disabled={!isInteractive}
-                  title={
+                  aria-label={
                     isSkillTarget
-                      ? `⚡ KLIK UNTUK ELIMINASI: Bidak ${pawnIdx + 1} (${player.name})`
+                      ? `Pilih bidak ${pawnIdx + 1} milik ${player.name} sebagai target`
                       : canMove
-                      ? `Klik untuk melangkahkan Bidak ${pawnIdx + 1}`
-                      : `Bidak ${pawnIdx + 1} (${player.name})`
+                      ? `Jalankan bidak ${pawnIdx + 1}`
+                      : `Bidak ${pawnIdx + 1} milik ${player.name}`
                   }
                   style={{ zIndex: isHopping ? 100 : (isSkillTarget ? 90 : 10 + idx) }}
                 >
                   <span className="pawn-inner" style={counterStyle}>{pawnIdx + 1}</span>
-                  {canMove && <span className="pawn-halo" />}
-                  {isSkillTarget && <span className="pawn-target-crosshair">🎯</span>}
+                  {isSkillTarget && <span className="pawn-target-crosshair" aria-hidden="true">🎯</span>}
                 </button>
               );
             })}
@@ -422,12 +428,6 @@ export default function LudoBoard({
           gridRow: '6 / span 1',
           gridColumn: '6 / span 1'
         }}
-        onClick={() => {
-          if (isGoalTarget && !room.animatingMove) {
-            handlePawnClick(validTargets['5,5'].pawnIdx, true);
-          }
-        }}
-        title={isGoalTarget ? 'Klik untuk memasukkan bidak ke Garis Akhir!' : undefined}
       >
         <div className="goal-triangle goal-green">
           <span className="goal-counter" style={counterStyle}>{finishedCounts.green > 0 ? finishedCounts.green : ''}</span>
@@ -444,10 +444,14 @@ export default function LudoBoard({
         <div className="goal-center-point" />
 
         {isGoalTarget && (
-          <div className="target-tile-highlight" style={counterStyle}>
-            <span className="target-pulse-ring" style={{ borderColor: '#f59e0b' }} />
-            <span className="target-dot" style={{ background: '#f59e0b' }} />
-          </div>
+          <button
+            type="button"
+            className="target-tile"
+            onClick={() => !room.animatingMove && handlePawnClick(validTargets['5,5'].pawnIdx, true)}
+            aria-label={`Masukkan bidak ${validTargets['5,5'].pawnIdx + 1} ke finish`}
+          >
+            <span className="target-dot" aria-hidden="true" />
+          </button>
         )}
       </div>
     );
@@ -468,21 +472,23 @@ export default function LudoBoard({
         key={`hud-${color}`}
         className={`player-hud-card hud-${color} ${isThisPlayerTurn ? 'hud-active-turn' : ''} ${player?.isOut ? 'hud-player-out' : ''}`}
       >
-        <div className="hud-avatar" style={{ background: COLOR_INFO[color].hex }}>
+        <div className={`hud-avatar color-${color}`} aria-hidden="true">
           {player ? player.name.charAt(0).toUpperCase() : '?'}
           {isThisPlayerTurn && <span className="hud-turn-pulse" />}
         </div>
         <div className="hud-info">
           <div className="hud-name-row">
-            <strong className="hud-player-name">{player ? player.name : 'Kosong'}</strong>
+            <strong className="hud-player-name">{player ? player.name : 'Kursi kosong'}</strong>
             {isMe && <span className="hud-tag you-tag">KAMU</span>}
             {player?.isBot && <span className="hud-tag bot-tag">BOT</span>}
             {player?.isLudoKing && <span className="hud-tag king-tag">👑</span>}
           </div>
           <div className="hud-sub-row">
-            {player?.isOut ? (
+            {!player ? (
+              <span className="hud-stats-text">Tidak ada pemain</span>
+            ) : player.isOut ? (
               <span className="hud-out-tag">❌ OUT</span>
-            ) : !player?.connected && !player?.isBot ? (
+            ) : player && !player.connected && !player.isBot ? (
               <span className="hud-offline-tag">📶 Terputus</span>
             ) : player?.autoPlayCount > 0 ? (
               <span className="hud-auto-tag">Auto {player.autoPlayCount}/3</span>
@@ -490,7 +496,7 @@ export default function LudoBoard({
               <span className="hud-active-text">Giliran jalan...</span>
             ) : (
               <span className="hud-stats-text">
-                {finishedCount > 0 ? `★ ${finishedCount} fin` : `${homeCount} di markas`}
+                {finishedCount > 0 ? `★ ${finishedCount} finish` : `${homeCount} di markas`}
               </span>
             )}
           </div>

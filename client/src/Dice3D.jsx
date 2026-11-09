@@ -1,26 +1,28 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { sound } from './sound';
 
-export default function Dice3D({ value, isRolling, canRoll, onRoll, disabled, playerColor }) {
+// `muted`: matikan suara dadu untuk instance ini (layar permainan hanya merender satu dadu).
+export default function Dice3D({ value, isRolling, canRoll, onRoll, disabled, playerColor, muted = false }) {
   const [landingBounce, setLandingBounce] = useState(false);
   const prevRollingRef = useRef(false);
 
   useEffect(() => {
+    const wasRolling = prevRollingRef.current;
+    prevRollingRef.current = isRolling;
     if (isRolling) {
-      sound.playRoll();
-    } else if (prevRollingRef.current && value) {
+      if (!muted) sound.playRoll();
+    } else if (wasRolling && value) {
       // Tepat saat selesai kocok dan dadu mendarat pada angka value
-      sound.playDiceLand(value === 6);
+      if (!muted) sound.playDiceLand(value === 6);
       setLandingBounce(true);
       const timer = setTimeout(() => setLandingBounce(false), 480);
       return () => clearTimeout(timer);
     }
-    prevRollingRef.current = isRolling;
-  }, [isRolling, value]);
+  }, [isRolling, value, muted]);
 
   const handleClick = () => {
     if (canRoll && !disabled && !isRolling) {
-      sound.playClick();
+      if (!muted) sound.playClick();
       onRoll();
     }
   };
@@ -29,75 +31,71 @@ export default function Dice3D({ value, isRolling, canRoll, onRoll, disabled, pl
   const targetFace = value || 1;
   const rotationClass = isRolling ? 'rolling-3d' : `show-${targetFace}`;
 
+  const label = isRolling ? 'Dadu sedang dikocok' : canRoll ? 'Lempar dadu' : value ? `Dadu menunjukkan ${value}` : 'Dadu';
+
+  // Tombol asli agar bisa dipakai lewat keyboard; nonaktif saat bukan giliran pemain
   return (
-    <div
-      className={`dice-wrapper ${canRoll ? 'clickable' : ''} ${disabled ? 'disabled' : ''} ${value === 6 && !isRolling ? 'is-six' : ''}`}
-      onClick={handleClick}
-      title={canRoll ? 'Klik untuk mengocok dadu!' : ''}
-    >
-      <div className={`dice-stage ${landingBounce ? 'landing-bounce' : ''}`}>
-        <div className={`dice-cube ${rotationClass}`}>
+    <div className={`dice-wrapper ${value === 6 && !isRolling ? 'is-six' : ''}`}>
+      <button
+        type="button"
+        className={`dice-button ${canRoll ? 'is-ready' : ''}`}
+        onClick={handleClick}
+        disabled={!canRoll || disabled || isRolling}
+        aria-label={label}
+        title={canRoll ? 'Lempar dadu' : undefined}
+      >
+      <span className={`dice-stage ${landingBounce ? 'landing-bounce' : ''}`} aria-hidden="true">
+        <span className={`dice-cube ${rotationClass}`}>
           {/* Face 1 */}
-          <div className="dice-face face-1">
+          <span className="dice-face face-1">
             <span className="pip pip-center pip-red" />
-          </div>
+          </span>
 
           {/* Face 2 */}
-          <div className="dice-face face-2">
+          <span className="dice-face face-2">
             <span className="pip pip-top-left" />
             <span className="pip pip-bottom-right" />
-          </div>
+          </span>
 
           {/* Face 3 */}
-          <div className="dice-face face-3">
+          <span className="dice-face face-3">
             <span className="pip pip-top-left" />
             <span className="pip pip-center" />
             <span className="pip pip-bottom-right" />
-          </div>
+          </span>
 
           {/* Face 4 */}
-          <div className="dice-face face-4">
+          <span className="dice-face face-4">
             <span className="pip pip-top-left" />
             <span className="pip pip-top-right" />
             <span className="pip pip-bottom-left" />
             <span className="pip pip-bottom-right" />
-          </div>
+          </span>
 
           {/* Face 5 */}
-          <div className="dice-face face-5">
+          <span className="dice-face face-5">
             <span className="pip pip-top-left" />
             <span className="pip pip-top-right" />
             <span className="pip pip-center" />
             <span className="pip pip-bottom-left" />
             <span className="pip pip-bottom-right" />
-          </div>
+          </span>
 
           {/* Face 6 */}
-          <div className="dice-face face-6">
+          <span className="dice-face face-6">
             <span className="pip pip-top-left" />
             <span className="pip pip-top-right" />
             <span className="pip pip-middle-left" />
             <span className="pip pip-middle-right" />
             <span className="pip pip-bottom-left" />
             <span className="pip pip-bottom-right" />
-          </div>
-        </div>
+          </span>
+        </span>
 
-        {/* Dynamic Shadow underneath */}
-        <div className={`dice-shadow ${isRolling ? 'rolling' : ''}`} />
-      </div>
-
-      {canRoll && !isRolling && (
-        <div className="dice-callout">
-          <span className="pulse-dot" /> KLIK KOCOK DADU
-        </div>
-      )}
-      {value === 1 && !isRolling && (
-        <div className="one-badge">✦ DAPAT 1: KELUAR KOTAK (1X JALAN) ✦</div>
-      )}
-      {value === 6 && !isRolling && (
-        <div className="six-badge">★ DAPAT 6: BONUS LEMPAR LAGI! ★</div>
-      )}
+        {/* Bayangan di bawah dadu */}
+        <span className={`dice-shadow ${isRolling ? 'rolling' : ''}`} />
+      </span>
+      </button>
     </div>
   );
 }

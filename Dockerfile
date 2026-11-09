@@ -1,15 +1,15 @@
 # ==========================================
 # STAGE 1: Build Client (Vite + React)
 # ==========================================
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
 # Salin package manifest
 COPY package*.json ./
 
-# Install seluruh dependensi termasuk devDependencies untuk build
-RUN npm install
+# Install seluruh dependensi (sesuai package-lock) termasuk devDependencies untuk build
+RUN npm ci
 
 # Salin seluruh source code proyek
 COPY . .
@@ -20,7 +20,7 @@ RUN npm run build
 # ==========================================
 # STAGE 2: Production Runner
 # ==========================================
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 
 WORKDIR /app
 
@@ -31,16 +31,18 @@ ENV PORT=5172
 COPY package*.json ./
 
 # Install hanya dependensi produksi (tanpa devDependencies)
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Ambil hasil build frontend statis dari builder
 COPY --from=builder /app/dist ./dist
 
-# Salin backend server
+# Salin backend server (tanpa file test)
 COPY server/ ./server/
+RUN rm -f server/*.test.js
 
-# Siapkan direktori persistensi data JSON
-RUN mkdir -p /app/server/data && chmod -R 777 /app/server/data
+# Siapkan direktori database SQLite milik user non-root `node` (uid 1000)
+RUN mkdir -p /app/server/data && chown -R node:node /app/server/data
+USER node
 
 # Expose port aplikasi
 EXPOSE 5172

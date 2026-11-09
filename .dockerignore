@@ -13,3 +13,8 @@ dist
 .idea
 .vscode
 
+
+# Data runtime & output lokal tidak ikut ke image
+server/data/*
+!server/data/.gitkeep
+graphify-out

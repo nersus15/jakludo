@@ -1,0 +1,259 @@
+// Aturan main JakLudo dalam bentuk fungsi murni (tanpa socket / timer / IO)
+// sehingga bisa diuji langsung lewat `npm test`.
+
+const COLORS = ['red', 'green', 'yellow', 'blue'];
+const COLOR_OFFSETS = [0, 10, 20, 30];
+const SAFE_TRACK_INDICES = [0, 6, 10, 16, 20, 26, 30, 36];
+const BLACK_HOLE_INDICES = [4, 14, 24, 34];
+const FINISH = 44;
+
+// Posisi bidak: 0 = markas, 1..39 = lintasan utama, 40..43 = jalur finish, 44 = finish
+function getTrackIndex(colorIdx, pawnVal) {
+  if (pawnVal >= 1 && pawnVal <= 39) {
+    return (COLOR_OFFSETS[colorIdx] + pawnVal - 1) % 40;
+  }
+  return null;
+}
+
+// Warna pertama yang belum dipakai pemain lain di room
+function nextFreeColor(players) {
+  const used = new Set(players.map(p => p.color));
+  return COLORS.find(c => !used.has(c)) || null;
+}
+
+function opponentOnTrack(room, player, trackPos, { skipOut = false } = {}) {
+  for (const opp of room.players) {
+    if (opp.id === player.id || (skipOut && opp.isOut)) continue;
+    const oppColorIdx = COLORS.indexOf(opp.color);
+    const oppPawns = room.pawns[opp.id] || [];
+    if (oppPawns.some(v => v >= 1 && v <= 39 && getTrackIndex(oppColorIdx, v) === trackPos)) {
+      return opp;
+    }
+  }
+  return null;
+}
+
+// Aturan: Dalam satu kotak tidak bisa ada 2 bidak.
+// - Tidak boleh mendarat di petak yang sudah ada bidak milik sendiri.
+// - Tidak boleh mendarat di petak lawan jika petak tersebut adalah Safe Zone.
+// - Bidak lawan di kotak base warnanya sendiri kebal dan tidak bisa diinjak.
+// - Petak finish (44) boleh menampung semua bidak yang finish.
+function canPawnMove(room, player, pawnIdx, dice) {
+  if (!room || !player || dice === null || dice === undefined) return false;
+  const currentPawns = room.pawns[player.id];
+  if (!currentPawns) return false;
+
+  const val = currentPawns[pawnIdx];
+  const colorIdx = COLORS.indexOf(player.color);
+  const safeZonesActive = room.settings?.safeZones !== false;
+
+  // Bidak di markas (0): bisa keluar dengan angka 6 atau 1
+  if (val === 0) {
+    if (dice !== 6 && dice !== 1) return false;
+    if (currentPawns.some((v, idx) => idx !== pawnIdx && v === 1)) return false;
+    if (safeZonesActive && opponentOnTrack(room, player, COLOR_OFFSETS[colorIdx])) return false;
+    return true;
+  }
+
+  if (val > 0 && val < FINISH) {
+    const newVal = val + dice;
+    if (newVal > FINISH) return false;
+    if (newVal === FINISH) return true;
+    if (currentPawns.some((v, idx) => idx !== pawnIdx && v === newVal)) return false;
+
+    if (newVal <= 39) {
+      const targetTrack = getTrackIndex(colorIdx, newVal);
+
+      for (const opp of room.players) {
+        if (opp.id === player.id || opp.isOut) continue;
+        const oppColorIdx = COLORS.indexOf(opp.color);
+        if (targetTrack !== COLOR_OFFSETS[oppColorIdx]) continue;
+        const oppPawns = room.pawns[opp.id] || [];
+        if (oppPawns.some(v => v >= 1 && v <= 39 && getTrackIndex(oppColorIdx, v) === targetTrack)) {
+          return false;
+        }
+      }
+
+      const isTargetSafe = safeZonesActive && SAFE_TRACK_INDICES.includes(targetTrack);
+      if (isTargetSafe && opponentOnTrack(room, player, targetTrack)) return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function getMovablePawns(room, player, dice) {
+  if (!room || !player || !dice) return [];
+  const result = [];
+  for (let i = 0; i < 4; i++) {
+    if (canPawnMove(room, player, i, dice)) result.push(i);
+  }
+  return result;
+}
+
+// ==========================================
+// BLACK HOLE
+// ==========================================
+
+// Posisi Black Hole yang berlaku di room (statis atau hasil pindah acak)
+function getBlackHoles(room) {
+  return Array.isArray(room.blackHoles) && room.blackHoles.length ? room.blackHoles : BLACK_HOLE_INDICES;
+}
+
+// Pindahkan tiap Black Hole ke petak acak di ruasnya sendiri (ruas k = petak 10k..10k+9).
+// Petak start, petak aman, petak berisi bidak, dan posisi lama dihindari.
+function relocateBlackHoles(room, random = Math.random) {
+  const occupied = new Set();
+  for (const p of room.players) {
+    const colorIdx = COLORS.indexOf(p.color);
+    for (const v of room.pawns[p.id] || []) {
+      const t = getTrackIndex(colorIdx, v);
+      if (t !== null) occupied.add(t);
+    }
+  }
+  const current = getBlackHoles(room);
+  return [0, 1, 2, 3].map(segment => {
+    const candidates = [];
+    for (let i = 0; i < 10; i++) {
+      const t = segment * 10 + i;
+      if (COLOR_OFFSETS.includes(t) || SAFE_TRACK_INDICES.includes(t) || occupied.has(t) || t === current[segment]) continue;
+      candidates.push(t);
+    }
+    // Ruas penuh bidak: Black Hole tetap di tempat lamanya
+    if (candidates.length === 0) return current[segment];
+    return candidates[Math.floor(random() * candidates.length)];
+  });
+}
+
+// ==========================================
+// BOT: menimbang untung-rugi setiap langkah
+// ==========================================
+
+// Bobot keputusan bot. Nilai bidak = seberapa jauh ia sudah berjalan (makin jauh, makin mahal hilang).
+const AI = {
+  progress: 1,          // per langkah maju
+  leaveBase: 30,        // mengeluarkan bidak dari markas
+  enterHome: 45,        // masuk jalur finish (tidak bisa diinjak lagi)
+  finish: 120,          // bidak sampai finish
+  captureBase: 50,      // memakan bidak lawan
+  captureProgress: 1.5, // ditambah sejauh apa bidak lawan sudah berjalan
+  riskWeight: 1,        // kerugian = peluang dimakan x nilai bidak
+  blackHole: 40         // mendarat di Black Hole tanpa perisai
+};
+
+const pawnWorth = val => val + 20;
+
+// Peluang sebuah petak lintasan dimakan lawan di giliran berikutnya. Setiap bidak lawan yang
+// berada 1-6 langkah di belakang petak (dan belum berbelok ke jalur finishnya) punya peluang 1/6.
+function captureRisk(room, player, trackPos) {
+  if (trackPos === null) return 0;
+  const safeZonesActive = room.settings?.safeZones !== false;
+  if (safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos)) return 0;
+
+  let chance = 0;
+  for (const opp of room.players) {
+    if (opp.id === player.id || opp.isOut) continue;
+    const oppColorIdx = COLORS.indexOf(opp.color);
+    for (const v of room.pawns[opp.id] || []) {
+      if (v >= 1 && v <= 39) {
+        const distance = (trackPos - getTrackIndex(oppColorIdx, v) + 40) % 40;
+        if (distance >= 1 && distance <= 6 && v + distance <= 39) chance += 1 / 6;
+      } else if (v === 0 && !safeZonesActive && trackPos === COLOR_OFFSETS[oppColorIdx]) {
+        chance += 2 / 6; // lawan keluar markas dengan 1 atau 6 tepat di petak ini
+      }
+    }
+  }
+  return Math.min(chance, 1);
+}
+
+// Nilai sebuah langkah dari sudut pandang pemain: untung (maju, makan, aman, finish) dikurangi rugi
+function evaluateMove(room, player, pawnIdx, dice) {
+  const pawns = room.pawns[player.id];
+  const colorIdx = COLORS.indexOf(player.color);
+  const from = pawns[pawnIdx];
+  const to = from === 0 ? 1 : from + dice;
+  const fromTrack = getTrackIndex(colorIdx, from);
+  const toTrack = getTrackIndex(colorIdx, to);
+  let score = 0;
+
+  score += (to - from) * AI.progress;
+  if (from === 0) score += AI.leaveBase + (pawns.filter(v => v >= 1 && v < FINISH).length === 0 ? 20 : 0);
+  if (to === FINISH) score += AI.finish;
+  else if (from <= 39 && to >= 40) score += AI.enterHome;
+
+  if (toTrack !== null) {
+    const victim = opponentPawnAt(room, player, toTrack);
+    const safeZonesActive = room.settings?.safeZones !== false;
+    if (victim && !(safeZonesActive && SAFE_TRACK_INDICES.includes(toTrack))) {
+      score += AI.captureBase + victim.val * AI.captureProgress;
+    }
+  }
+
+  // Selisih risiko: lepas dari ancaman di posisi sekarang vs ancaman di posisi baru
+  const riskNow = fromTrack !== null ? captureRisk(room, player, fromTrack) : 0;
+  const riskNext = toTrack !== null ? captureRisk(room, player, toTrack) : 0;
+  score += riskNow * pawnWorth(from) * AI.riskWeight;
+  score -= riskNext * pawnWorth(to) * AI.riskWeight;
+
+  if (room.settings?.blackHole && toTrack !== null && getBlackHoles(room).includes(toTrack)) {
+    const shielded = (player.items?.blackholeShield?.owned || 0) + (player.items?.blackholeShield?.earned || 0) > 0;
+    score -= shielded ? 5 : AI.blackHole + pawnWorth(to);
+  }
+
+  return score;
+}
+
+function opponentPawnAt(room, player, trackPos) {
+  for (const opp of room.players) {
+    if (opp.id === player.id) continue;
+    const oppColorIdx = COLORS.indexOf(opp.color);
+    const pawns = room.pawns[opp.id] || [];
+    for (let i = 0; i < pawns.length; i++) {
+      if (pawns[i] >= 1 && pawns[i] <= 39 && getTrackIndex(oppColorIdx, pawns[i]) === trackPos) {
+        return { player: opp, pawnIdx: i, val: pawns[i] };
+      }
+    }
+  }
+  return null;
+}
+
+// Pilih langkah dengan nilai tertinggi; seri dipecah dengan bidak yang paling jauh
+function chooseBestPawn(room, player, dice) {
+  if (!room.pawns[player.id]) return null;
+  const movable = getMovablePawns(room, player, dice);
+  if (movable.length === 0) return null;
+
+  let best = null;
+  for (const pawnIdx of movable) {
+    const score = evaluateMove(room, player, pawnIdx, dice);
+    const progress = room.pawns[player.id][pawnIdx];
+    if (!best || score > best.score || (score === best.score && progress > best.progress)) {
+      best = { pawnIdx, score, progress };
+    }
+  }
+  return best.pawnIdx;
+}
+
+// Validasi indeks bidak dari payload klien
+function isPawnIndex(v) {
+  return Number.isInteger(v) && v >= 0 && v <= 3;
+}
+
+module.exports = {
+  COLORS,
+  COLOR_OFFSETS,
+  SAFE_TRACK_INDICES,
+  BLACK_HOLE_INDICES,
+  FINISH,
+  getTrackIndex,
+  nextFreeColor,
+  canPawnMove,
+  getMovablePawns,
+  getBlackHoles,
+  relocateBlackHoles,
+  captureRisk,
+  evaluateMove,
+  chooseBestPawn,
+  isPawnIndex
+};

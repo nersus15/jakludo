@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jakludo-pwa-v1';
+const CACHE_NAME = 'jakludo-pwa-v2';
 
 const STATIC_ASSETS = [
   '/',
@@ -54,6 +54,12 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Audio/video memakai Range request (206). Respons cache penuh untuk Range request membuat
+  // Safari/iOS gagal memutar musik, jadi biarkan browser menanganinya langsung.
+  if (request.headers.has('range') || request.destination === 'audio' || url.pathname.endsWith('.mp3')) {
+    return;
+  }
+
   // Navigation requests (HTML shell): Network-First dengan Fallback ke Cache
   if (request.mode === 'navigate') {
     event.respondWith(
@@ -65,23 +71,28 @@ self.addEventListener('fetch', event => {
           }
           return response;
         })
-        .catch(() => caches.match('/') || caches.match('/index.html'))
+        .catch(async () => (await caches.match('/')) || (await caches.match('/index.html')) || Response.error())
     );
     return;
   }
 
-  // Static Assets (JS, CSS, Images, Audio): Cache-First dengan Network Revalidate
+  // Static Assets (JS, CSS, Images): Cache-First dengan Network Revalidate.
+  // respondWith tidak boleh menerima null (saat offline/tunnel putus) karena memicu error di browser.
   event.respondWith(
     caches.match(request).then(cachedResponse => {
       const fetchPromise = fetch(request).then(networkResponse => {
-        if (networkResponse && networkResponse.status === 200) {
+        if (networkResponse && networkResponse.status === 200 && url.origin === self.location.origin) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
         }
         return networkResponse;
-      }).catch(() => null);
+      });
 
-      return cachedResponse || fetchPromise;
+      if (cachedResponse) {
+        fetchPromise.catch(() => {}); // revalidasi di belakang layar boleh gagal
+        return cachedResponse;
+      }
+      return fetchPromise.catch(() => Response.error());
     })
   );
 });

@@ -2,12 +2,27 @@
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>JakLudo · Game Ludo Multiplayer Realtime Online</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>JakLudo · Main Ludo online bareng teman</title>
 
     <!-- PWA & Mobile Web App Meta Tags -->
-    <meta name="description" content="Game Ludo Multiplayer Realtime Seru dengan Dadu 3D, Toko Item, dan Perebutan Takhta Ludo King!" />
-    <meta name="theme-color" content="#ff6200" />
+    <meta name="description" content="Main Ludo online bareng teman, sampai empat pemain secara realtime. Buat room, bagikan kodenya, dan rebut gelar Ludo King." />
+    <meta name="theme-color" content="#f5ecdc" />
+    <!-- Pasang tema tersimpan sebelum halaman digambar agar tidak berkedip (default: terang) -->
+    <script>
+      (function () {
+        var pref = 'light';
+        try { pref = localStorage.getItem('jakludo_theme') || 'light'; } catch (e) {}
+        var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        if (dark) document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1a1512');
+      })();
+    </script>
+
+    <!-- Font: Fredoka (judul & angka, bulat seperti huruf logo) & Nunito (isi), lihat DESIGN.md -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap" />
     <link rel="manifest" href="/manifest.webmanifest" />
 
     <!-- iOS Safari PWA Meta Tags -->

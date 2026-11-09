@@ -124,3 +124,18 @@ test('bidak di petak start warnanya sendiri tetap tidak bisa didarati lawan', ()
   room.settings.safeZones = false;
   assert.equal(canPawnMove(room, room.players[3], 0, 5), false);
 });
+
+test('petak start tetap aman bagi pemiliknya walaupun safe zone dimatikan', () => {
+  const { isPawnProtected, captureRisk } = require('./rules');
+  // Safe zone mati. Merah val 1 -> track 0 (start merah). Biru val 6 (track 35) di belakangnya, jarak 5.
+  const room = makeRoom({ a: [1, 0, 0, 0], b: [0, 0, 0, 0], c: [0, 0, 0, 0], d: [6, 0, 0, 0] }, { safeZones: false });
+  const [red, green, , blue] = room.players;
+  assert.equal(isPawnProtected(room, red, 0), true, 'start sendiri tetap aman');
+  assert.equal(isPawnProtected(room, green, 0), false, 'start warna lain tidak melindungi tamu');
+  assert.equal(isPawnProtected(room, red, 6), false, 'petak bintang ikut mati bersama safe zone');
+  assert.equal(canPawnMove(room, blue, 0, 5), false, 'lawan tidak bisa mendarat di start merah');
+  assert.equal(captureRisk(room, red, 0), 0, 'bot tahu bidaknya aman di start sendiri');
+  // Pemilik yang sudah OUT kehilangan perlindungan
+  red.isOut = true;
+  assert.equal(canPawnMove(room, blue, 0, 5), true);
+});

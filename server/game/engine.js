@@ -6,8 +6,6 @@ const inventory = require('./inventory');
 const store = require('./store');
 const {
   COLORS,
-  COLOR_OFFSETS,
-  SAFE_TRACK_INDICES,
   FINISH,
   getTrackIndex,
   canPawnMove,
@@ -15,6 +13,7 @@ const {
   chooseBestPawn,
   getBlackHoles,
   relocateBlackHoles,
+  isPawnProtected,
   isPawnIndex
 } = require('./rules');
 const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY } = require('./config');
@@ -337,38 +336,35 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 function resolveLanding(room, player, pawnIdx, toVal) {
   if (toVal < 1 || toVal > 39) return false;
   const trackPos = getTrackIndex(COLORS.indexOf(player.color), toVal);
-  const safeZonesActive = room.settings?.safeZones !== false;
   let captured = false;
 
   // 1. Makan bidak lawan. Dicek lebih dulu, termasuk di petak Black Hole: lawan yang bertahan
   //    di sana (memakai perisai) tetap bisa dimakan dan tetap memberi bonus giliran.
-  if (!(safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos))) {
-    for (const opponent of room.players) {
-      // Bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
-      if (opponent.id === player.id) continue;
-      const oppColorIdx = COLORS.indexOf(opponent.color);
-      const oppPawns = room.pawns[opponent.id];
-      if (!oppPawns) continue;
+  //    Bidak yang terlindungi (start miliknya / bintang) tidak pernah sampai sini karena
+  //    canPawnMove menutup petak itu, tapi tetap dicek agar aman.
+  for (const opponent of room.players) {
+    if (opponent.id === player.id) continue;
+    const oppColorIdx = COLORS.indexOf(opponent.color);
+    const oppPawns = room.pawns[opponent.id];
+    if (!oppPawns) continue;
 
-      oppPawns.forEach((oppVal, j) => {
-        if (oppVal < 1 || oppVal > 39) return;
-        const oppTrack = getTrackIndex(oppColorIdx, oppVal);
-        if (oppTrack !== trackPos || oppTrack === COLOR_OFFSETS[oppColorIdx]) return; // Kebal di kotak base warnanya
+    oppPawns.forEach((oppVal, j) => {
+      if (oppVal < 1 || oppVal > 39) return;
+      if (getTrackIndex(oppColorIdx, oppVal) !== trackPos || isPawnProtected(room, opponent, trackPos)) return;
 
-        oppPawns[j] = 0;
-        captured = true;
-        room.lastCapture = {
-          id: eventId(),
-          attacker: player.name,
-          defender: opponent.name,
-          color: opponent.color,
-          defenderIsOut: !!opponent.isOut,
-          trackPos
-        };
-        addHistory(room, `⚔️ ${player.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}!`);
-        runItemHooks(room, player, 'capture', { victim: opponent, pawnIdx: j });
-      });
-    }
+      oppPawns[j] = 0;
+      captured = true;
+      room.lastCapture = {
+        id: eventId(),
+        attacker: player.name,
+        defender: opponent.name,
+        color: opponent.color,
+        defenderIsOut: !!opponent.isOut,
+        trackPos
+      };
+      addHistory(room, `⚔️ ${player.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}!`);
+      runItemHooks(room, player, 'capture', { victim: opponent, pawnIdx: j });
+    });
   }
 
   // 2. Efek Black Hole pada bidak yang baru mendarat (bisa dicegah item, mis. Blackhole Shield)

@@ -407,3 +407,21 @@ test('dapat 6 tanpa langkah yang mungkin tetap mendapat lemparan bonus', async (
   assert.equal(room.turn, 0, 'giliran tetap milik pemain yang dapat 6');
   assert.equal(room.dice, null, 'boleh melempar lagi');
 });
+
+test('langkah otomatis pemain AFK memakai pertimbangan bot, bukan bidak pertama', async () => {
+  const engine = require('./game/engine');
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  sockets[0].socket.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const [pa, pb] = room.players;
+  // Dadu 2: bidak 0 (val 3) akan mendarat tepat di depan bidak hijau -> berisiko; bidak 1 (val 20) aman
+  room.pawns[pa.id] = [3, 20, 0, 0];
+  room.pawns[pb.id] = [32, 0, 0, 0];
+  room.dice = 2;
+  engine.executeAutoPlay(room, pa);
+  await wait(2500);
+  clearTimeout(room.turnTimer);
+  assert.deepEqual(room.pawns[pa.id].slice(0, 2), [3, 22], 'bidak yang aman yang dijalankan');
+  assert.equal(pa.autoPlayCount, 1);
+});

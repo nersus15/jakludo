@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import AppHeader from './components/AppHeader';
 import GameHeader from './components/game/GameHeader';
 import Toasts from './components/Toasts';
@@ -7,10 +7,7 @@ import InstallGuide from './components/InstallGuide';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
-import AuthModal from './AuthModal';
-import LeaderboardModal from './LeaderboardModal';
 import AudioSettingsModal from './AudioSettingsModal';
-import ShopModal from './ShopModal';
 import { useAuth } from './hooks/useAuth';
 import { useGameRoom } from './hooks/useGameRoom';
 import { useActiveRooms } from './hooks/useActiveRooms';
@@ -19,6 +16,21 @@ import { useTheme } from './hooks/useTheme';
 import { usePwaInstall } from './hooks/usePwaInstall';
 import { useItemCatalog } from './items';
 import { sound } from './sound';
+
+// Dialog yang jarang dibuka dimuat terpisah agar bundle awal lebih kecil.
+// Diunduh di belakang layar saat browser senggang, jadi tetap langsung muncul saat dibuka.
+const loadAuth = () => import('./AuthModal');
+const loadLeaderboard = () => import('./LeaderboardModal');
+const loadShop = () => import('./ShopModal');
+const AuthModal = lazy(loadAuth);
+const LeaderboardModal = lazy(loadLeaderboard);
+const ShopModal = lazy(loadShop);
+
+function preloadDialogs() {
+  const run = () => [loadAuth, loadLeaderboard, loadShop].forEach(load => load().catch(() => {}));
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 4000 });
+  else setTimeout(run, 2000);
+}
 
 export default function App() {
   const [modal, setModal] = useState(null); // 'auth' | 'shop' | 'audio' | 'leaderboard' | null
@@ -37,6 +49,7 @@ export default function App() {
   const itemCatalog = useItemCatalog();
 
   useEffect(() => sound.subscribe(state => setAudio({ ...state })), []);
+  useEffect(preloadDialogs, []);
 
   // Status chat terbuka dipakai untuk menghitung pesan belum dibaca
   const changeSheet = name => {
@@ -126,17 +139,21 @@ export default function App() {
         </footer>
       )}
 
-      <AuthModal
-        isOpen={modal === 'auth'}
-        onClose={close}
-        onLoginSuccess={(user, token) => {
-          auth.loginSuccess(user, token);
-          close();
-        }}
-      />
-      <LeaderboardModal isOpen={modal === 'leaderboard'} onClose={close} currentUser={auth.currentUser} socket={game.socket} />
+      <Suspense fallback={null}>
+        {modal === 'auth' && (
+          <AuthModal
+            isOpen
+            onClose={close}
+            onLoginSuccess={(user, token) => {
+              auth.loginSuccess(user, token);
+              close();
+            }}
+          />
+        )}
+        {modal === 'leaderboard' && <LeaderboardModal isOpen onClose={close} currentUser={auth.currentUser} socket={game.socket} />}
+        {modal === 'shop' && <ShopModal isOpen onClose={close} currentUser={auth.currentUser} onUpdateUser={auth.setCurrentUser} authToken={auth.authToken} />}
+      </Suspense>
       <AudioSettingsModal isOpen={modal === 'audio'} onClose={close} />
-      <ShopModal isOpen={modal === 'shop'} onClose={close} currentUser={auth.currentUser} onUpdateUser={auth.setCurrentUser} authToken={auth.authToken} />
       <InstallGuide platform={pwa.installGuide} onClose={pwa.closeInstallGuide} />
     </div>
   );

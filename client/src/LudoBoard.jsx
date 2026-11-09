@@ -26,10 +26,15 @@ function getCornerColors(rotation) {
 
 // Wrapper: room bisa null sebelum data pertama datang. Hook ada di LudoBoardView,
 // jadi return lebih awal di sini tidak melanggar aturan hooks React.
-export default function LudoBoard(props) {
+// Di-memo: papan tidak perlu digambar ulang saat hanya chat/reaksi yang berubah
+const LudoBoard = React.memo(function LudoBoard(props) {
   if (!props.room) return null;
   return <LudoBoardView {...props} />;
-}
+});
+export default LudoBoard;
+
+// Indeks lintasan per petak "baris,kolom", dihitung sekali (bukan findIndex di tiap petak)
+const TRACK_INDEX_BY_CELL = new Map(TRACK_COORDS.map(([r, c], i) => [`${r},${c}`, i]));
 
 function LudoBoardView({
   room,
@@ -328,9 +333,10 @@ function LudoBoardView({
     else if (c === 5 && r >= 1 && r <= 4) homeColor = 'yellow';
     else if (r === 5 && c >= 6 && c <= 9) homeColor = 'blue';
 
-    const trackIdx = TRACK_COORDS.findIndex(coord => coord[0] === r && coord[1] === c);
+    const trackIdx = TRACK_INDEX_BY_CELL.get(`${r},${c}`) ?? -1;
     const isBlackHole = blackHoleActive && trackIdx !== -1 && blackHoles.includes(trackIdx);
-    const isStar = trackIdx !== -1 && SAFE_TRACK_INDICES.includes(trackIdx);
+    // Petak start tidak diberi bintang: hanya aman bagi pemilik warnanya, bukan zona aman bersama
+    const isStar = trackIdx !== -1 && !startColor && SAFE_TRACK_INDICES.includes(trackIdx);
 
     const cellPawns = pawnsByCoord[`${r},${c}`] || [];
 
@@ -357,7 +363,7 @@ function LudoBoardView({
             type="button"
             className="target-tile"
             onClick={() => !room.animatingMove && handlePawnClick(targetInfo.pawnIdx, true)}
-            aria-label={`Jalankan bidak ${targetInfo.pawnIdx + 1} ke petak ini`}
+            aria-label={`Jalankan bidak ${targetInfo.pawnIdx + 1} ke petak ini${isBlackHole ? ' (Black Hole!)' : ''}`}
           >
             <span className="target-dot" aria-hidden="true" />
           </button>
@@ -366,7 +372,7 @@ function LudoBoardView({
         {isStar && safeZonesActive && (
           <span className="cell-icon star-icon" style={counterStyle} aria-hidden="true">★</span>
         )}
-        {isBlackHole && !cellPawns.length && !isValidTarget && (
+        {isBlackHole && !cellPawns.length && (
           <span className="cell-icon blackhole-icon" style={counterStyle} role="img" aria-label="Black Hole">
             🕳️
           </span>

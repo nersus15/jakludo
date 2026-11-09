@@ -6,8 +6,6 @@ const inventory = require('./inventory');
 const store = require('./store');
 const {
   COLORS,
-  COLOR_OFFSETS,
-  SAFE_TRACK_INDICES,
   FINISH,
   getTrackIndex,
   canPawnMove,
@@ -15,6 +13,7 @@ const {
   chooseBestPawn,
   getBlackHoles,
   relocateBlackHoles,
+  isPawnProtected,
   isPawnIndex
 } = require('./rules');
 const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY } = require('./config');
@@ -103,10 +102,10 @@ function advanceTurn(room) {
   room.turn = next;
   room.dice = null;
   room.consecutiveSixes = 0;
-  shiftBlackHolesEachRound(room, activePlayers.length);
+  const holesShifted = shiftBlackHolesEachRound(room, activePlayers.length);
   room.players.forEach(p => { p.accumulatedThisTurn = false; });
   const nextPlayer = room.players[room.turn];
-  room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/${MAX_AUTO_PLAY})` : ''}.`;
+  room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/${MAX_AUTO_PLAY})` : ''}.${holesShifted ? ' 🕳️ Black Hole pindah tempat!' : ''}`;
 
   emitRoom(room);
   triggerTurn(room);
@@ -115,13 +114,14 @@ function advanceTurn(room) {
 // Mode Black Hole acak: setelah semua pemain aktif mendapat giliran (1 putaran),
 // keempat Black Hole pindah ke petak lain di ruasnya masing-masing.
 function shiftBlackHolesEachRound(room, activeCount) {
-  if (!room.settings?.blackHole || room.settings.blackHoleMode !== 'random') return;
+  if (!room.settings?.blackHole || room.settings.blackHoleMode !== 'random') return false;
   room.turnsSinceBlackHoleShift = (room.turnsSinceBlackHoleShift || 0) + 1;
-  if (room.turnsSinceBlackHoleShift < activeCount) return;
+  if (room.turnsSinceBlackHoleShift < activeCount) return false;
   room.turnsSinceBlackHoleShift = 0;
   room.blackHoles = relocateBlackHoles(room);
   room.lastBlackHoleShift = { id: eventId(), positions: room.blackHoles };
   addHistory(room, '🕳️ Black Hole berpindah tempat!');
+  return true;
 }
 
 // Jadwalkan aksi berikutnya untuk pemain yang sedang mendapat giliran
@@ -337,38 +337,35 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 function resolveLanding(room, player, pawnIdx, toVal) {
   if (toVal < 1 || toVal > 39) return false;
   const trackPos = getTrackIndex(COLORS.indexOf(player.color), toVal);
-  const safeZonesActive = room.settings?.safeZones !== false;
   let captured = false;
 
   // 1. Makan bidak lawan. Dicek lebih dulu, termasuk di petak Black Hole: lawan yang bertahan
   //    di sana (memakai perisai) tetap bisa dimakan dan tetap memberi bonus giliran.
-  if (!(safeZonesActive && SAFE_TRACK_INDICES.includes(trackPos))) {
-    for (const opponent of room.players) {
-      // Bidak milik pemain yang sudah out TETAP bisa diinjak & dikembalikan ke base
-      if (opponent.id === player.id) continue;
-      const oppColorIdx = COLORS.indexOf(opponent.color);
-      const oppPawns = room.pawns[opponent.id];
-      if (!oppPawns) continue;
+  //    Bidak yang terlindungi (start miliknya / bintang) tidak pernah sampai sini karena
+  //    canPawnMove menutup petak itu, tapi tetap dicek agar aman.
+  for (const opponent of room.players) {
+    if (opponent.id === player.id) continue;
+    const oppColorIdx = COLORS.indexOf(opponent.color);
+    const oppPawns = room.pawns[opponent.id];
+    if (!oppPawns) continue;
 
-      oppPawns.forEach((oppVal, j) => {
-        if (oppVal < 1 || oppVal > 39) return;
-        const oppTrack = getTrackIndex(oppColorIdx, oppVal);
-        if (oppTrack !== trackPos || oppTrack === COLOR_OFFSETS[oppColorIdx]) return; // Kebal di kotak base warnanya
+    oppPawns.forEach((oppVal, j) => {
+      if (oppVal < 1 || oppVal > 39) return;
+      if (getTrackIndex(oppColorIdx, oppVal) !== trackPos || isPawnProtected(room, opponent, trackPos)) return;
 
-        oppPawns[j] = 0;
-        captured = true;
-        room.lastCapture = {
-          id: eventId(),
-          attacker: player.name,
-          defender: opponent.name,
-          color: opponent.color,
-          defenderIsOut: !!opponent.isOut,
-          trackPos
-        };
-        addHistory(room, `⚔️ ${player.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}!`);
-        runItemHooks(room, player, 'capture', { victim: opponent, pawnIdx: j });
-      });
-    }
+      oppPawns[j] = 0;
+      captured = true;
+      room.lastCapture = {
+        id: eventId(),
+        attacker: player.name,
+        defender: opponent.name,
+        color: opponent.color,
+        defenderIsOut: !!opponent.isOut,
+        trackPos
+      };
+      addHistory(room, `⚔️ ${player.name} memakan bidak ${opponent.name}${opponent.isOut ? ' (pemain out)' : ''}!`);
+      runItemHooks(room, player, 'capture', { victim: opponent, pawnIdx: j });
+    });
   }
 
   // 2. Efek Black Hole pada bidak yang baru mendarat (bisa dicegah item, mis. Blackhole Shield)
@@ -569,6 +566,7 @@ module.exports = {
   declareWinner,
   advanceTurn,
   triggerTurn,
+  executeAutoPlay,
   handleRoll,
   handleMove,
   useItem,

@@ -1,5 +1,5 @@
 import React from 'react';
-import jakludoLogo from '../assets/jakludo-logo.jpg';
+import jakludoLogo from '../assets/jakludo-logo.webp';
 
 const COLORS = ['red', 'green', 'yellow', 'blue'];
 
@@ -42,7 +42,7 @@ export default function HomeScreen({ user, checkingAuth, code, error, activeRoom
           </ul>
         </div>
         <figure className="home__art">
-          <img src={jakludoLogo} alt="Logo JakLudo: dadu, bidak Ludo, dan Monas" width="480" height="480" fetchpriority="high" />
+          <img src={jakludoLogo} alt="Logo JakLudo: dadu, bidak Ludo, dan Monas" width="720" height="480" fetchpriority="high" />
         </figure>
       </section>
 

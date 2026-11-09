@@ -37,6 +37,11 @@ export default function TurnPanel({ room, playerId, isTurn, canAct, currentTurnP
             {isTurn ? 'Giliranmu' : currentTurnPlayer?.name}
           </p>
           <p className="turn-panel__status" aria-live="polite">{status}</p>
+          {room.blackHoleShiftIn && (
+            <p className="turn-panel__hint muted">
+              🕳️ Black Hole pindah {room.blackHoleShiftIn === 1 ? 'setelah giliran ini' : `${room.blackHoleShiftIn} giliran lagi`}
+            </p>
+          )}
 
           {canAct && (
             <button type="button" className="btn btn--primary btn--lg btn--block" onClick={actions.rollDice}>

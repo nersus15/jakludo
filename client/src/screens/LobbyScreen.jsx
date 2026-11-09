@@ -174,7 +174,7 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
             </p>
           </fieldset>
         )}
-        <p className="setting__note muted">Bidak yang berdiri di kotak start warnanya sendiri tidak bisa dimakan lawan.</p>
+        <p className="setting__note muted">Kotak start hanya aman bagi warnanya sendiri. Bidak warna lain yang singgah di sana bisa dimakan.</p>
       </section>
 
       <section className="lobby__start">

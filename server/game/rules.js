@@ -134,7 +134,8 @@ const AI = {
   captureBase: 50,      // memakan bidak lawan
   captureProgress: 1.5, // ditambah sejauh apa bidak lawan sudah berjalan
   riskWeight: 1,        // kerugian = peluang dimakan x nilai bidak
-  blackHole: 40         // mendarat di Black Hole tanpa perisai
+  blackHole: 40,        // mendarat di Black Hole tanpa perisai
+  shieldCost: 25        // memakai perisai (bisa item yang dibeli pemain saat langkahnya dijalankan otomatis)
 };
 
 const pawnWorth = val => val + 20;
@@ -190,7 +191,7 @@ function evaluateMove(room, player, pawnIdx, dice) {
 
   if (room.settings?.blackHole && toTrack !== null && getBlackHoles(room).includes(toTrack)) {
     const shielded = (player.items?.blackholeShield?.owned || 0) + (player.items?.blackholeShield?.earned || 0) > 0;
-    score -= shielded ? 5 : AI.blackHole + pawnWorth(to);
+    score -= shielded ? AI.shieldCost : AI.blackHole + pawnWorth(to);
   }
 
   return score;

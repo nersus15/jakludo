@@ -566,6 +566,7 @@ module.exports = {
   declareWinner,
   advanceTurn,
   triggerTurn,
+  executeAutoPlay,
   handleRoll,
   handleMove,
   useItem,

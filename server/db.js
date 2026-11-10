@@ -199,6 +199,7 @@ const q = {
     ORDER BY wins DESC, points DESC,
       CASE WHEN matches_played > 0 THEN CAST(wins AS REAL) / matches_played ELSE 0 END DESC`),
   spendPoints: db.prepare('UPDATE leaderboard SET points = points - ? WHERE user_id = ? AND points >= ?'),
+  addPoints: db.prepare('UPDATE leaderboard SET points = points + ? WHERE user_id = ?'),
   userItems: db.prepare('SELECT item_id, quantity FROM user_items WHERE user_id = ? AND quantity > 0'),
   addItem: db.prepare(`INSERT INTO user_items (user_id, item_id, quantity) VALUES (?, ?, ?)
     ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity`),
@@ -488,6 +489,19 @@ function consumeUserItem({ userId, itemId }) {
   return q.useItem.run(userId, itemId).changes > 0;
 }
 
+function addPoints({ userId, amount }) {
+  const user = findUserById(userId);
+  if (!user) return { error: 'Pengguna tidak ditemukan.' };
+  if (!Number.isInteger(amount) || amount <= 0) return { error: 'Jumlah diamond tidak valid.' };
+
+  transaction(() => {
+    ensureLeaderboardEntry(user);
+    q.addPoints.run(amount, user.id);
+  });
+
+  return { success: true, user: sanitizeUser(findUserById(user.id)) };
+}
+
 let closed = false;
 
 // ==========================================
@@ -543,6 +557,7 @@ module.exports = {
   getUserItems,
   purchaseItem,
   consumeUserItem,
+  addPoints,
   saveRoom,
   deleteRoom,
   loadRooms,

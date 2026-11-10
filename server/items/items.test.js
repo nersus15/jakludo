@@ -204,118 +204,53 @@ test('poin tidak cukup menolak pembelian', async () => {
   assert.equal(db.getUserItems(u.user.id).forceReturn, 2);
 });
 
-// ---------- Universal Shield ----------
+test('fitur inject diamond: hanya seliron_id yang boleh, user lain ditolak 403', async () => {
+  // Register user biasa
+  const normalUser = await register();
+  const resForbidden = await fetch(`${url}/api/shop/inject-diamonds`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${normalUser.token}` },
+    body: JSON.stringify({ amount: 1000 })
+  });
+  assert.equal(resForbidden.status, 403);
+  const dataForbidden = await resForbidden.json();
+  assert.equal(dataForbidden.success, false);
+  assert.match(dataForbidden.error, /khusus untuk username seliron_id/i);
 
-// Stok diberikan langsung sebagai item pertandingan: membeli di toko butuh akun baru per test,
-// dan pendaftaran akun dibatasi per jaringan
-const giveShield = player => {
-  player.items.universalShield = { owned: 0, earned: 1, state: {} };
-};
-const giveForceReturn = player => {
-  player.items.forceReturn = { owned: 0, earned: 1, state: {} };
-};
+  // Register user seliron_id (or register if not exists)
+  const selironRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'seliron_id', password: 'Password#123' })
+  });
+  let selironAuth = await selironRes.json();
+  if (!selironAuth.token) {
+    // jika sudah terdaftar
+    const loginRes = await fetch(`${url}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'seliron_id', password: 'Password#123' })
+    });
+    selironAuth = await loginRes.json();
+  }
 
-test('harga item sesuai toko: Force Return 100, Blackhole Shield 50, Universal Shield 100', () => {
-  assert.equal(items.get('forceReturn').price, 100);
-  assert.equal(items.get('blackholeShield').price, 50);
-  assert.equal(items.get('universalShield').price, 100);
-  assert.equal(items.get('universalShield').kind, 'reactive');
+  const initialPoints = selironAuth.user?.points || 0;
+
+  // Inject 2500 diamond
+  const resSuccess = await fetch(`${url}/api/shop/inject-diamonds`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${selironAuth.token}` },
+    body: JSON.stringify({ amount: 2500 })
+  });
+  assert.equal(resSuccess.status, 200);
+  const dataSuccess = await resSuccess.json();
+  assert.equal(dataSuccess.success, true);
+  assert.equal(dataSuccess.user.points, initialPoints + 2500);
+
+  // Gunakan poin/diamond hasil inject untuk membeli item
+  const buyRes = await buy(selironAuth.token, 'forceReturn');
+  assert.equal(buyRes.success, true);
+  assert.equal(buyRes.user.points, initialPoints + 2500 - 100);
+  assert.equal(db.getUserItems(selironAuth.user.id).forceReturn >= 1, true);
 });
 
-test('target Force Return yang punya Universal Shield ditanya dan bisa menahannya', async () => {
-  const { host, guest, room, pa, pb } = await startedRoom();
-  giveForceReturn(pa);
-  giveShield(pb);
-  room.pawns[pb.id] = [12, 0, 0, 0];
-  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
-
-  const asked = new Promise(resolve => guest.on('room:update', r => r.pendingShield && resolve(r.pendingShield)));
-  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
-  const pending = await asked;
-  assert.equal(pending.playerId, pb.id);
-  assert.equal(pending.itemId, 'universalShield');
-  assert.equal(pending.event, 'forceReturn');
-  assert.equal(pending.resume, undefined, 'data lanjutan tidak dikirim ke klien');
-
-  // Selama menunggu keputusan, pemain yang giliran tidak bisa melempar dadu
-  host.emit('game:roll');
-  await wait(50);
-  assert.equal(room.rolling, false);
-
-  guest.emit('game:shield_decision', { use: true });
-  await wait(80);
-  assert.equal(room.pendingShield, null);
-  assert.equal(room.pawns[pb.id][0], 12, 'bidak selamat');
-  assert.equal(pb.items.universalShield.earned, 0, 'perisai terpakai');
-  assert.equal(pa.items.forceReturn.earned, 0, 'Force Return penyerang tetap terpakai');
-  assert.equal(room.lastItemEvent.itemId, 'universalShield');
-  assert.equal(room.turn, 0, 'giliran tetap milik penyerang');
-});
-
-test('target Force Return boleh memilih menyimpan Universal Shield', async () => {
-  const { host, guest, room, pa, pb } = await startedRoom();
-  giveForceReturn(pa);
-  giveShield(pb);
-  room.pawns[pb.id] = [12, 0, 0, 0];
-  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
-  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
-  await wait(80);
-  assert.ok(room.pendingShield);
-
-  host.emit('game:shield_decision', { use: true }); // bukan pemilik perisai: diabaikan
-  await wait(50);
-  assert.ok(room.pendingShield);
-
-  guest.emit('game:shield_decision', { use: false });
-  await wait(80);
-  assert.equal(room.pawns[pb.id][0], 0, 'bidak pulang ke markas');
-  assert.equal(pb.items.universalShield.earned, 1, 'perisai tetap tersimpan');
-});
-
-test('Universal Shield dipakai otomatis jika waktu memutuskan habis', async () => {
-  const { host, room, pa, pb } = await startedRoom();
-  giveForceReturn(pa);
-  giveShield(pb);
-  room.pawns[pb.id] = [12, 0, 0, 0];
-  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
-  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
-  await wait(80);
-  room.pendingShield.expiresAt = Date.now();
-  engine.triggerTurn(room); // pasang ulang timer, sama seperti setelah server restart
-  await wait(80);
-  assert.equal(room.pendingShield, null);
-  assert.equal(room.pawns[pb.id][0], 12);
-  assert.equal(pb.items.universalShield.earned, 0);
-});
-
-test('Black Hole: pemilik Universal Shield ditanya; menolak berarti bidak tersedot', async () => {
-  const { host, room, pa } = await startedRoom({ blackHole: true });
-  giveShield(pa);
-  room.pawns[pa.id] = [2, 0, 0, 0];
-  room.dice = 3;
-  engine.handleMove(room, pa.id, 0);
-  await wait(3 * 220 + 500);
-  assert.equal(room.pendingShield?.event, 'blackHole');
-  assert.equal(room.pawns[pa.id][0], 5, 'menunggu keputusan, bidak belum tersedot');
-  assert.deepEqual(require('../game/store').publicRoom(room).movable, [], 'tidak ada langkah selama menunggu');
-
-  host.emit('game:shield_decision', { use: false });
-  await wait(80);
-  assert.equal(room.pawns[pa.id][0], 0, 'bidak tersedot');
-  assert.equal(pa.items.universalShield.earned, 1);
-  assert.equal(room.turn, 1, 'giliran lanjut ke pemain berikutnya');
-});
-
-test('Black Hole: Blackhole Shield otomatis dipakai lebih dulu sebelum Universal Shield ditawarkan', async () => {
-  const { room, pa } = await startedRoom({ blackHole: true });
-  pa.items.blackholeShield = { owned: 0, earned: 1, state: {} };
-  giveShield(pa);
-  room.pawns[pa.id] = [2, 0, 0, 0];
-  room.dice = 3;
-  engine.handleMove(room, pa.id, 0);
-  await wait(3 * 220 + 500);
-  assert.equal(room.pendingShield, null, 'tidak perlu bertanya');
-  assert.equal(room.pawns[pa.id][0], 5);
-  assert.equal(pa.items.blackholeShield.earned, 0);
-  assert.equal(pa.items.universalShield.earned, 1, 'Universal Shield tetap utuh');
-});

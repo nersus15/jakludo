@@ -15,14 +15,13 @@ function turnStatus({ room, isTurn, currentTurnPlayer, movablePawns }) {
   if (!isTurn) return `Giliran ${name}`;
   if (room.dice === null) return 'Giliranmu. Lempar dadu!';
   if (movablePawns.length === 0) return `Dapat ${room.dice}, tidak ada langkah. Giliran berpindah...`;
-  if (room.dice === 6) return 'Dapat 6, pilih bidak. Setelah ini kamu lempar lagi.';
-  return `Dapat ${room.dice}. Pilih bidak yang mau jalan.`;
+  if (room.dice === 6) return 'Dapat 6, ketuk bidak di papan. Setelah ini kamu lempar lagi.';
+  return `Dapat ${room.dice}. Ketuk bidak di papan yang mau jalan.`;
 }
 
-// Panel giliran: dadu, aksi utama, pilihan bidak, reaksi, serta tombol chat & skor
-export default function TurnPanel({ room, playerId, isTurn, canAct, currentTurnPlayer, movablePawns, unreadChats, actions, onOpenChat, onOpenScores }) {
+// Panel giliran: dadu, aksi utama, reaksi, serta tombol chat & skor. Bidak dipilih langsung di papan.
+export default function TurnPanel({ room, isTurn, canAct, currentTurnPlayer, movablePawns, unreadChats, actions, onOpenChat, onOpenScores }) {
   const status = turnStatus({ room, isTurn, currentTurnPlayer, movablePawns });
-  const myPawns = room.pawns[playerId] || [];
 
   return (
     <section className={`turn-panel card ${isTurn ? 'is-my-turn card--focus' : ''}`} aria-label="Giliran">
@@ -51,17 +50,6 @@ export default function TurnPanel({ room, playerId, isTurn, canAct, currentTurnP
             <button type="button" className="btn btn--primary btn--lg btn--block" onClick={actions.rollDice}>
               Lempar dadu
             </button>
-          )}
-
-          {isTurn && !room.animatingMove && movablePawns.length > 1 && (
-            <div className="pawn-choices" role="group" aria-label="Pilih bidak">
-              {movablePawns.map(idx => (
-                <button key={idx} type="button" className="btn btn--secondary pawn-choice" onClick={() => actions.movePawn(idx)}>
-                  Bidak {idx + 1}
-                  <span className="muted">{myPawns[idx] === 0 ? 'keluar' : `+${room.dice}`}</span>
-                </button>
-              ))}
-            </div>
           )}
         </div>
       </div>

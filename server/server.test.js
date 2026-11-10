@@ -379,7 +379,7 @@ test('dapat 6 tanpa langkah yang mungkin tetap mendapat lemparan bonus', async (
   room.pawns[pa.id] = [41, 44, 44, 44];
   const crypto = require('crypto');
   const original = crypto.randomInt;
-  crypto.randomInt = () => 5; // dadu = 6
+  crypto.randomInt = max => max - 1; // angka acak tertinggi -> dadu = 6
   try {
     a.emit('game:roll');
     await wait(750 + 1300 + 300);
@@ -406,4 +406,18 @@ test('langkah otomatis pemain AFK memakai pertimbangan bot, bukan bidak pertama'
   clearTimeout(room.turnTimer);
   assert.deepEqual(room.pawns[pa.id].slice(0, 2), [3, 22], 'bidak yang aman yang dijalankan');
   assert.equal(pa.autoPlayCount, 1);
+});
+
+test('catatan dadu pemain tersimpan di server tapi tidak dikirim ke klien', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const update = new Promise(resolve => a.on('room:update', r => r.dice !== null && resolve(r)));
+  a.emit('game:roll');
+  const pub = await update;
+  clearTimeout(room.turnTimer);
+  assert.equal(room.players[0].diceStats.total, 1);
+  assert.equal(pub.players[0].diceStats, undefined);
 });

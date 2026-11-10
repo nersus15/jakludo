@@ -35,8 +35,9 @@ function roomTimeout(room, fn, ms) {
 // ==========================================
 
 function publicPlayer(p, room) {
-  // sessionId adalah rahasia reconnect; stok item dikirim dalam bentuk ringkasan
-  const { sessionId, items, ...rest } = p;
+  // sessionId adalah rahasia reconnect; catatan dadu tidak dikirim agar lemparan tidak bisa dihitung;
+  // stok item dikirim dalam bentuk ringkasan
+  const { sessionId, items, diceStats, ...rest } = p;
   return { ...rest, items: inventory.publicItems(p, room) };
 }
 

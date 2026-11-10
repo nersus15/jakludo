@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jakludo-pwa-v2';
+const CACHE_NAME = 'jakludo-pwa-v3';
 
 const STATIC_ASSETS = [
   '/',
@@ -31,6 +31,19 @@ self.addEventListener('activate', event => {
           .map(name => caches.delete(name))
       );
     }).then(() => self.clients.claim())
+  );
+});
+
+// Klik notifikasi permainan: fokus ke tab JakLudo yang sudah terbuka, atau buka tab baru
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = event.notification.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      const existing = clients.find(c => new URL(c.url).origin === self.location.origin);
+      if (existing) return existing.focus();
+      return self.clients.openWindow(target);
+    })
   );
 });
 

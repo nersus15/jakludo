@@ -4,6 +4,7 @@ import GameHeader from './components/game/GameHeader';
 import Toasts from './components/Toasts';
 import { ReconnectBar } from './components/NetworkStatus';
 import InstallGuide from './components/InstallGuide';
+import NotificationPrompt from './components/NotificationPrompt';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
@@ -155,6 +156,7 @@ export default function App() {
       </Suspense>
       <AudioSettingsModal isOpen={modal === 'audio'} onClose={close} />
       <InstallGuide platform={pwa.installGuide} onClose={pwa.closeInstallGuide} />
+      <NotificationPrompt enabled={game.screen === 'home' && !modal && !pwa.installGuide} />
     </div>
   );
 }

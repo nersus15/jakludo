@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { storage } from '../storage';
 import { sound } from '../sound';
 import { triggerConfetti } from '../confetti';
+import { notify } from '../notifications';
 
 const roomFromUrl = () => new URLSearchParams(location.search).get('room') || '';
 
@@ -36,6 +37,8 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
   const errorTimer = useRef(null);
   const hasCelebrated = useRef(false);
   const lastItemEventId = useRef(null);
+  const lastCaptureId = useRef(null);
+  const turnNotified = useRef(false);
   // Saat baru masuk/kembali ke room, event item lama tidak boleh diputar ulang
   const seedEvents = useRef(false);
   const playerIdRef = useRef('');
@@ -95,6 +98,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
         if (seedEvents.current) {
           seedEvents.current = false;
           lastItemEventId.current = updated.lastItemEvent?.id ?? null;
+          lastCaptureId.current = updated.lastCapture?.id ?? null;
           // Kembali ke room yang sudah selesai tidak perlu memutar ulang perayaan menang
           hasCelebrated.current = !!updated.winner;
         }
@@ -202,6 +206,52 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
   useEffect(() => {
     if (!isTurn || room?.dice !== null) setItemTargeting(null);
   }, [isTurn, room?.dice]);
+
+  // Notifikasi browser: giliran mengocok dadu. Jika giliran datang saat tab masih dilihat lalu pemain
+  // pindah tab, notifikasi tetap dikirim saat tab disembunyikan (sekali per giliran).
+  useEffect(() => {
+    if (!canAct || room?.winner || me?.isOut) {
+      turnNotified.current = false;
+      return undefined;
+    }
+    const send = async () => {
+      if (turnNotified.current) return;
+      const res = await notify('🎲 Giliranmu!', {
+        body: `Silahkan kocok dadu di room ${room?.code}. Jangan sampai giliranmu dijalankan otomatis.`,
+        tag: `jakludo-turn-${room?.code}`
+      });
+      if (res.ok) turnNotified.current = true;
+    };
+    send();
+    const onHide = () => { if (document.visibilityState === 'hidden') send(); };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('blur', send);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('blur', send);
+    };
+  }, [canAct, room?.winner, room?.code, me?.isOut]);
+
+  // Notifikasi browser: ada bidak yang diinjak / dipulangkan ke markas
+  useEffect(() => {
+    const cap = room?.lastCapture;
+    if (!cap || cap.id === lastCaptureId.current) return;
+    lastCaptureId.current = cap.id;
+    const myName = me?.name;
+    const iAmDefender = cap.defenderId ? cap.defenderId === playerId : cap.defender === myName;
+    const iAmAttacker = cap.attackerId ? cap.attackerId === playerId : cap.attacker === myName;
+    const how = cap.isForceReturn ? 'memakai Force Return pada' : 'menginjak';
+    let title = '⚔️ Bidak diinjak!';
+    let body = `${cap.attacker} ${how} bidak ${cap.defender}. Bidaknya kembali ke markas.`;
+    if (iAmDefender) {
+      title = '😱 Bidakmu diinjak!';
+      body = `${cap.attacker} ${how} bidakmu. Bidakmu kembali ke markas.`;
+    } else if (iAmAttacker) {
+      title = '🔥 Kamu menginjak bidak lawan!';
+      body = `Bidak ${cap.defender} kembali ke markas.`;
+    }
+    notify(title, { body, tag: `jakludo-capture-${room?.code}` });
+  }, [room?.lastCapture, room?.code, playerId, me?.name]);
 
   // ---------- Aksi ----------
 

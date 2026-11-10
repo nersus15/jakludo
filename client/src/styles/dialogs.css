@@ -397,3 +397,51 @@
 .audio-control__test {
   justify-self: start;
 }
+
+/* Peringkat akhir pertandingan (urut bidak finish terbanyak) */
+.final-ranking {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+}
+
+.final-ranking__row {
+  display: grid;
+  grid-template-columns: 2rem auto 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border-inline-start: 4px solid var(--pc, var(--border));
+}
+
+.final-ranking__row.is-me {
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
+.final-ranking__pos {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.final-ranking__name {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.final-ranking__name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.final-ranking__score {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

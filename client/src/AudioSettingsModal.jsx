@@ -1,6 +1,14 @@
 import React, { useEffect, useId, useState } from 'react';
 import Modal from './components/Modal';
 import { sound } from './sound';
+import { getNotificationPermission, notify, requestNotificationPermission } from './notifications';
+
+const PERMISSION_LABEL = { granted: 'Diizinkan', denied: 'Diblokir', default: 'Belum dipilih', unsupported: 'Tidak didukung' };
+const NOTIF_MESSAGES = {
+  denied: 'Notifikasi diblokir browser. Klik ikon gembok/pengaturan situs di samping alamat web, ubah Notifikasi menjadi "Izinkan", lalu muat ulang halaman.',
+  default: 'Izin notifikasi belum diberikan.',
+  unsupported: 'Browser ini tidak mendukung notifikasi. Di iPhone/iPad, pasang JakLudo ke layar utama terlebih dahulu (iOS 16.4+).'
+};
 
 function VolumeControl({ id, title, description, percent, muted, onVolume, onToggleMute, extra }) {
   return (
@@ -35,10 +43,28 @@ function VolumeControl({ id, title, description, percent, muted, onVolume, onTog
 
 export default function AudioSettingsModal({ isOpen, onClose }) {
   const [audio, setAudio] = useState(sound.getState());
+  const [notifStatus, setNotifStatus] = useState(null);
   const bgmId = useId();
   const sfxId = useId();
 
   useEffect(() => sound.subscribe(state => setAudio({ ...state })), []);
+
+  const testNotification = async () => {
+    sound.playClick();
+    const permission = await requestNotificationPermission();
+    if (permission !== 'granted') {
+      setNotifStatus({ ok: false, text: NOTIF_MESSAGES[permission] || NOTIF_MESSAGES.denied });
+      return;
+    }
+    const res = await notify('🔔 Tes notifikasi JakLudo', {
+      body: 'Notifikasi berhasil! Kamu akan diberi tahu saat giliranmu dan saat bidak diinjak.',
+      tag: 'jakludo-test',
+      force: true
+    });
+    setNotifStatus(res.ok
+      ? { ok: true, text: 'Notifikasi terkirim. Jika tidak terlihat, berarti diblokir oleh pengaturan sistem operasi (lihat petunjuk di bawah).' }
+      : { ok: false, text: `Notifikasi gagal ditampilkan browser${res.error ? `: ${res.error.message}` : '.'}` });
+  };
 
   return (
     <Modal
@@ -89,6 +115,22 @@ export default function AudioSettingsModal({ isOpen, onClose }) {
           }
         />
       </div>
+
+      <section className="audio-control" aria-labelledby="notif-test-title">
+        <div className="audio-control__head">
+          <div>
+            <h3 id="notif-test-title">Notifikasi browser</h3>
+            <p className="muted">Status izin: <strong>{PERMISSION_LABEL[getNotificationPermission()]}</strong></p>
+          </div>
+          <button type="button" className="btn btn--secondary" onClick={testNotification}>Tes notifikasi</button>
+        </div>
+        {notifStatus && (
+          <p className={`alert alert--${notifStatus.ok ? 'success' : 'error'}`} role="status">{notifStatus.text}</p>
+        )}
+        <p className="muted">
+          Tidak muncul? Pastikan browser diizinkan mengirim notifikasi oleh sistem: macOS → System Settings → Notifications → (Chrome/Safari/Edge) → Allow Notifications, dan matikan mode Focus / Jangan Ganggu. Windows → Pengaturan → Sistem → Notifikasi.
+        </p>
+      </section>
     </Modal>
   );
 }

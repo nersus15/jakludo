@@ -365,7 +365,9 @@ function captureAt(room, player, toVal) {
       room.lastCapture = {
         id: eventId(),
         attacker: player.name,
+        attackerId: player.id,
         defender: opponent.name,
+        defenderId: opponent.id,
         color: opponent.color,
         defenderIsOut: !!opponent.isOut,
         trackPos
@@ -416,7 +418,7 @@ function gameApi(room, player, item) {
       room.pawns[owner.id][pawnIdx] = 0;
     },
     recordCapture: (defender, extra = {}) => {
-      room.lastCapture = { id: eventId(), attacker: player.name, defender: defender.name, color: defender.color, ...extra };
+      room.lastCapture = { id: eventId(), attacker: player.name, attackerId: player.id, defender: defender.name, defenderId: defender.id, color: defender.color, ...extra };
     }
   };
 }

@@ -492,6 +492,8 @@ function useItem(socket, room, { itemId, target }) {
 
   let resolvedTarget = null;
   if (item.target === 'opponentPawn') {
+    const anyTarget = room.players.some(p => p.id !== player.id && (room.pawns[p.id] || []).some(v => v >= 1 && v <= 39));
+    if (!anyTarget) return socket.emit('room:error', `${item.name} belum bisa dipakai: tidak ada bidak lawan di luar markas.`);
     resolvedTarget = resolveOpponentPawn(socket, room, player, target);
     if (!resolvedTarget) return;
   }

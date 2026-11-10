@@ -147,6 +147,16 @@ test('item aktif tidak bisa dipakai tanpa stok atau setelah melempar dadu', asyn
   assert.match(await err, /tidak valid/, 'item pasif tidak bisa dipakai manual');
 });
 
+test('Force Return tidak bisa dipakai jika tidak ada bidak lawan di luar markas', async () => {
+  const { host, room, pa, pb } = await startedRoom();
+  pa.items.forceReturn = { owned: 0, earned: 1, state: {} };
+  room.pawns[pb.id] = [0, 0, 44, 41]; // markas dan jalur finish bukan target
+  const err = once(host, 'room:error');
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  assert.match(await err, /tidak ada bidak lawan di luar markas/);
+  assert.equal(pa.items.forceReturn.earned, 1, 'stok tidak berkurang');
+});
+
 test('Blackhole Shield otomatis mencegah bidak tersedot dan mengurangi stok', async () => {
   const { a, room, pa } = await startedRoom({ blackHole: true });
   await buy(a.token, 'blackholeShield');

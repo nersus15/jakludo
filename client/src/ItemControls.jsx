@@ -27,13 +27,19 @@ export function InventoryChips({ catalog, player }) {
 }
 
 // Tombol item aktif (mis. Force Return) yang bisa dipakai di giliran sendiri sebelum melempar dadu
-export function ActiveItemActions({ catalog, player, enabled, targetingItemId, onToggleTarget, onUse }) {
+// Ada bidak lawan di lintasan (bukan di markas / jalur finish) yang bisa jadi target
+function hasOpponentPawnOnTrack(room, playerId) {
+  return room.players.some(p => p.id !== playerId && (room.pawns[p.id] || []).some(v => v >= 1 && v <= 39));
+}
+
+export function ActiveItemActions({ catalog, room, player, enabled, targetingItemId, onToggleTarget, onUse }) {
   if (!enabled) return null;
   const usable = catalog.filter(item => item.kind === 'active' && itemStock(player, item.id).count > 0);
 
   return usable.map(item => {
     const stock = itemStock(player, item.id);
     const isTargeting = targetingItemId === item.id;
+    const noTarget = item.target === 'opponentPawn' && !hasOpponentPawnOnTrack(room, player?.id);
     return (
       <section key={item.id} className="action-card card" aria-label={item.name}>
         <div className="action-card__head">
@@ -50,6 +56,7 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
             type="button"
             className="btn btn--primary"
             aria-pressed={item.target ? isTargeting : undefined}
+            disabled={noTarget}
             onClick={() => {
               sound.playClick();
               if (item.target) onToggleTarget(isTargeting ? null : item.id);
@@ -59,7 +66,8 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
             {isTargeting ? 'Batal pilih target' : `Pakai ${item.name}`}
           </button>
         </div>
-        {isTargeting && <p className="action-card__hint">Ketuk bidak lawan di lintasan untuk memakai {item.name}.</p>}
+        {noTarget && <p className="action-card__hint">Belum bisa dipakai: tidak ada bidak lawan di luar markas.</p>}
+        {isTargeting && !noTarget && <p className="action-card__hint">Ketuk bidak lawan di lintasan untuk memakai {item.name}.</p>}
       </section>
     );
   });

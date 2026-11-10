@@ -53,6 +53,7 @@ export default function GameScreen({ game, itemCatalog, sheet, onSheetChange, on
 
         <ActiveItemActions
           catalog={itemCatalog}
+          room={room}
           player={me}
           enabled={canAct}
           targetingItemId={game.itemTargeting}

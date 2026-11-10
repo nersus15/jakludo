@@ -12,6 +12,8 @@ module.exports = {
   OFFLINE_OUT_MS: 2 * 60 * 1000,
   // Kursi pemain (selain pembuat room) di lobby ditahan selama ini setelah koneksi putus
   LOBBY_SEAT_GRACE_MS: 2 * 60 * 1000,
+  // Waktu pemain memutuskan memakai perisai (Universal Shield); lewat dari ini perisai otomatis dipakai
+  SHIELD_DECISION_MS: 10000,
   // Batas auto-play berturut-turut sebelum pemain dinyatakan OUT
   MAX_AUTO_PLAY: 3,
   MAX_PLAYERS: 4,

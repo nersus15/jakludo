@@ -602,8 +602,8 @@ class SoundManager {
     this.playFunnyElimination();
   }
 
-  // Efek suara menggelegar saat Skill Ultimate Eliminasi Bidak digunakan
-  playThunderSkill() {
+  // Efek suara menggelegar untuk item serangan (mis. Force Return)
+  playThunder() {
     if (this.sfxMuted || this.sfxVolume <= 0) return;
     this.init();
     if (!this.ctx) return;

@@ -1,4 +1,4 @@
-// Alur permainan: giliran, dadu, langkah bidak, skill, dan pemakaian item.
+// Alur permainan: giliran, dadu, langkah bidak, pemakaian item, dan keputusan perisai.
 const crypto = require('crypto');
 const db = require('../db');
 const items = require('../items');
@@ -16,7 +16,7 @@ const {
   isPawnProtected,
   isPawnIndex
 } = require('./rules');
-const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY } = require('./config');
+const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY, SHIELD_DECISION_MS } = require('./config');
 
 const { addHistory, emitRoom, roomTimeout, clearRoomTimers } = store;
 const eventId = () => Date.now() + Math.random();
@@ -28,10 +28,7 @@ const eventId = () => Date.now() + Math.random();
 function resetPlayerForGame(p) {
   p.autoPlayCount = 0;
   p.isOut = false;
-  p.skillPoints = 0;
-  p.skillUnlocked = false;
   p.finishedCount = 0;
-  p.accumulatedThisTurn = false;
   inventory.resetForMatch(p);
   if (p.userId) inventory.loadOwned(p, db.getUserItems(p.userId));
 }
@@ -67,6 +64,7 @@ function declareWinner(room, winnerPlayer) {
   clearRoomTimers(room);
   room.winner = winnerPlayer.id;
   room.dice = null;
+  room.pendingShield = null;
   room.message = `🏆 SELAMAT! ${winnerPlayer.name} MENANG!`;
   addHistory(room, `🎉 ${winnerPlayer.name} berhasil memenangkan pertandingan JakLudo!`);
 
@@ -87,6 +85,7 @@ function declareWinner(room, winnerPlayer) {
 function advanceTurn(room) {
   if (!room || !room.started || room.winner) return;
   clearRoomTimers(room);
+  room.pendingShield = null; // giliran dipaksa pindah (mis. pemain menyerah): keputusan perisai batal
 
   const activePlayers = room.players.filter(p => !p.isOut);
   if (activePlayers.length <= 1) {
@@ -103,7 +102,6 @@ function advanceTurn(room) {
   room.dice = null;
   room.consecutiveSixes = 0;
   const holesShifted = shiftBlackHolesEachRound(room, activePlayers.length);
-  room.players.forEach(p => { p.accumulatedThisTurn = false; });
   const nextPlayer = room.players[room.turn];
   room.message = `Giliran ${nextPlayer.name}${nextPlayer.autoPlayCount > 0 ? ` (Auto-Play ${nextPlayer.autoPlayCount}/${MAX_AUTO_PLAY})` : ''}.${holesShifted ? ' 🕳️ Black Hole pindah tempat!' : ''}`;
 
@@ -127,6 +125,11 @@ function shiftBlackHolesEachRound(room, activeCount) {
 // Jadwalkan aksi berikutnya untuk pemain yang sedang mendapat giliran
 function triggerTurn(room) {
   if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
+  // Permainan berhenti sampai pemilik perisai memutuskan (timer dipasang ulang setelah server restart)
+  if (room.pendingShield) {
+    armShieldTimer(room);
+    return;
+  }
   const currentPlayer = room.players[room.turn];
   if (!currentPlayer) return;
 
@@ -169,7 +172,7 @@ function scheduleAutoMove(room, player, isAuto) {
 }
 
 function executeAutoPlay(room, player) {
-  if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
+  if (!room || !room.started || room.winner || room.rolling || room.animatingMove || room.pendingShield) return;
   if (room.players[room.turn]?.id !== player.id) return;
 
   // OUT setelah 3x auto-play berturut-turut: langsung jika pemain online tapi diam (AFK),
@@ -204,17 +207,10 @@ function handleRoll(room, playerId, isAuto = false) {
   if (!room || !room.started || room.winner) return;
   const currentPlayer = room.players[room.turn];
   if (!currentPlayer || currentPlayer.id !== playerId || currentPlayer.isOut) return;
-  if (room.dice !== null || room.rolling || room.animatingMove) return;
+  if (room.dice !== null || room.rolling || room.animatingMove || room.pendingShield) return;
 
   if (room.turnTimer) clearTimeout(room.turnTimer);
   if (!isAuto && !currentPlayer.isBot) currentPlayer.autoPlayCount = 0;
-
-  // Pemain yang memegang skill eliminasi tetapi memilih melempar dadu: poin skill diakumulasi 2x
-  if (currentPlayer.skillUnlocked && (currentPlayer.skillPoints || 0) > 0 && !currentPlayer.accumulatedThisTurn) {
-    currentPlayer.skillPoints *= 2;
-    currentPlayer.accumulatedThisTurn = true;
-    addHistory(room, `⚡ ${currentPlayer.name} tidak menggunakan skill giliran ini: Poin skill diakumulasi menjadi ${currentPlayer.skillPoints}x!`);
-  }
 
   room.rolling = true;
   room.message = `${currentPlayer.name} sedang mengocok dadu...`;
@@ -270,7 +266,7 @@ function handleRoll(room, playerId, isAuto = false) {
 // ==========================================
 
 function handleMove(room, playerId, pawnIdx, isAuto = false) {
-  if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
+  if (!room || !room.started || room.winner || room.rolling || room.animatingMove || room.pendingShield) return;
   const player = room.players[room.turn];
   if (!player || player.id !== playerId || player.isOut) return;
   if (room.dice === null) return;
@@ -299,47 +295,58 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
   if (room.moveTimer) clearTimeout(room.moveTimer);
   room.moveTimer = roomTimeout(room, () => {
     room.animatingMove = null;
-    const captured = resolveLanding(room, player, pawnIdx, toVal);
+    const move = { pawnIdx, fromVal, toVal, rollVal, captured: captureAt(room, player, toVal) };
 
-    if (pawns.every(v => v === FINISH)) {
-      declareWinner(room, player);
-      return;
+    // Black Hole: perisai pasif dicoba dulu, lalu pemain bisa ditanya soal Universal Shield
+    const trackPos = toVal <= 39 ? getTrackIndex(COLORS.indexOf(player.color), toVal) : null;
+    if (trackPos !== null && room.settings?.blackHole && getBlackHoles(room).includes(trackPos)) {
+      const outcome = protectPawn(room, player, 'blackHole', { pawnIdx, trackPos }, { type: 'move', playerId: player.id, move });
+      if (outcome === 'pending') return emitRoom(room);
+      if (outcome === 'exposed') suckIntoBlackHole(room, player, pawnIdx, trackPos);
     }
-
-    const reachedGoal = toVal === FINISH;
-    if (reachedGoal) resolveGoal(room, player, pawnIdx);
-    room.dice = null;
-
-    // Angka 6, bidak masuk finish, atau memakan lawan memberi bonus giliran
-    if (rollVal === 6 || reachedGoal || captured) {
-      if (reachedGoal) {
-        player.accumulatedThisTurn = false;
-        room.message = `🎯 Bidak masuk ke garis tengah! ${player.name} dapat bonus giliran lempar dadu & jalan satu bidak lagi!`;
-        addHistory(room, `🎯 ${player.name} memasukkan bidak ke tengah (bonus lempar dadu & jalan lagi)!`);
-      } else if (captured) {
-        player.accumulatedThisTurn = false;
-        room.message = `⚔️ Bidak lawan berhasil dieliminasi! ${player.name} dapat giliran jalan lagi sekali!${room.lastBlackHole ? ' (Bidakmu sendiri tersedot Black Hole.)' : ''}`;
-        addHistory(room, `⚔️ ${player.name} mengeliminasi bidak lawan (bonus lempar dadu & jalan lagi)!`);
-      } else {
-        room.message = `Dapat angka 6! ${player.name} dapat melempar dadu sekali lagi.`;
-        addHistory(room, `🎲 ${player.name} dapat angka 6 (bonus lempar lagi)!`);
-      }
-      emitRoom(room);
-      triggerTurn(room);
-    } else {
-      if (fromVal === 0 && rollVal === 1) addHistory(room, `🚪 ${player.name} keluar kotak dengan angka 1.`);
-      advanceTurn(room);
-    }
+    finishMove(room, player, move);
   }, steps * 220 + 360);
 }
 
-// Efek petak tujuan di lintasan utama. Return true jika ada bidak lawan yang dimakan.
-function resolveLanding(room, player, pawnIdx, toVal) {
+// Lanjutan langkah setelah efek petak selesai: menang, finish, bonus giliran, atau giliran berikutnya
+function finishMove(room, player, { pawnIdx, fromVal, toVal, rollVal, captured }) {
+  const pawns = room.pawns[player.id];
+  if (pawns.every(v => v === FINISH)) {
+    declareWinner(room, player);
+    return;
+  }
+
+  const reachedGoal = toVal === FINISH;
+  if (reachedGoal) resolveGoal(room, player, pawnIdx);
+  room.dice = null;
+
+  // Angka 6, bidak masuk finish, atau memakan lawan memberi bonus giliran
+  if (rollVal === 6 || reachedGoal || captured) {
+    if (reachedGoal) {
+      room.message = `🎯 Bidak masuk ke garis tengah! ${player.name} dapat bonus giliran lempar dadu & jalan satu bidak lagi!`;
+      addHistory(room, `🎯 ${player.name} memasukkan bidak ke tengah (bonus lempar dadu & jalan lagi)!`);
+    } else if (captured) {
+      room.message = `⚔️ Bidak lawan berhasil dieliminasi! ${player.name} dapat giliran jalan lagi sekali!${room.lastBlackHole ? ' (Bidakmu sendiri tersedot Black Hole.)' : ''}`;
+      addHistory(room, `⚔️ ${player.name} mengeliminasi bidak lawan (bonus lempar dadu & jalan lagi)!`);
+    } else {
+      room.message = `Dapat angka 6! ${player.name} dapat melempar dadu sekali lagi.`;
+      addHistory(room, `🎲 ${player.name} dapat angka 6 (bonus lempar lagi)!`);
+    }
+    emitRoom(room);
+    triggerTurn(room);
+  } else {
+    if (fromVal === 0 && rollVal === 1) addHistory(room, `🚪 ${player.name} keluar kotak dengan angka 1.`);
+    advanceTurn(room);
+  }
+}
+
+// Makan bidak lawan di petak tujuan (lintasan utama). Return true jika ada yang dimakan.
+function captureAt(room, player, toVal) {
   if (toVal < 1 || toVal > 39) return false;
   const trackPos = getTrackIndex(COLORS.indexOf(player.color), toVal);
   let captured = false;
 
-  // 1. Makan bidak lawan. Dicek lebih dulu, termasuk di petak Black Hole: lawan yang bertahan
+  // Dicek sebelum Black Hole, termasuk di petak Black Hole: lawan yang bertahan
   //    di sana (memakai perisai) tetap bisa dimakan dan tetap memberi bonus giliran.
   //    Bidak yang terlindungi (start miliknya / bintang) tidak pernah sampai sini karena
   //    canPawnMove menutup petak itu, tapi tetap dicek agar aman.
@@ -367,32 +374,21 @@ function resolveLanding(room, player, pawnIdx, toVal) {
       runItemHooks(room, player, 'capture', { victim: opponent, pawnIdx: j });
     });
   }
-
-  // 2. Efek Black Hole pada bidak yang baru mendarat (bisa dicegah item, mis. Blackhole Shield)
-  if (room.settings?.blackHole && getBlackHoles(room).includes(trackPos)) {
-    if (!runItemHooks(room, player, 'blackHole', { pawnIdx, trackPos })) {
-      room.pawns[player.id][pawnIdx] = 0;
-      room.lastBlackHole = { id: eventId(), playerId: player.id, pawnIdx, trackPos, color: player.color, time: Date.now() };
-      addHistory(room, `🕳️ Bidak ${pawnIdx + 1} milik ${player.name} menginjak Black Hole dan tersedot kembali ke Base!`);
-      room.message = `🕳️ Bidak ${player.name} tersedot Black Hole ke base!`;
-    }
-  }
   return captured;
 }
 
-// Bidak masuk finish. Tiga bidak finish secara organik membuka Skill Eliminasi.
+function suckIntoBlackHole(room, player, pawnIdx, trackPos) {
+  room.pawns[player.id][pawnIdx] = 0;
+  room.lastBlackHole = { id: eventId(), playerId: player.id, pawnIdx, trackPos, color: player.color, time: Date.now() };
+  addHistory(room, `🕳️ Bidak ${pawnIdx + 1} milik ${player.name} menginjak Black Hole dan tersedot kembali ke Base!`);
+  room.message = `🕳️ Bidak ${player.name} tersedot Black Hole ke base!`;
+}
+
+// Bidak masuk finish
 function resolveGoal(room, player, pawnIdx) {
   room.lastGoal = { id: eventId(), playerId: player.id, playerName: player.name, color: player.color, pawnIdx };
   addHistory(room, `⭐ ${player.name} berhasil memasukkan 1 bidak ke garis akhir!`);
-
   player.finishedCount = room.pawns[player.id].filter(v => v === FINISH).length;
-  if (player.finishedCount === 3 && !player.skillUnlocked) {
-    player.skillUnlocked = true;
-    player.skillPoints = 1;
-    addHistory(room, `⚡ ${player.name} BERHASIL MEMASUKKAN 3 BIDAK! SKILL ELIMINASI TERBUKA!`);
-    room.message = `⚡ SKILL TERBUKA! ${player.name} dapat mengeliminasi 1 bidak lawan!`;
-    room.lastSkillUnlock = { id: eventId(), playerId: player.id, playerName: player.name, playerColor: player.color, time: Date.now() };
-  }
 }
 
 // ==========================================
@@ -448,17 +444,17 @@ function runItemHooks(room, player, event, data) {
   return false;
 }
 
-// Pemain yang sedang giliran dan boleh memakai skill/item aktif. Skill & item aktif hanya boleh
-// dipakai SEBELUM melempar dadu agar tidak bisa dipakai untuk mengocok ulang.
+// Pemain yang sedang giliran dan boleh memakai item aktif. Item aktif hanya boleh dipakai
+// SEBELUM melempar dadu agar tidak bisa dipakai untuk mengocok ulang.
 function currentActor(socket, room) {
-  if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return null;
+  if (!room || !room.started || room.winner || room.rolling || room.animatingMove || room.pendingShield) return null;
   const player = room.players[room.turn];
   if (!player || player.id !== socket.id || player.isOut) {
     socket.emit('room:error', 'Sekarang bukan giliranmu.');
     return null;
   }
   if (room.dice !== null) {
-    socket.emit('room:error', 'Skill dan item hanya bisa dipakai sebelum melempar dadu.');
+    socket.emit('room:error', 'Item hanya bisa dipakai sebelum melempar dadu.');
     return null;
   }
   return player;
@@ -491,8 +487,11 @@ function useItem(socket, room, { itemId, target }) {
   const player = currentActor(socket, room);
   if (!player) return;
   if (inventory.count(player, item.id) <= 0) {
-    return socket.emit('room:error', `Kamu tidak punya ${item.name}. Beli di Toko atau dapatkan dari permainan.`);
+    return socket.emit('room:error', `Kamu tidak punya ${item.name}. Beli dulu di Toko.`);
   }
+
+  const reason = item.canUse?.(itemContext(room, player, item));
+  if (reason) return socket.emit('room:error', `${item.name} belum bisa dipakai: ${reason}`);
 
   let resolvedTarget = null;
   if (item.target === 'opponentPawn') {
@@ -501,9 +500,18 @@ function useItem(socket, room, { itemId, target }) {
   }
 
   const ctx = itemContext(room, player, item, { target: resolvedTarget });
-  const reason = item.canUse?.(ctx);
-  if (reason) return socket.emit('room:error', reason);
   if (!ctx.consume()) return socket.emit('room:error', `${item.name} gagal dipakai. Coba lagi.`);
+
+  // Serangan yang bisa ditahan perisai lawan (mis. Force Return vs Universal Shield)
+  if (item.attack && resolvedTarget) {
+    const outcome = protectPawn(room, resolvedTarget.player, item.attack, { pawnIdx: resolvedTarget.pawnIdx, attacker: player },
+      { type: 'item', attackerId: player.id, itemId: item.id });
+    if (outcome === 'pending') return emitRoom(room);
+    if (outcome === 'protected') {
+      emitRoom(room);
+      return triggerTurn(room);
+    }
+  }
 
   item.use(ctx);
   emitRoom(room);
@@ -511,53 +519,92 @@ function useItem(socket, room, { itemId, target }) {
 }
 
 // ==========================================
-// SKILL ELIMINASI (3 bidak finish)
+// PERISAI: item yang menahan Force Return / Black Hole untuk pemiliknya
 // ==========================================
 
-function useSkill(socket, room, { target }) {
-  const player = currentActor(socket, room);
-  if (!player) return;
+// Coba lindungi bidak `owner` dari sebuah event. Return:
+//   'protected' -> dicegah item (pasif otomatis, atau reaktif yang dipakai otomatis untuk bot/terputus)
+//   'exposed'   -> tidak ada perisai, efek berjalan
+//   'pending'   -> pemilik ditanya dulu; permainan berhenti sampai resolvePendingShield()
+// `resume` menyimpan cara melanjutkan permainan setelah keputusan (disimpan sebagai data agar
+// tetap bisa dilanjutkan setelah server restart).
+function protectPawn(room, owner, event, data, resume) {
+  if (runItemHooks(room, owner, event, data)) return 'protected';
 
-  const finishedCount = room.pawns[player.id].filter(v => v === FINISH).length;
-  if (finishedCount < 3 || !(player.skillPoints > 0)) {
-    return socket.emit('room:error', 'Skill belum terbuka atau poin skill tidak cukup.');
-  }
-  const victim = resolveOpponentPawn(socket, room, player, target);
-  if (!victim) return;
+  const shield = items.list().find(item => item.kind === 'reactive' && item.protects.includes(event) && inventory.count(owner, item.id) > 0);
+  if (!shield) return 'exposed';
 
-  room.pawns[victim.player.id][victim.pawnIdx] = 0;
-  player.skillPoints = 0;
-  player.skillUnlocked = false;
+  if (owner.isBot || !owner.connected) return useShield(room, owner, shield, event, data) ? 'protected' : 'exposed';
 
-  room.lastSkillUse = {
+  room.pendingShield = {
     id: eventId(),
-    attacker: player.name,
-    defender: victim.player.name,
-    color: victim.player.color,
-    targetPawnIdx: victim.pawnIdx
+    playerId: owner.id,
+    itemId: shield.id,
+    event,
+    pawnIdx: data.pawnIdx,
+    trackPos: data.trackPos ?? null,
+    attackerId: data.attacker?.id || null,
+    expiresAt: Date.now() + SHIELD_DECISION_MS,
+    resume
   };
-  room.lastCapture = { id: eventId(), attacker: player.name, defender: victim.player.name, color: victim.player.color, isSkill: true };
-
-  addHistory(room, `⚡ ${player.name} MENGGUNAKAN SKILL ELIMINASI: Menendang bidak ${victim.player.name} kembali ke markas! Poin skill kembali ke 0.`);
-  room.message = `⚡ ${player.name} berhasil mengeliminasi bidak ${victim.player.name} dengan SKILL! Silakan lempar dadu.`;
-  emitRoom(room);
-  triggerTurn(room);
+  const threat = event === 'forceReturn' ? `Force Return dari ${data.attacker?.name || 'lawan'}` : 'Black Hole';
+  room.message = `🔰 ${owner.name} sedang memutuskan memakai ${shield.name} untuk menahan ${threat}...`;
+  armShieldTimer(room);
+  return 'pending';
 }
 
-// Pemain memilih menabung skill pada giliran ini (Akumulasi 2x lipat)
-function accumulateSkill(socket, room) {
-  if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
-  const player = room.players[room.turn];
-  if (!player || player.id !== socket.id || player.isOut) return;
+function useShield(room, owner, shield, event, data) {
+  if (!inventory.consume(owner, shield.id)) return false;
+  shield.protect(itemContext(room, owner, shield, { ...data, event }));
+  return true;
+}
 
-  const finishedCount = (room.pawns[player.id] || []).filter(v => v === FINISH).length;
-  if (finishedCount < 3 || !(player.skillPoints > 0) || player.accumulatedThisTurn) return;
+// Waktu memutuskan habis: perisai dipakai (pemain membelinya untuk melindungi bidak)
+function armShieldTimer(room) {
+  if (room.shieldTimer) clearTimeout(room.shieldTimer);
+  const pending = room.pendingShield;
+  const delay = Math.max(0, pending.expiresAt - Date.now());
+  room.shieldTimer = roomTimeout(room, () => {
+    if (room.pendingShield?.id === pending.id) resolvePendingShield(room, true);
+  }, delay);
+}
 
-  player.skillPoints = Math.max(1, player.skillPoints) * 2;
-  player.accumulatedThisTurn = true;
-  addHistory(room, `⚡ ${player.name} menabung skill! Poin skill dilipatgandakan menjadi ${player.skillPoints}x!`);
-  room.message = `⚡ Poin skill ${player.name} terakumulasi menjadi ${player.skillPoints}x lipat!`;
+// Pilihan pemain dari popup perisai
+function decideShield(socket, room, { use }) {
+  const pending = room?.pendingShield;
+  if (!pending || pending.playerId !== socket.id) return;
+  resolvePendingShield(room, use === true);
+}
+
+function resolvePendingShield(room, use) {
+  const pending = room.pendingShield;
+  if (!pending) return;
+  room.pendingShield = null;
+  if (room.shieldTimer) clearTimeout(room.shieldTimer);
+  room.shieldTimer = null;
+
+  const owner = room.players.find(p => p.id === pending.playerId);
+  const attacker = pending.attackerId ? room.players.find(p => p.id === pending.attackerId) : null;
+  const shield = items.get(pending.itemId);
+  const data = { pawnIdx: pending.pawnIdx, trackPos: pending.trackPos, attacker };
+  const isProtected = !!(use && owner && shield && useShield(room, owner, shield, pending.event, data));
+  if (!isProtected && owner) addHistory(room, `${owner.name} memilih tidak memakai ${shield?.name || 'perisai'}.`);
+
+  const { resume } = pending;
+  if (resume.type === 'move') {
+    const mover = room.players.find(p => p.id === resume.playerId) || owner;
+    if (!isProtected) suckIntoBlackHole(room, mover, resume.move.pawnIdx, pending.trackPos);
+    finishMove(room, mover, resume.move);
+    return;
+  }
+
+  // resume.type === 'item': lanjutkan serangan item aktif yang tadi ditahan
+  const item = items.get(resume.itemId);
+  if (!isProtected && item && attacker && owner) {
+    item.use(itemContext(room, attacker, item, { target: { player: owner, pawnIdx: pending.pawnIdx } }));
+  }
   emitRoom(room);
+  triggerTurn(room);
 }
 
 module.exports = {
@@ -570,6 +617,6 @@ module.exports = {
   handleRoll,
   handleMove,
   useItem,
-  useSkill,
-  accumulateSkill
+  decideShield,
+  resolvePendingShield
 };

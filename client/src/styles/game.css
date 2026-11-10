@@ -161,7 +161,7 @@
   flex-shrink: 0;
 }
 
-/* ---------- Kartu aksi (skill & item aktif) ---------- */
+/* ---------- Kartu aksi (item aktif) ---------- */
 
 .action-card {
   padding: var(--space-3);

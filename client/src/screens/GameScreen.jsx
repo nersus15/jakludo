@@ -5,7 +5,7 @@ import TurnPanel from '../components/game/TurnPanel';
 import ChatPanel from '../components/game/ChatPanel';
 import Scoreboard from '../components/game/Scoreboard';
 import GameNotices from '../components/game/GameNotices';
-import SkillControls from '../components/game/SkillControls';
+import ShieldPrompt from '../components/game/ShieldPrompt';
 import WinnerDialog from '../components/game/WinnerDialog';
 import { InventoryChips, ActiveItemActions } from '../ItemControls';
 import { sound } from '../sound';
@@ -25,20 +25,15 @@ export default function GameScreen({ game, itemCatalog, sheet, onSheetChange, on
   return (
     <main className="game" id="main">
       <div className="game__board">
-        <GameNotices
-          skillNotice={game.skillNotice}
-          itemNotice={game.itemNotice}
-          onDismissSkill={actions.dismissSkillNotice}
-          onDismissItem={actions.dismissItemNotice}
-        />
+        <GameNotices itemNotice={game.itemNotice} onDismissItem={actions.dismissItemNotice} />
         <LudoBoard
           room={room}
           myPlayerId={playerId}
           isMyTurn={isTurn}
           movablePawns={movablePawns}
           onMovePawn={actions.movePawn}
-          skillTargeting={game.skillTargeting || !!game.itemTargeting}
-          onSelectSkillTarget={actions.selectTarget}
+          targeting={!!game.itemTargeting}
+          onSelectTarget={actions.selectTarget}
         />
       </div>
 
@@ -56,7 +51,6 @@ export default function GameScreen({ game, itemCatalog, sheet, onSheetChange, on
           onOpenScores={() => openSheet('scores')}
         />
 
-        <SkillControls me={me} room={room} canAct={canAct} skillTargeting={game.skillTargeting} actions={actions} />
         <ActiveItemActions
           catalog={itemCatalog}
           player={me}
@@ -89,6 +83,7 @@ export default function GameScreen({ game, itemCatalog, sheet, onSheetChange, on
       </Modal>
 
       <WinnerDialog room={room} me={me} actions={actions} />
+      <ShieldPrompt room={room} playerId={playerId} catalog={itemCatalog} onDecide={actions.decideShield} />
     </main>
   );
 }

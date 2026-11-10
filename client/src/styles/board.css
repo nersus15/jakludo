@@ -398,7 +398,7 @@
 
 /* Bidak yang bisa dijalankan: cincin oranye statis, berdenyut 3x saat pertama muncul */
 .pawn-can-move,
-.pawn-skill-target {
+.pawn-target {
   cursor: pointer;
   z-index: 50;
 }
@@ -417,7 +417,7 @@
 
 /* Area sentuh bidak interaktif diperluas sampai ±44px */
 .pawn-can-move::after,
-.pawn-skill-target::after {
+.pawn-target::after {
   content: '';
   position: absolute;
   inset: -10px;
@@ -425,11 +425,11 @@
 }
 
 .pawn-can-move:hover,
-.pawn-skill-target:hover {
+.pawn-target:hover {
   transform: scale(1.1);
 }
 
-.pawn-skill-target {
+.pawn-target {
   box-shadow: 0 0 0 3px #b91c1c, 0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
@@ -442,7 +442,7 @@
   pointer-events: none;
 }
 
-.pulse-skill-target {
+.pulse-target {
   animation: pawn-nudge 0.6s var(--ease) 3 alternate;
 }
 

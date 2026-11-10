@@ -1,6 +1,9 @@
 // Aturan main JakLudo dalam bentuk fungsi murni (tanpa socket / timer / IO)
 // sehingga bisa diuji langsung lewat `npm test`.
 
+// Registry item hanya data (tanpa IO), dipakai bot untuk tahu item mana yang menahan Black Hole
+const items = require('../items');
+
 const COLORS = ['red', 'green', 'yellow', 'blue'];
 const COLOR_OFFSETS = [0, 10, 20, 30];
 const SAFE_TRACK_INDICES = [0, 6, 10, 16, 20, 26, 30, 36];
@@ -190,7 +193,10 @@ function evaluateMove(room, player, pawnIdx, dice) {
   score -= riskNext * pawnWorth(to) * AI.riskWeight;
 
   if (room.settings?.blackHole && toTrack !== null && getBlackHoles(room).includes(toTrack)) {
-    const shielded = (player.items?.blackholeShield?.owned || 0) + (player.items?.blackholeShield?.earned || 0) > 0;
+    const shielded = items.protectorsOf('blackHole').some(item => {
+      const stock = player.items?.[item.id];
+      return (stock?.owned || 0) + (stock?.earned || 0) > 0;
+    });
     score -= shielded ? AI.shieldCost : AI.blackHole + pawnWorth(to);
   }
 

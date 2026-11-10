@@ -1,4 +1,4 @@
-// Test fitur toko & item: registry, pembelian, Force Return, dan Blackhole Shield
+// Test fitur toko & item: registry, pembelian, Force Return, Blackhole Shield, dan Universal Shield
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -17,6 +17,7 @@ let url;
 const clients = [];
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const once = (c, event) => new Promise(resolve => c.once(event, resolve));
+const engine = require('../game/engine');
 
 test.before(async () => {
   await new Promise(resolve => server.listen(0, resolve));
@@ -75,7 +76,7 @@ test('setiap item di registry memenuhi kontrak dan tampil di katalog toko', asyn
   assert.deepEqual(res.items.map(i => i.id), items.list().map(i => i.id));
   for (const item of res.items) {
     assert.ok(item.name && item.icon && item.description && Number.isInteger(item.price));
-    assert.ok(['active', 'passive'].includes(item.kind));
+    assert.ok(['active', 'passive', 'reactive'].includes(item.kind));
     assert.equal(typeof item.use, 'undefined', 'function tidak ikut dikirim ke klien');
   }
 });
@@ -87,6 +88,7 @@ test('Force Return yang dibeli bisa langsung dipakai tanpa harus menginjak lawan
   assert.equal(pa.items.forceReturn.owned, 1, 'stok di room ikut tersinkron setelah membeli');
 
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   await wait(100);
   assert.equal(room.pawns[pb.id][0], 0, 'bidak lawan pulang ke markas');
@@ -96,11 +98,11 @@ test('Force Return yang dibeli bisa langsung dipakai tanpa harus menginjak lawan
   assert.equal(room.turn, 0, 'giliran tetap milik pemain yang memakai item');
 });
 
-test('menginjak bidak lawan 3 kali memberi 1 Force Return gratis', async () => {
+test('menginjak lawan dan memasukkan 3 bidak tidak lagi memberi Force Return gratis', async () => {
   const { room, pa, pb } = await startedRoom();
   for (let i = 0; i < 3; i++) {
     // Merah val 2 + dadu 3 -> track 4; hijau val 35 -> track (10 + 34) % 40 = 4
-    room.pawns[pa.id] = [2, 0, 0, 0];
+    room.pawns[pa.id] = [2, 44, 44, 44 - i];
     room.pawns[pb.id] = [35, 0, 0, 0];
     room.turn = 0;
     room.dice = 3;
@@ -109,9 +111,8 @@ test('menginjak bidak lawan 3 kali memberi 1 Force Return gratis', async () => {
     await wait(3 * 220 + 500);
     assert.equal(room.pawns[pb.id][0], 0);
   }
-  assert.equal(pa.items.forceReturn.earned, 1);
-  assert.equal(pa.items.forceReturn.state.stomps, 0, 'progres injakan kembali ke 0 setelah dapat item');
-  assert.equal(room.lastItemEvent.title, 'FORCE RETURN DIDAPAT!');
+  assert.equal(pa.items.forceReturn?.earned || 0, 0);
+  assert.equal(pa.skillPoints, undefined, 'skill eliminasi sudah dihapus');
 });
 
 test('item gratis dari pertandingan dipakai lebih dulu, item yang dibeli tetap tersimpan', async () => {
@@ -120,6 +121,7 @@ test('item gratis dari pertandingan dipakai lebih dulu, item yang dibeli tetap t
   pa.items.forceReturn.earned = 1;
 
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   await wait(100);
   assert.equal(pa.items.forceReturn.earned, 0);
@@ -130,6 +132,7 @@ test('item gratis dari pertandingan dipakai lebih dulu, item yang dibeli tetap t
 test('item aktif tidak bisa dipakai tanpa stok atau setelah melempar dadu', async () => {
   const { a, host, room, pa, pb } = await startedRoom();
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   let err = once(host, 'room:error');
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   assert.match(await err, /tidak punya/);
@@ -145,6 +148,36 @@ test('item aktif tidak bisa dipakai tanpa stok atau setelah melempar dadu', asyn
   err = once(host, 'room:error');
   host.emit('game:use_item', { itemId: 'blackholeShield' });
   assert.match(await err, /tidak valid/, 'item pasif tidak bisa dipakai manual');
+});
+
+test('Force Return butuh minimal 1 bidak sendiri di luar markas', async () => {
+  const { host, room, pa, pb } = await startedRoom();
+  pa.items.forceReturn = { owned: 0, earned: 1, state: {} };
+  room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [0, 0, 0, 44]; // bidak yang sudah finish tidak dihitung
+  assert.match(require('../game/store').publicRoom(room).players[0].items.forceReturn.blocked, /keluarkan dulu/);
+  let err = once(host, 'room:error');
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  assert.match(await err, /keluarkan dulu minimal 1 bidakmu/);
+  assert.equal(room.pawns[pb.id][0], 12);
+  assert.equal(pa.items.forceReturn.earned, 1, 'stok tidak berkurang');
+
+  room.pawns[pa.id] = [3, 0, 0, 44];
+  assert.equal(require('../game/store').publicRoom(room).players[0].items.forceReturn.blocked, null);
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  await wait(80);
+  assert.equal(room.pawns[pb.id][0], 0, 'setelah ada bidak di luar markas, Force Return bisa dipakai');
+});
+
+test('Force Return tidak bisa dipakai jika tidak ada bidak lawan di luar markas', async () => {
+  const { host, room, pa, pb } = await startedRoom();
+  pa.items.forceReturn = { owned: 0, earned: 1, state: {} };
+  room.pawns[pa.id] = [5, 0, 0, 0];
+  room.pawns[pb.id] = [0, 0, 44, 41]; // markas dan jalur finish bukan target
+  const err = once(host, 'room:error');
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  assert.match(await err, /tidak ada bidak lawan di luar markas/);
+  assert.equal(pa.items.forceReturn.earned, 1, 'stok tidak berkurang');
 });
 
 test('Blackhole Shield otomatis mencegah bidak tersedot dan mengurangi stok', async () => {

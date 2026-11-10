@@ -45,7 +45,7 @@ export function useItemCatalog() {
   return useItemCatalogState().items;
 }
 
-// Ringkasan stok item milik pemain dari room:update ({ count, owned, earned, progress })
+// Ringkasan stok item milik pemain dari room:update ({ count, owned, earned, blocked })
 export function itemStock(player, itemId) {
-  return player?.items?.[itemId] || { count: 0, owned: 0, earned: 0, progress: null };
+  return player?.items?.[itemId] || { count: 0, owned: 0, earned: 0, blocked: null };
 }

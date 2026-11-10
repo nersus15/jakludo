@@ -4,6 +4,12 @@ import { sound } from './sound';
 import { storage } from './storage';
 import { useItemCatalogState } from './items';
 
+const KIND_LABELS = {
+  active: 'Dipakai manual di giliranmu',
+  passive: 'Bekerja otomatis',
+  reactive: 'Muncul pilihan saat dibutuhkan'
+};
+
 export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, authToken }) {
   const [buying, setBuying] = useState(null);
   const [injecting, setInjecting] = useState(false);
@@ -166,7 +172,7 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
                 <span className="shop-item__icon" aria-hidden="true">{item.icon}</span>
                 <div>
                   <h3>{item.name}</h3>
-                  <p className="muted">{item.kind === 'active' ? 'Dipakai manual di giliranmu' : 'Bekerja otomatis'} · dimiliki {owned[item.id] || 0}</p>
+                  <p className="muted">{KIND_LABELS[item.kind] || 'Bekerja otomatis'} · dimiliki {owned[item.id] || 0}</p>
                 </div>
               </div>
               <p className="shop-item__desc">{item.description}</p>

@@ -1,9 +1,6 @@
 // Force Return: pulangkan 1 bidak lawan di lintasan langsung ke markas.
-// Cara mendapatkan:
-//   1. Beli di toko -> tersimpan di akun dan bisa dipakai kapan saja di giliran sendiri
-//   2. Menginjak bidak lawan 3 kali -> otomatis dapat 1 gratis (berlaku untuk pertandingan itu saja)
-const STOMPS_PER_CHARGE = 3;
-
+// Hanya bisa didapat dengan membeli di toko. Lawan yang punya perisai untuk event 'forceReturn'
+// (mis. Universal Shield) boleh memilih menahannya.
 module.exports = {
   id: 'forceReturn',
   name: 'Force Return',
@@ -11,31 +8,19 @@ module.exports = {
   price: 100,
   kind: 'active',
   target: 'opponentPawn',
+  attack: 'forceReturn',
   sound: 'thunder',
   badge: 'Eliminasi Instan',
   badgeColor: '#f59e0b',
-  highlight: `Bisa langsung dipakai · Gratis 1 tiap ${STOMPS_PER_CHARGE}x injak lawan`,
-  description: `Pulangkan 1 bidak lawan di lintasan langsung ke markas. Item yang dibeli di toko bisa dipakai kapan saja di giliranmu sebelum melempar dadu. Kamu juga otomatis mendapat 1 Force Return gratis setiap ${STOMPS_PER_CHARGE} kali menginjak bidak lawan (hanya berlaku di pertandingan itu).`,
+  highlight: 'Dipakai di giliranmu sebelum melempar dadu',
+  description: 'Pulangkan 1 bidak lawan di lintasan langsung ke markas. Dipakai di giliranmu sebelum melempar dadu, dan hanya jika minimal 1 bidakmu sudah keluar dari markas. Lawan yang punya Universal Shield bisa memilih menahannya.',
 
-  progress(state) {
-    return { value: state.stomps || 0, max: STOMPS_PER_CHARGE, label: 'injakan' };
-  },
-
-  hooks: {
-    capture(ctx) {
-      const { player, state, game } = ctx;
-      state.stomps = (state.stomps || 0) + 1;
-      if (state.stomps < STOMPS_PER_CHARGE) return false;
-
-      state.stomps -= STOMPS_PER_CHARGE;
-      ctx.grant(1);
-      game.addHistory(`⚡ ${player.name} sudah ${STOMPS_PER_CHARGE}x menginjak lawan dan mendapat 1 Force Return gratis!`);
-      game.announce({
-        title: 'FORCE RETURN DIDAPAT!',
-        text: `${player.name} mendapat 1 Force Return gratis setelah ${STOMPS_PER_CHARGE}x menginjak bidak lawan!`
-      });
-      return false; // Tidak mengubah hasil capture
-    }
+  canUse({ room, player }) {
+    // 44 = finish: bidak yang sudah finish tidak dihitung sebagai bidak di papan
+    if (!(room.pawns[player.id] || []).some(v => v >= 1 && v < 44)) return 'keluarkan dulu minimal 1 bidakmu dari markas.';
+    const anyTarget = room.players.some(p => p.id !== player.id && (room.pawns[p.id] || []).some(v => v >= 1 && v <= 39));
+    if (!anyTarget) return 'tidak ada bidak lawan di luar markas.';
+    return null;
   },
 
   use(ctx) {

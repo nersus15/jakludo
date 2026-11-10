@@ -34,21 +34,21 @@ function roomTimeout(room, fn, ms) {
 // DATA UNTUK KLIEN
 // ==========================================
 
-function publicPlayer(p) {
+function publicPlayer(p, room) {
   // sessionId adalah rahasia reconnect; stok item dikirim dalam bentuk ringkasan
   const { sessionId, items, ...rest } = p;
-  return { ...rest, items: inventory.publicItems(p) };
+  return { ...rest, items: inventory.publicItems(p, room) };
 }
 
 function publicRoom(r) {
   const current = r.players[r.turn];
-  const movable = r.started && !r.winner && r.dice !== null && !r.rolling && !r.animatingMove && current
+  const movable = r.started && !r.winner && r.dice !== null && !r.rolling && !r.animatingMove && !r.pendingShield && current
     ? getMovablePawns(r, current, r.dice)
     : [];
   return {
     code: r.code,
     host: r.host,
-    players: r.players.map(publicPlayer),
+    players: r.players.map(p => publicPlayer(p, r)),
     started: r.started,
     turn: r.turn,
     dice: r.dice,
@@ -61,9 +61,11 @@ function publicRoom(r) {
     lastCapture: r.lastCapture || null,
     lastBlackHole: r.lastBlackHole || null,
     lastGoal: r.lastGoal || null,
-    lastSkillUse: r.lastSkillUse || null,
-    lastSkillUnlock: r.lastSkillUnlock || null,
     lastItemEvent: r.lastItemEvent || null,
+    // Keputusan perisai yang sedang ditunggu (data lanjutan permainan tidak dikirim ke klien)
+    pendingShield: r.pendingShield
+      ? { id: r.pendingShield.id, playerId: r.pendingShield.playerId, itemId: r.pendingShield.itemId, event: r.pendingShield.event, pawnIdx: r.pendingShield.pawnIdx, attackerId: r.pendingShield.attackerId, remainingMs: Math.max(0, r.pendingShield.expiresAt - Date.now()) }
+      : null,
     lastBlackHoleShift: r.lastBlackHoleShift || null,
     blackHoles: r.settings?.blackHole ? getBlackHoles(r) : [],
     // Mode acak: sisa pergantian giliran sampai Black Hole pindah (1 = pindah setelah giliran ini)
@@ -99,15 +101,14 @@ function resetRoomEvents(r) {
   r.lastCapture = null;
   r.lastBlackHole = null;
   r.lastGoal = null;
-  r.lastSkillUse = null;
-  r.lastSkillUnlock = null;
+  r.pendingShield = null;
   r.lastItemEvent = null;
   r.lastBlackHoleShift = null;
 }
 
 function clearRoomTimers(r) {
   if (!r) return;
-  for (const key of ['botTimeout', 'rollTimer', 'passTimer', 'moveTimer', 'turnTimer']) {
+  for (const key of ['botTimeout', 'rollTimer', 'passTimer', 'moveTimer', 'turnTimer', 'shieldTimer']) {
     if (r[key]) clearTimeout(r[key]);
     r[key] = null;
   }
@@ -117,7 +118,7 @@ function clearRoomTimers(r) {
 // PERSISTENSI: snapshot ke SQLite agar permainan selamat dari restart/deploy
 // ==========================================
 
-const RUNTIME_KEYS = new Set(['botTimeout', 'rollTimer', 'passTimer', 'moveTimer', 'turnTimer', 'cleanupTimer', 'lobbyRemovals']);
+const RUNTIME_KEYS = new Set(['botTimeout', 'rollTimer', 'passTimer', 'moveTimer', 'turnTimer', 'shieldTimer', 'cleanupTimer', 'lobbyRemovals']);
 const dirtyRooms = new Set();
 let saveTimer = null;
 

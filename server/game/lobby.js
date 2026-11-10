@@ -260,6 +260,8 @@ function handleDeparture(socket, r, { intentional }) {
     departing.left = true;
     departing.sessionId = null;
     addHistory(r, `🚪 ${departing.name} keluar dari permainan (menyerah).`);
+    // Pemain yang sedang ditanya soal perisai lalu menyerah: anggap tidak memakai perisai
+    if (r.pendingShield?.playerId === departing.id) engine.resolvePendingShield(r, false);
 
     if (store.deleteIfAllHumansOut(r)) return;
     if (r.host === socket.id) store.reassignHost(r);

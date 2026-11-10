@@ -2,7 +2,7 @@ import React from 'react';
 import { sound } from './sound';
 import { itemStock } from './items';
 
-// Daftar item yang dimiliki pemain beserta progresnya (mis. 2/3 injakan menuju Force Return gratis)
+// Daftar item yang dimiliki pemain
 export function InventoryChips({ catalog, player }) {
   if (catalog.length === 0) return <p className="muted">Memuat item...</p>;
   return (
@@ -17,7 +17,6 @@ export function InventoryChips({ catalog, player }) {
               <span className="muted">
                 {stock.count} dimiliki
                 {stock.earned > 0 ? ` (${stock.earned} gratis)` : ''}
-                {stock.progress ? ` · ${stock.progress.value}/${stock.progress.max} ${stock.progress.label}` : ''}
               </span>
             </span>
           </li>
@@ -35,6 +34,8 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
   return usable.map(item => {
     const stock = itemStock(player, item.id);
     const isTargeting = targetingItemId === item.id;
+    // Alasan dari server (canUse item), mis. belum ada bidakmu di luar markas
+    const blocked = stock.blocked;
     return (
       <section key={item.id} className="action-card card" aria-label={item.name}>
         <div className="action-card__head">
@@ -51,6 +52,7 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
             type="button"
             className="btn btn--primary"
             aria-pressed={item.target ? isTargeting : undefined}
+            disabled={!!blocked}
             onClick={() => {
               sound.playClick();
               if (item.target) onToggleTarget(isTargeting ? null : item.id);
@@ -60,7 +62,8 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
             {isTargeting ? 'Batal pilih target' : `Pakai ${item.name}`}
           </button>
         </div>
-        {isTargeting && <p className="action-card__hint">Ketuk bidak lawan di lintasan untuk memakai {item.name}.</p>}
+        {blocked && <p className="action-card__hint">Belum bisa dipakai: {blocked}</p>}
+        {isTargeting && !blocked && <p className="action-card__hint">Ketuk bidak lawan di lintasan untuk memakai {item.name}.</p>}
       </section>
     );
   });

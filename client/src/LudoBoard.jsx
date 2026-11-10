@@ -7,6 +7,7 @@ import {
   getPawnCoord
 } from './boardConstants';
 import { sound } from './sound';
+import { HudTimer } from './components/game/TurnTimer';
 import Icon from './components/Icon';
 import PlayerAvatar from './components/PlayerAvatar';
 import { isAvatarUrl } from './social/media';
@@ -462,6 +463,7 @@ function LudoBoardView({
         key={`hud-${color}`}
         className={`player-hud-card hud-${color} ${isThisPlayerTurn ? 'hud-active-turn' : ''} ${player?.isOut ? 'hud-player-out' : ''}`}
       >
+        {player && room.turnClock?.playerId === player.id && <HudTimer key={room.turnClock.id} clock={room.turnClock} />}
         <div
           className={`hud-avatar color-${color} ${isAvatarUrl(player?.avatar) ? 'hud-avatar--photo' : ''}`}
           aria-hidden="true"

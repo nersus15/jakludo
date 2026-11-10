@@ -13,7 +13,15 @@ module.exports = {
   badge: 'Eliminasi Instan',
   badgeColor: '#f59e0b',
   highlight: 'Dipakai di giliranmu sebelum melempar dadu',
-  description: 'Pulangkan 1 bidak lawan di lintasan langsung ke markas. Dipakai di giliranmu sebelum melempar dadu. Lawan yang punya Universal Shield bisa memilih menahannya.',
+  description: 'Pulangkan 1 bidak lawan di lintasan langsung ke markas. Dipakai di giliranmu sebelum melempar dadu, dan hanya jika minimal 1 bidakmu sudah keluar dari markas. Lawan yang punya Universal Shield bisa memilih menahannya.',
+
+  canUse({ room, player }) {
+    // 44 = finish: bidak yang sudah finish tidak dihitung sebagai bidak di papan
+    if (!(room.pawns[player.id] || []).some(v => v >= 1 && v < 44)) return 'keluarkan dulu minimal 1 bidakmu dari markas.';
+    const anyTarget = room.players.some(p => p.id !== player.id && (room.pawns[p.id] || []).some(v => v >= 1 && v <= 39));
+    if (!anyTarget) return 'tidak ada bidak lawan di luar markas.';
+    return null;
+  },
 
   use(ctx) {
     const { player, target, game } = ctx;

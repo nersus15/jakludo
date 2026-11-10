@@ -490,17 +490,16 @@ function useItem(socket, room, { itemId, target }) {
     return socket.emit('room:error', `Kamu tidak punya ${item.name}. Beli dulu di Toko.`);
   }
 
+  const reason = item.canUse?.(itemContext(room, player, item));
+  if (reason) return socket.emit('room:error', `${item.name} belum bisa dipakai: ${reason}`);
+
   let resolvedTarget = null;
   if (item.target === 'opponentPawn') {
-    const anyTarget = room.players.some(p => p.id !== player.id && (room.pawns[p.id] || []).some(v => v >= 1 && v <= 39));
-    if (!anyTarget) return socket.emit('room:error', `${item.name} belum bisa dipakai: tidak ada bidak lawan di luar markas.`);
     resolvedTarget = resolveOpponentPawn(socket, room, player, target);
     if (!resolvedTarget) return;
   }
 
   const ctx = itemContext(room, player, item, { target: resolvedTarget });
-  const reason = item.canUse?.(ctx);
-  if (reason) return socket.emit('room:error', reason);
   if (!ctx.consume()) return socket.emit('room:error', `${item.name} gagal dipakai. Coba lagi.`);
 
   // Serangan yang bisa ditahan perisai lawan (mis. Force Return vs Universal Shield)

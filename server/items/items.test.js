@@ -88,6 +88,7 @@ test('Force Return yang dibeli bisa langsung dipakai tanpa harus menginjak lawan
   assert.equal(pa.items.forceReturn.owned, 1, 'stok di room ikut tersinkron setelah membeli');
 
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   await wait(100);
   assert.equal(room.pawns[pb.id][0], 0, 'bidak lawan pulang ke markas');
@@ -120,6 +121,7 @@ test('item gratis dari pertandingan dipakai lebih dulu, item yang dibeli tetap t
   pa.items.forceReturn.earned = 1;
 
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   await wait(100);
   assert.equal(pa.items.forceReturn.earned, 0);
@@ -130,6 +132,7 @@ test('item gratis dari pertandingan dipakai lebih dulu, item yang dibeli tetap t
 test('item aktif tidak bisa dipakai tanpa stok atau setelah melempar dadu', async () => {
   const { a, host, room, pa, pb } = await startedRoom();
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   let err = once(host, 'room:error');
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   assert.match(await err, /tidak punya/);
@@ -147,9 +150,29 @@ test('item aktif tidak bisa dipakai tanpa stok atau setelah melempar dadu', asyn
   assert.match(await err, /tidak valid/, 'item pasif tidak bisa dipakai manual');
 });
 
+test('Force Return butuh minimal 1 bidak sendiri di luar markas', async () => {
+  const { host, room, pa, pb } = await startedRoom();
+  pa.items.forceReturn = { owned: 0, earned: 1, state: {} };
+  room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [0, 0, 0, 44]; // bidak yang sudah finish tidak dihitung
+  assert.match(require('../game/store').publicRoom(room).players[0].items.forceReturn.blocked, /keluarkan dulu/);
+  let err = once(host, 'room:error');
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  assert.match(await err, /keluarkan dulu minimal 1 bidakmu/);
+  assert.equal(room.pawns[pb.id][0], 12);
+  assert.equal(pa.items.forceReturn.earned, 1, 'stok tidak berkurang');
+
+  room.pawns[pa.id] = [3, 0, 0, 44];
+  assert.equal(require('../game/store').publicRoom(room).players[0].items.forceReturn.blocked, null);
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  await wait(80);
+  assert.equal(room.pawns[pb.id][0], 0, 'setelah ada bidak di luar markas, Force Return bisa dipakai');
+});
+
 test('Force Return tidak bisa dipakai jika tidak ada bidak lawan di luar markas', async () => {
   const { host, room, pa, pb } = await startedRoom();
   pa.items.forceReturn = { owned: 0, earned: 1, state: {} };
+  room.pawns[pa.id] = [5, 0, 0, 0];
   room.pawns[pb.id] = [0, 0, 44, 41]; // markas dan jalur finish bukan target
   const err = once(host, 'room:error');
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
@@ -204,6 +227,7 @@ test('target Force Return yang punya Universal Shield ditanya dan bisa menahanny
   giveForceReturn(pa);
   giveShield(pb);
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
 
   const asked = new Promise(resolve => guest.on('room:update', r => r.pendingShield && resolve(r.pendingShield)));
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
@@ -233,6 +257,7 @@ test('target Force Return boleh memilih menyimpan Universal Shield', async () =>
   giveForceReturn(pa);
   giveShield(pb);
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   await wait(80);
   assert.ok(room.pendingShield);
@@ -252,6 +277,7 @@ test('Universal Shield dipakai otomatis jika waktu memutuskan habis', async () =
   giveForceReturn(pa);
   giveShield(pb);
   room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0]; // Force Return butuh bidak sendiri di luar markas
   host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
   await wait(80);
   room.pendingShield.expiresAt = Date.now();

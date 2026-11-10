@@ -50,15 +50,16 @@ function resetForMatch(player) {
   }
 }
 
-// Ringkasan untuk klien: jumlah dan asal stok tiap item di katalog
-function publicItems(player) {
+// Ringkasan untuk klien: jumlah, asal stok, dan alasan item aktif belum bisa dipakai (blocked)
+function publicItems(player, room) {
   const out = {};
   for (const item of items.list()) {
     const s = player.items?.[item.id] || { owned: 0, earned: 0, state: {} };
     out[item.id] = {
       count: s.owned + s.earned,
       owned: s.owned,
-      earned: s.earned
+      earned: s.earned,
+      blocked: room?.started && item.canUse ? item.canUse({ room, player, item }) : null
     };
   }
   return out;

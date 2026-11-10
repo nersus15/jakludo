@@ -34,10 +34,10 @@ function roomTimeout(room, fn, ms) {
 // DATA UNTUK KLIEN
 // ==========================================
 
-function publicPlayer(p) {
+function publicPlayer(p, room) {
   // sessionId adalah rahasia reconnect; stok item dikirim dalam bentuk ringkasan
   const { sessionId, items, ...rest } = p;
-  return { ...rest, items: inventory.publicItems(p) };
+  return { ...rest, items: inventory.publicItems(p, room) };
 }
 
 function publicRoom(r) {
@@ -48,7 +48,7 @@ function publicRoom(r) {
   return {
     code: r.code,
     host: r.host,
-    players: r.players.map(publicPlayer),
+    players: r.players.map(p => publicPlayer(p, r)),
     started: r.started,
     turn: r.turn,
     dice: r.dice,

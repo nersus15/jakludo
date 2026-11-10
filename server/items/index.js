@@ -18,7 +18,9 @@
 //                                         event yang dicegah item (wajib untuk reactive)
 //   protect(ctx)                          efek item reaktif; ctx.event, ctx.pawnIdx, ctx.attacker
 //   sound: 'thunder' | 'chime'            efek suara saat item diumumkan ke semua pemain
-//   canUse(ctx) -> string | null          alasan item belum bisa dipakai (opsional)
+//   canUse(ctx) -> string | null          alasan item aktif belum bisa dipakai (opsional). Dicek sebelum
+//                                         target dipilih (ctx tanpa target) dan dikirim ke klien
+//                                         sebagai items[id].blocked agar tombolnya bisa dinonaktifkan
 //   use(ctx)                              efek item aktif; stok sudah dikurangi sebelum dipanggil
 //   hooks: { [event](ctx) -> boolean }    reaksi terhadap event permainan. Return true berarti
 //                                         event sudah ditangani (mis. sedotan Black Hole dicegah).
@@ -27,7 +29,7 @@
 //                 (item pasif dicoba lebih dulu, baru item reaktif ditawarkan)
 //
 // ctx yang diterima use/canUse/hooks:
-//   room, player, item, target              target hanya ada untuk use/canUse
+//   room, player, item, target              target hanya ada untuk use
 //   count                                   stok item yang dimiliki pemain saat ini
 //   state                                   objek progres item milik pemain (bebas diisi item)
 //   consume() -> boolean                    kurangi 1 stok (item hasil pertandingan dipakai lebih dulu)

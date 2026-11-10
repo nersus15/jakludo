@@ -1,0 +1,1203 @@
+// Penyimpanan & logika fitur sosial: pertemanan, grup, undangan grup, chat (teks, foto, voice note, match),
+// dan leaderboard khusus grup. Terintegrasi dengan PostgreSQL (write-through) dan MinIO S3.
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const db = require('../db');
+const storage = require('../lib/storage');
+const media = require('../lib/media');
+
+const LOCAL_SOCIAL_FILE = path.join(db.DATA_DIR, 'jakludo-social.json');
+const WIN_POINTS = 25;
+const PLAY_POINTS = 5;
+
+const state = {
+  friendships: new Map(),      // "low:high" -> { userLow, userHigh, requesterId, status, createdAt, updatedAt }
+  groups: new Map(),           // groupId -> { id, name, ownerId, createdAt }
+  groupMembers: new Map(),     // groupId -> Map<userId, { groupId, userId, role, joinedAt }>
+  groupInvites: new Map(),     // inviteId -> { id, groupId, inviterId, inviteeId, createdAt }
+  groupMessages: new Map(),    // groupId -> Array<msgRow> (urut lama -> baru)
+  groupLeaderboard: new Map()  // groupId -> Map<userId, { groupId, userId, wins, matchesPlayed, points }>
+};
+
+// Kehadiran online per userId -> Set<socketId>
+const onlineSockets = new Map();
+// Cache audio MP3 siap putar di memori (maks 30 pesan terakhir) agar playback cepat & mendukung Range request
+const audioPlayCache = new Map();
+
+function pairKey(a, b) {
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+function pairOrder(a, b) {
+  return a < b ? [a, b] : [b, a];
+}
+
+function persistLocalSocial() {
+  if (db.getPool()) return;
+  try {
+    const dump = {
+      friendships: Array.from(state.friendships.values()),
+      groups: Array.from(state.groups.values()),
+      groupMembers: Array.from(state.groupMembers.values()).flatMap(m => Array.from(m.values())),
+      groupInvites: Array.from(state.groupInvites.values()),
+      groupMessages: Array.from(state.groupMessages.values()).flat(),
+      groupLeaderboard: Array.from(state.groupLeaderboard.values()).flatMap(m => Array.from(m.values()))
+    };
+    fs.writeFileSync(LOCAL_SOCIAL_FILE, JSON.stringify(dump));
+  } catch (err) {
+    console.error('[SOCIAL LOCAL]', err.message);
+  }
+}
+
+function bootstrapLocalSocial() {
+  if (!fs.existsSync(LOCAL_SOCIAL_FILE)) return;
+  try {
+    const dump = JSON.parse(fs.readFileSync(LOCAL_SOCIAL_FILE, 'utf8'));
+    for (const f of dump.friendships || []) {
+      state.friendships.set(pairKey(f.userLow, f.userHigh), f);
+    }
+    for (const g of dump.groups || []) {
+      state.groups.set(g.id, g);
+      if (!state.groupMembers.has(g.id)) state.groupMembers.set(g.id, new Map());
+      if (!state.groupMessages.has(g.id)) state.groupMessages.set(g.id, []);
+      if (!state.groupLeaderboard.has(g.id)) state.groupLeaderboard.set(g.id, new Map());
+    }
+    for (const m of dump.groupMembers || []) {
+      if (!state.groupMembers.has(m.groupId)) state.groupMembers.set(m.groupId, new Map());
+      state.groupMembers.get(m.groupId).set(m.userId, m);
+    }
+    for (const inv of dump.groupInvites || []) {
+      state.groupInvites.set(inv.id, inv);
+    }
+    for (const msg of dump.groupMessages || []) {
+      if (!state.groupMessages.has(msg.groupId)) state.groupMessages.set(msg.groupId, []);
+      state.groupMessages.get(msg.groupId).push(msg);
+    }
+    for (const list of state.groupMessages.values()) {
+      list.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    }
+    for (const lb of dump.groupLeaderboard || []) {
+      if (!state.groupLeaderboard.has(lb.groupId)) state.groupLeaderboard.set(lb.groupId, new Map());
+      state.groupLeaderboard.get(lb.groupId).set(lb.userId, lb);
+    }
+  } catch {
+    // Abaikan jika gagal dibaca
+  }
+}
+
+bootstrapLocalSocial();
+
+async function hydrateFromPostgres() {
+  const pool = db.getPool();
+  if (!pool) return;
+
+  state.friendships.clear();
+  state.groups.clear();
+  state.groupMembers.clear();
+  state.groupInvites.clear();
+  state.groupMessages.clear();
+  state.groupLeaderboard.clear();
+
+  const [friendsRes, groupsRes, membersRes, invitesRes, msgsRes, lbRes] = await Promise.all([
+    pool.query('SELECT * FROM friendships'),
+    pool.query('SELECT * FROM groups'),
+    pool.query('SELECT * FROM group_members'),
+    pool.query('SELECT * FROM group_invites'),
+    pool.query('SELECT * FROM group_messages ORDER BY created_at ASC, id ASC'),
+    pool.query('SELECT * FROM group_leaderboard')
+  ]);
+
+  for (const r of friendsRes.rows) {
+    state.friendships.set(pairKey(r.user_low, r.user_high), {
+      userLow: r.user_low,
+      userHigh: r.user_high,
+      requesterId: r.requester_id,
+      status: r.status,
+      createdAt: Number(r.created_at),
+      updatedAt: Number(r.updated_at)
+    });
+  }
+  for (const r of groupsRes.rows) {
+    state.groups.set(r.id, {
+      id: r.id,
+      name: r.name,
+      ownerId: r.owner_id,
+      createdAt: Number(r.created_at)
+    });
+    state.groupMembers.set(r.id, new Map());
+    state.groupMessages.set(r.id, []);
+    state.groupLeaderboard.set(r.id, new Map());
+  }
+  for (const r of membersRes.rows) {
+    if (!state.groupMembers.has(r.group_id)) state.groupMembers.set(r.group_id, new Map());
+    state.groupMembers.get(r.group_id).set(r.user_id, {
+      groupId: r.group_id,
+      userId: r.user_id,
+      role: r.role,
+      joinedAt: Number(r.joined_at)
+    });
+  }
+  for (const r of invitesRes.rows) {
+    state.groupInvites.set(r.id, {
+      id: r.id,
+      groupId: r.group_id,
+      inviterId: r.inviter_id,
+      inviteeId: r.invitee_id,
+      createdAt: Number(r.created_at)
+    });
+  }
+  for (const r of msgsRes.rows) {
+    if (!state.groupMessages.has(r.group_id)) state.groupMessages.set(r.group_id, []);
+    state.groupMessages.get(r.group_id).push({
+      id: r.id,
+      groupId: r.group_id,
+      senderId: r.sender_id || null,
+      type: r.type,
+      text: r.text || '',
+      mediaKey: r.media_key || null,
+      mediaMime: r.media_mime || null,
+      mediaSize: r.media_size ? Number(r.media_size) : null,
+      mediaWidth: r.media_width ? Number(r.media_width) : null,
+      mediaHeight: r.media_height ? Number(r.media_height) : null,
+      mediaDurationMs: r.media_duration_ms ? Number(r.media_duration_ms) : null,
+      matchCode: r.match_code || null,
+      createdAt: Number(r.created_at)
+    });
+  }
+  for (const r of lbRes.rows) {
+    if (!state.groupLeaderboard.has(r.group_id)) state.groupLeaderboard.set(r.group_id, new Map());
+    state.groupLeaderboard.get(r.group_id).set(r.user_id, {
+      groupId: r.group_id,
+      userId: r.user_id,
+      wins: Number(r.wins),
+      matchesPlayed: Number(r.matches_played),
+      points: Number(r.points)
+    });
+  }
+}
+
+// ==========================================
+// KEHADIRAN ONLINE & ROOM SOCKET.IO
+// ==========================================
+
+function getIo() {
+  const gameStore = require('../game/store');
+  return gameStore.getIo();
+}
+
+function isUserOnline(userId) {
+  const set = onlineSockets.get(userId);
+  return Boolean(set && set.size > 0);
+}
+
+function userSummary(userId) {
+  if (!userId) return null;
+  const u = db.getUserById(userId);
+  if (!u) return null;
+  return {
+    userId: u.id,
+    username: u.username,
+    name: u.name,
+    avatar: u.avatar || '🎯',
+    online: isUserOnline(u.id)
+  };
+}
+
+function emitToUser(userId, event, payload = {}) {
+  const io = getIo();
+  if (!io || !userId) return;
+  if (event === 'friends:changed' && (!payload || Object.keys(payload).length === 0)) {
+    io.to(`user:${userId}`).emit(event, listFriends(userId));
+    return;
+  }
+  if (event === 'groups:changed' && (!payload || Object.keys(payload).length === 0)) {
+    Promise.resolve(listUserGroups(userId))
+      .then(grpData => {
+        const invData = listUserGroupInvites(userId);
+        io.to(`user:${userId}`).emit(event, { ...grpData, ...invData });
+      })
+      .catch(() => {
+        io.to(`user:${userId}`).emit(event, {});
+      });
+    return;
+  }
+  io.to(`user:${userId}`).emit(event, payload);
+}
+
+function emitToGroup(groupId, event, payload = {}) {
+  const io = getIo();
+  if (!io || !groupId) return;
+  if (event === 'groups:changed' && (!payload || Object.keys(payload).length === 0)) {
+    const members = state.groupMembers.get(groupId);
+    if (members) {
+      for (const uid of members.keys()) {
+        emitToUser(uid, 'groups:changed');
+      }
+    }
+    return;
+  }
+  io.to(`group:${groupId}`).emit(event, payload);
+}
+
+function joinUserSocketsToGroup(userId, groupId) {
+  const io = getIo();
+  const sockets = onlineSockets.get(userId);
+  if (!io || !sockets) return;
+  for (const sid of sockets) {
+    const sock = io.sockets.sockets.get(sid);
+    if (sock) sock.join(`group:${groupId}`);
+  }
+}
+
+function leaveUserSocketsFromGroup(userId, groupId) {
+  const io = getIo();
+  const sockets = onlineSockets.get(userId);
+  if (!io || !sockets) return;
+  for (const sid of sockets) {
+    const sock = io.sockets.sockets.get(sid);
+    if (sock) sock.leave(`group:${groupId}`);
+  }
+}
+
+function notifyAcceptedFriendsPresence(userId) {
+  for (const f of state.friendships.values()) {
+    if (f.status !== 'accepted') continue;
+    if (f.userLow === userId) emitToUser(f.userHigh, 'friends:changed');
+    else if (f.userHigh === userId) emitToUser(f.userLow, 'friends:changed');
+  }
+}
+
+function identifySocket(socket, token) {
+  const user = typeof token === 'string' ? db.getUserByToken(token) : null;
+  if (!user) return null;
+
+  if (socket.data.userId && socket.data.userId !== user.id) {
+    detachSocket(socket);
+  }
+
+  const wasOnline = isUserOnline(user.id);
+  socket.data.userId = user.id;
+  if (!onlineSockets.has(user.id)) onlineSockets.set(user.id, new Set());
+  onlineSockets.get(user.id).add(socket.id);
+
+  socket.join(`user:${user.id}`);
+  for (const [groupId, members] of state.groupMembers.entries()) {
+    if (members.has(user.id)) socket.join(`group:${groupId}`);
+  }
+
+  if (!wasOnline) notifyAcceptedFriendsPresence(user.id);
+
+  // Kirim snapshot awal via WebSocket agar klien tidak perlu spam HTTP fetch
+  Promise.resolve(listUserGroups(user.id))
+    .then(grpData => {
+      socket.emit('social:sync', {
+        ...listFriends(user.id),
+        ...grpData,
+        ...listUserGroupInvites(user.id)
+      });
+    })
+    .catch(() => {});
+
+  return user;
+}
+
+function detachSocket(socket) {
+  const userId = socket.data?.userId;
+  if (!userId) return;
+
+  socket.leave(`user:${userId}`);
+  for (const groupId of state.groupMembers.keys()) {
+    socket.leave(`group:${groupId}`);
+  }
+  delete socket.data.userId;
+
+  const set = onlineSockets.get(userId);
+  if (set) {
+    set.delete(socket.id);
+    if (set.size === 0) {
+      onlineSockets.delete(userId);
+      notifyAcceptedFriendsPresence(userId);
+    }
+  }
+}
+
+// ==========================================
+// PERTEMANAN (FRIENDS)
+// ==========================================
+
+function areFriends(userA, userB) {
+  if (!userA || !userB || userA === userB) return false;
+  const f = state.friendships.get(pairKey(userA, userB));
+  return Boolean(f && f.status === 'accepted');
+}
+
+function listFriends(userId) {
+  const friends = [];
+  const incoming = [];
+  const outgoing = [];
+
+  for (const f of state.friendships.values()) {
+    if (f.userLow !== userId && f.userHigh !== userId) continue;
+    const otherId = f.userLow === userId ? f.userHigh : f.userLow;
+    const summary = userSummary(otherId);
+    if (!summary) continue;
+
+    if (f.status === 'accepted') {
+      friends.push(summary);
+    } else if (f.requesterId === userId) {
+      outgoing.push({ ...summary, requestedAt: new Date(f.createdAt).toISOString() });
+    } else {
+      incoming.push({ ...summary, requestedAt: new Date(f.createdAt).toISOString() });
+    }
+  }
+
+  friends.sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+  return { friends, incoming, outgoing };
+}
+
+function requestFriend(userId, rawUsername) {
+  const clean = String(rawUsername || '').trim().replace(/^@/, '');
+  if (!clean) return { error: 'Username teman wajib diisi.' };
+
+  const target = db.getUserByUsername(clean);
+  if (!target) return { error: `Pengguna @${clean} tidak ditemukan.` };
+  if (target.id === userId) return { error: 'Tidak bisa menambahkan diri sendiri sebagai teman.' };
+
+  const [userLow, userHigh] = pairOrder(userId, target.id);
+  const key = `${userLow}:${userHigh}`;
+  const existing = state.friendships.get(key);
+  const now = Date.now();
+
+  if (existing) {
+    if (existing.status === 'accepted') {
+      return { error: `Kamu dan @${target.username} sudah berteman.` };
+    }
+    if (existing.requesterId === userId) {
+      return { error: `Permintaan pertemanan ke @${target.username} sudah dikirim.` };
+    }
+    // Lawan sudah lebih dulu mengirim permintaan ke kita -> otomatis terima!
+    existing.status = 'accepted';
+    existing.updatedAt = now;
+    persistLocalSocial();
+    db.execPg(
+      'UPDATE friendships SET status = $1, updated_at = $2 WHERE user_low = $3 AND user_high = $4',
+      ['accepted', now, userLow, userHigh]
+    );
+    emitToUser(userId, 'friends:changed');
+    emitToUser(target.id, 'friends:changed');
+    return { status: 'accepted', user: userSummary(target.id) };
+  }
+
+  const row = {
+    userLow,
+    userHigh,
+    requesterId: userId,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now
+  };
+  state.friendships.set(key, row);
+  persistLocalSocial();
+  db.execPg(
+    `INSERT INTO friendships (user_low, user_high, requester_id, status, created_at, updated_at)
+     VALUES ($1, $2, $3, 'pending', $4, $5)
+     ON CONFLICT (user_low, user_high) DO UPDATE SET
+       requester_id = EXCLUDED.requester_id,
+       status = EXCLUDED.status,
+       updated_at = EXCLUDED.updated_at`,
+    [userLow, userHigh, userId, now, now]
+  );
+
+  emitToUser(userId, 'friends:changed');
+  emitToUser(target.id, 'friends:changed');
+  return { status: 'pending', user: userSummary(target.id) };
+}
+
+function acceptFriend(userId, otherUserId) {
+  if (!otherUserId || otherUserId === userId) return { error: 'Pengguna tidak valid.' };
+  const [userLow, userHigh] = pairOrder(userId, otherUserId);
+  const key = `${userLow}:${userHigh}`;
+  const existing = state.friendships.get(key);
+
+  if (!existing || existing.status !== 'pending' || existing.requesterId !== otherUserId) {
+    return { error: 'Permintaan pertemanan tidak ditemukan.' };
+  }
+
+  existing.status = 'accepted';
+  existing.updatedAt = Date.now();
+  persistLocalSocial();
+  db.execPg(
+    'UPDATE friendships SET status = $1, updated_at = $2 WHERE user_low = $3 AND user_high = $4',
+    ['accepted', existing.updatedAt, userLow, userHigh]
+  );
+
+  emitToUser(userId, 'friends:changed');
+  emitToUser(otherUserId, 'friends:changed');
+  return { success: true };
+}
+
+function removeFriend(userId, otherUserId) {
+  if (!otherUserId || otherUserId === userId) return { error: 'Pengguna tidak valid.' };
+  const [userLow, userHigh] = pairOrder(userId, otherUserId);
+  const key = `${userLow}:${userHigh}`;
+  if (!state.friendships.delete(key)) {
+    return { error: 'Data pertemanan tidak ditemukan.' };
+  }
+  persistLocalSocial();
+  db.execPg('DELETE FROM friendships WHERE user_low = $1 AND user_high = $2', [userLow, userHigh]);
+  emitToUser(userId, 'friends:changed');
+  emitToUser(otherUserId, 'friends:changed');
+  return { success: true };
+}
+
+// ==========================================
+// GRUP & ANGGOTA
+// ==========================================
+
+function validateGroupName(name) {
+  const clean = String(name || '').trim();
+  if (clean.length < 3 || clean.length > 40) {
+    return { valid: false, error: 'Nama grup harus berisi 3 sampai 40 karakter.' };
+  }
+  return { valid: true, cleanName: clean };
+}
+
+function isGroupMember(groupId, userId) {
+  if (!groupId || !userId) return false;
+  return Boolean(state.groupMembers.get(groupId)?.has(userId));
+}
+
+function getMemberRole(groupId, userId) {
+  return state.groupMembers.get(groupId)?.get(userId)?.role || null;
+}
+
+function getGroupBasic(groupId) {
+  const g = state.groups.get(groupId);
+  return g ? { id: g.id, name: g.name } : null;
+}
+
+async function formatMessage(msg) {
+  if (!msg) return null;
+  let mediaObj = null;
+  if (msg.mediaKey) {
+    const url = await storage.signMediaUrl(msg.mediaKey);
+    mediaObj = {
+      url,
+      streamUrl: msg.type === 'audio' ? `/api/groups/${msg.groupId}/messages/${msg.id}/audio` : null,
+      mime: msg.mediaMime || 'application/octet-stream',
+      size: msg.mediaSize || 0,
+      width: msg.mediaWidth ?? null,
+      height: msg.mediaHeight ?? null,
+      durationMs: msg.mediaDurationMs ?? null
+    };
+  }
+  return {
+    id: msg.id,
+    groupId: msg.groupId,
+    type: msg.type,
+    sender: msg.senderId ? userSummary(msg.senderId) : null,
+    text: msg.text || '',
+    media: mediaObj,
+    match: msg.matchCode ? { code: msg.matchCode } : null,
+    createdAt: new Date(msg.createdAt).toISOString()
+  };
+}
+
+function appendRawGroupMessage({ groupId, senderId = null, type, text = '', mediaKey = null, mediaMime = null, mediaSize = null, mediaWidth = null, mediaHeight = null, mediaDurationMs = null, matchCode = null }) {
+  const id = 'msg_' + crypto.randomUUID();
+  const createdAt = Date.now();
+  const row = {
+    id,
+    groupId,
+    senderId,
+    type,
+    text: String(text || '').slice(0, 1000),
+    mediaKey,
+    mediaMime,
+    mediaSize,
+    mediaWidth,
+    mediaHeight,
+    mediaDurationMs,
+    matchCode,
+    createdAt
+  };
+  if (!state.groupMessages.has(groupId)) state.groupMessages.set(groupId, []);
+  state.groupMessages.get(groupId).push(row);
+  persistLocalSocial();
+
+  db.execPg(
+    `INSERT INTO group_messages
+      (id, group_id, sender_id, type, text, media_key, media_mime, media_size, media_width, media_height, media_duration_ms, match_code, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [id, groupId, senderId, type, row.text, mediaKey, mediaMime, mediaSize, mediaWidth, mediaHeight, mediaDurationMs, matchCode, createdAt]
+  );
+
+  return row;
+}
+
+async function broadcastNewGroupMessage(row) {
+  const formatted = await formatMessage(row);
+  emitToGroup(row.groupId, 'group:message', formatted);
+  emitToGroup(row.groupId, 'groups:changed');
+  return formatted;
+}
+
+async function listUserGroups(userId) {
+  const summaries = [];
+  for (const [groupId, members] of state.groupMembers.entries()) {
+    const me = members.get(userId);
+    if (!me) continue;
+    const g = state.groups.get(groupId);
+    if (!g) continue;
+    const msgs = state.groupMessages.get(groupId) || [];
+    const lastRaw = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    const lastMessage = lastRaw ? await formatMessage(lastRaw) : null;
+    summaries.push({
+      id: g.id,
+      name: g.name,
+      role: me.role,
+      memberCount: members.size,
+      createdAt: new Date(g.createdAt).toISOString(),
+      lastMessage,
+      _sortTime: lastRaw ? lastRaw.createdAt : g.createdAt
+    });
+  }
+  summaries.sort((a, b) => b._sortTime - a._sortTime);
+  for (const s of summaries) delete s._sortTime;
+  return {
+    groups: summaries,
+    mediaEnabled: storage.isMediaEnabled()
+  };
+}
+
+function getGroupDetail(groupId, userId) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+  const membersMap = state.groupMembers.get(groupId);
+  const myMember = membersMap?.get(userId);
+  if (!myMember) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+
+  const roleWeight = { owner: 0, admin: 1, member: 2 };
+  const members = [];
+  for (const m of membersMap.values()) {
+    const summary = userSummary(m.userId);
+    if (!summary) continue;
+    members.push({
+      ...summary,
+      role: m.role,
+      joinedAt: new Date(m.joinedAt).toISOString()
+    });
+  }
+  members.sort((a, b) => (roleWeight[a.role] ?? 9) - (roleWeight[b.role] ?? 9) || a.name.localeCompare(b.name));
+
+  const pendingInvites = [];
+  for (const inv of state.groupInvites.values()) {
+    if (inv.groupId !== groupId) continue;
+    const invitee = userSummary(inv.inviteeId);
+    const inviter = userSummary(inv.inviterId);
+    if (!invitee || !inviter) continue;
+    pendingInvites.push({
+      id: inv.id,
+      invitee,
+      inviter,
+      createdAt: new Date(inv.createdAt).toISOString()
+    });
+  }
+
+  return {
+    group: {
+      id: g.id,
+      name: g.name,
+      ownerId: g.ownerId,
+      role: myMember.role,
+      createdAt: new Date(g.createdAt).toISOString(),
+      members,
+      pendingInvites
+    }
+  };
+}
+
+async function createGroup(userId, { name }) {
+  const valid = validateGroupName(name);
+  if (!valid.valid) return { error: valid.error };
+
+  const creator = db.getUserById(userId);
+  if (!creator) return { error: 'Pengguna tidak ditemukan.' };
+
+  const id = 'grp_' + crypto.randomUUID();
+  const now = Date.now();
+  const groupRow = { id, name: valid.cleanName, ownerId: userId, createdAt: now };
+  const memberRow = { groupId: id, userId, role: 'owner', joinedAt: now };
+
+  state.groups.set(id, groupRow);
+  state.groupMembers.set(id, new Map([[userId, memberRow]]));
+  state.groupMessages.set(id, []);
+  state.groupLeaderboard.set(id, new Map());
+  persistLocalSocial();
+
+  await db.execPgTransaction(async client => {
+    await client.query(
+      'INSERT INTO groups (id, name, owner_id, created_at) VALUES ($1, $2, $3, $4)',
+      [id, valid.cleanName, userId, now]
+    );
+    await client.query(
+      'INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES ($1, $2, $3, $4)',
+      [id, userId, 'owner', now]
+    );
+  });
+
+  joinUserSocketsToGroup(userId, id);
+  const sysMsg = appendRawGroupMessage({
+    groupId: id,
+    senderId: userId,
+    type: 'system',
+    text: `🎉 Grup "${valid.cleanName}" dibuat oleh ${creator.name}.`
+  });
+  await broadcastNewGroupMessage(sysMsg);
+
+  return getGroupDetail(id, userId);
+}
+
+async function renameGroup(groupId, actorId, { name }) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+  const role = getMemberRole(groupId, actorId);
+  if (role !== 'owner' && role !== 'admin') {
+    return { error: 'Hanya owner atau admin yang dapat mengubah nama grup.', status: 403 };
+  }
+  const valid = validateGroupName(name);
+  if (!valid.valid) return { error: valid.error };
+
+  g.name = valid.cleanName;
+  persistLocalSocial();
+  db.execPg('UPDATE groups SET name = $1 WHERE id = $2', [valid.cleanName, groupId]);
+
+  const actor = db.getUserById(actorId);
+  const sysMsg = appendRawGroupMessage({
+    groupId,
+    senderId: actorId,
+    type: 'system',
+    text: `✏️ ${actor?.name || 'Admin'} mengubah nama grup menjadi "${valid.cleanName}".`
+  });
+  await broadcastNewGroupMessage(sysMsg);
+  emitToGroup(groupId, 'group:updated', { groupId });
+
+  return getGroupDetail(groupId, actorId);
+}
+
+function deleteGroup(groupId, actorId) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (g.ownerId !== actorId) {
+    return { error: 'Hanya pembuat grup (owner) yang dapat menghapus grup.', status: 403 };
+  }
+
+  const members = Array.from(state.groupMembers.get(groupId)?.keys() || []);
+  const msgs = state.groupMessages.get(groupId) || [];
+  const invitedUsers = [];
+  for (const [invId, inv] of state.groupInvites.entries()) {
+    if (inv.groupId === groupId) {
+      invitedUsers.push(inv.inviteeId);
+      state.groupInvites.delete(invId);
+    }
+  }
+
+  // Hapus file media di MinIO secara asinkron
+  for (const m of msgs) {
+    if (m.mediaKey) storage.deleteMedia(m.mediaKey);
+  }
+
+  state.groups.delete(groupId);
+  state.groupMembers.delete(groupId);
+  state.groupMessages.delete(groupId);
+  state.groupLeaderboard.delete(groupId);
+  persistLocalSocial();
+
+  db.execPg('DELETE FROM groups WHERE id = $1', [groupId]);
+
+  emitToGroup(groupId, 'group:removed', { groupId });
+  emitToGroup(groupId, 'groups:changed');
+  for (const uid of members) leaveUserSocketsFromGroup(uid, groupId);
+  for (const uid of invitedUsers) emitToUser(uid, 'groups:changed');
+
+  return { success: true };
+}
+
+function inviteToGroup(groupId, inviterId, { username }) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (!isGroupMember(groupId, inviterId)) {
+    return { error: 'Hanya anggota grup yang dapat mengundang pemain lain.', status: 403 };
+  }
+
+  const clean = String(username || '').trim().replace(/^@/, '');
+  if (!clean) return { error: 'Username wajib diisi.' };
+  const invitee = db.getUserByUsername(clean);
+  if (!invitee) return { error: `Pengguna @${clean} tidak ditemukan.` };
+
+  if (isGroupMember(groupId, invitee.id)) {
+    return { error: `@${invitee.username} sudah menjadi anggota grup ini.` };
+  }
+  for (const inv of state.groupInvites.values()) {
+    if (inv.groupId === groupId && inv.inviteeId === invitee.id) {
+      return { error: `@${invitee.username} sudah memiliki undangan yang menunggu konfirmasi.` };
+    }
+  }
+
+  const id = 'ginv_' + crypto.randomUUID();
+  const createdAt = Date.now();
+  const row = { id, groupId, inviterId, inviteeId: invitee.id, createdAt };
+  state.groupInvites.set(id, row);
+  persistLocalSocial();
+
+  db.execPg(
+    `INSERT INTO group_invites (id, group_id, inviter_id, invitee_id, created_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (group_id, invitee_id) DO NOTHING`,
+    [id, groupId, inviterId, invitee.id, createdAt]
+  );
+
+  emitToUser(invitee.id, 'groups:changed');
+  emitToGroup(groupId, 'group:updated', { groupId });
+
+  return {
+    invite: {
+      id,
+      invitee: userSummary(invitee.id),
+      inviter: userSummary(inviterId),
+      createdAt: new Date(createdAt).toISOString()
+    }
+  };
+}
+
+function listUserGroupInvites(userId) {
+  const invites = [];
+  for (const inv of state.groupInvites.values()) {
+    if (inv.inviteeId !== userId) continue;
+    const g = state.groups.get(inv.groupId);
+    const members = state.groupMembers.get(inv.groupId);
+    const inviter = userSummary(inv.inviterId);
+    if (!g || !inviter) continue;
+    invites.push({
+      id: inv.id,
+      group: { id: g.id, name: g.name, memberCount: members ? members.size : 1 },
+      inviter,
+      createdAt: new Date(inv.createdAt).toISOString()
+    });
+  }
+  invites.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return { invites };
+}
+
+async function acceptGroupInvite(inviteId, userId) {
+  const inv = state.groupInvites.get(inviteId);
+  if (!inv || inv.inviteeId !== userId) {
+    return { error: 'Undangan grup tidak ditemukan atau sudah tidak berlaku.', status: 404 };
+  }
+  const g = state.groups.get(inv.groupId);
+  if (!g) {
+    state.groupInvites.delete(inviteId);
+    return { error: 'Grup sudah tidak ada.', status: 404 };
+  }
+
+  state.groupInvites.delete(inviteId);
+  const now = Date.now();
+  if (!state.groupMembers.has(g.id)) state.groupMembers.set(g.id, new Map());
+  state.groupMembers.get(g.id).set(userId, {
+    groupId: g.id,
+    userId,
+    role: 'member',
+    joinedAt: now
+  });
+  persistLocalSocial();
+
+  await db.execPgTransaction(async client => {
+    await client.query('DELETE FROM group_invites WHERE id = $1', [inviteId]);
+    await client.query(
+      `INSERT INTO group_members (group_id, user_id, role, joined_at)
+       VALUES ($1, $2, 'member', $3)
+       ON CONFLICT (group_id, user_id) DO NOTHING`,
+      [g.id, userId, now]
+    );
+  });
+
+  joinUserSocketsToGroup(userId, g.id);
+  const user = db.getUserById(userId);
+  const sysMsg = appendRawGroupMessage({
+    groupId: g.id,
+    senderId: userId,
+    type: 'system',
+    text: `👋 ${user?.name || 'Pemain'} bergabung ke grup.`
+  });
+  await broadcastNewGroupMessage(sysMsg);
+  emitToUser(userId, 'groups:changed');
+  emitToGroup(g.id, 'group:updated', { groupId: g.id });
+
+  return getGroupDetail(g.id, userId);
+}
+
+function declineGroupInvite(inviteId, userId) {
+  const inv = state.groupInvites.get(inviteId);
+  if (!inv || inv.inviteeId !== userId) {
+    return { error: 'Undangan grup tidak ditemukan.', status: 404 };
+  }
+  state.groupInvites.delete(inviteId);
+  persistLocalSocial();
+  db.execPg('DELETE FROM group_invites WHERE id = $1', [inviteId]);
+
+  emitToUser(userId, 'groups:changed');
+  emitToGroup(inv.groupId, 'group:updated', { groupId: inv.groupId });
+  return { success: true };
+}
+
+async function setMemberRole(groupId, actorId, targetUserId, { role }) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (g.ownerId !== actorId) {
+    return { error: 'Hanya pembuat grup (owner) yang dapat mengatur peran admin.', status: 403 };
+  }
+  if (targetUserId === actorId) {
+    return { error: 'Peran owner tidak dapat diubah.' };
+  }
+  if (role !== 'admin' && role !== 'member') {
+    return { error: 'Peran harus admin atau member.' };
+  }
+
+  const members = state.groupMembers.get(groupId);
+  const target = members?.get(targetUserId);
+  if (!target) return { error: 'Anggota tidak ditemukan di grup ini.', status: 404 };
+
+  target.role = role;
+  persistLocalSocial();
+  db.execPg(
+    'UPDATE group_members SET role = $1 WHERE group_id = $2 AND user_id = $3',
+    [role, groupId, targetUserId]
+  );
+
+  const targetUser = db.getUserById(targetUserId);
+  const sysMsg = appendRawGroupMessage({
+    groupId,
+    senderId: actorId,
+    type: 'system',
+    text: role === 'admin'
+      ? `🛡️ ${targetUser?.name || 'Anggota'} diangkat menjadi Admin grup.`
+      : `👤 ${targetUser?.name || 'Anggota'} sekarang menjadi Member biasa.`
+  });
+  await broadcastNewGroupMessage(sysMsg);
+  emitToGroup(groupId, 'group:updated', { groupId });
+
+  return getGroupDetail(groupId, actorId);
+}
+
+async function removeGroupMember(groupId, actorId, targetUserId) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+
+  const members = state.groupMembers.get(groupId);
+  const actor = members?.get(actorId);
+  const target = members?.get(targetUserId);
+  if (!actor) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+  if (!target) return { error: 'Anggota tidak ditemukan di grup ini.', status: 404 };
+
+  const isSelf = actorId === targetUserId;
+  if (isSelf) {
+    if (actor.role === 'owner') {
+      return { error: 'Owner tidak bisa keluar dari grup. Hapus grup jika ingin membubarkannya.' };
+    }
+  } else {
+    if (actor.role === 'member') {
+      return { error: 'Hanya owner atau admin yang dapat mengeluarkan anggota.', status: 403 };
+    }
+    if (actor.role === 'admin' && target.role !== 'member') {
+      return { error: 'Admin hanya dapat mengeluarkan member biasa.', status: 403 };
+    }
+  }
+
+  members.delete(targetUserId);
+  persistLocalSocial();
+  db.execPg('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, targetUserId]);
+
+  leaveUserSocketsFromGroup(targetUserId, groupId);
+  emitToUser(targetUserId, 'group:removed', { groupId });
+  emitToUser(targetUserId, 'groups:changed');
+
+  const targetUser = db.getUserById(targetUserId);
+  const sysMsg = appendRawGroupMessage({
+    groupId,
+    senderId: actorId,
+    type: 'system',
+    text: isSelf
+      ? `🚪 ${targetUser?.name || 'Anggota'} keluar dari grup.`
+      : `🚫 ${targetUser?.name || 'Anggota'} dikeluarkan dari grup.`
+  });
+  await broadcastNewGroupMessage(sysMsg);
+  emitToGroup(groupId, 'group:updated', { groupId });
+
+  return { success: true };
+}
+
+// ==========================================
+// PESAN GRUP (TEKS, FOTO, VOICE NOTE, MATCH)
+// ==========================================
+
+async function listGroupMessages(groupId, userId, { before, limit = 30 } = {}) {
+  if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+
+  const all = state.groupMessages.get(groupId) || [];
+  const cap = Math.max(1, Math.min(50, Number(limit) || 30));
+  let endIdx = all.length;
+  if (before) {
+    const foundIdx = all.findIndex(m => m.id === before);
+    if (foundIdx !== -1) endIdx = foundIdx;
+  }
+  const startIdx = Math.max(0, endIdx - cap);
+  const slice = all.slice(startIdx, endIdx);
+  const messages = await Promise.all(slice.map(formatMessage));
+
+  return {
+    messages,
+    hasMore: startIdx > 0
+  };
+}
+
+async function sendGroupTextMessage(groupId, userId, { text }) {
+  if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+
+  const clean = String(text || '').trim();
+  if (!clean) return { error: 'Pesan tidak boleh kosong.' };
+  if (clean.length > 1000) return { error: 'Pesan maksimal 1.000 karakter.' };
+
+  const row = appendRawGroupMessage({
+    groupId,
+    senderId: userId,
+    type: 'text',
+    text: clean
+  });
+  const message = await broadcastNewGroupMessage(row);
+  return { message };
+}
+
+async function sendGroupMediaMessage(groupId, userId, { kind, buffer, durationMs, text }) {
+  if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+  if (!storage.isMediaEnabled()) {
+    return { error: 'Penyimpanan media MinIO belum dikonfigurasi di server.', status: 503 };
+  }
+  if (kind !== 'image' && kind !== 'audio') {
+    return { error: 'Jenis media harus berupa image (foto) atau audio (voice note).' };
+  }
+
+  let processed;
+  try {
+    if (kind === 'image') {
+      processed = await media.compressImage(buffer);
+    } else {
+      processed = await media.compressAudio(buffer, durationMs);
+    }
+  } catch (err) {
+    return { error: err.message || 'Gagal memproses file media.' };
+  }
+
+  let uploaded;
+  try {
+    uploaded = await storage.uploadMedia({
+      groupId,
+      kind,
+      ext: processed.ext,
+      buffer: processed.buffer,
+      mime: processed.mime
+    });
+  } catch (err) {
+    console.error('[MINIO UPLOAD ERROR]', err);
+    return { error: 'Gagal mengunggah file media ke penyimpanan objek.', status: 502 };
+  }
+
+  const cleanCaption = String(text || '').trim().slice(0, 300);
+  const row = appendRawGroupMessage({
+    groupId,
+    senderId: userId,
+    type: kind,
+    text: cleanCaption,
+    mediaKey: uploaded.key,
+    mediaMime: processed.mime,
+    mediaSize: uploaded.size,
+    mediaWidth: processed.width ?? null,
+    mediaHeight: processed.height ?? null,
+    mediaDurationMs: processed.durationMs ?? null
+  });
+
+  const message = await broadcastNewGroupMessage(row);
+  return { message };
+}
+
+async function getGroupMessageAudio(groupId, messageId, userId) {
+  if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+
+  const list = state.groupMessages.get(groupId) || [];
+  const msg = list.find(m => m.id === messageId && m.type === 'audio');
+  if (!msg || !msg.mediaKey) return { error: 'Voice note tidak ditemukan.', status: 404 };
+
+  if (audioPlayCache.has(messageId)) {
+    return audioPlayCache.get(messageId);
+  }
+
+  let rawBuffer;
+  try {
+    rawBuffer = await storage.getMediaBuffer(msg.mediaKey);
+  } catch (err) {
+    console.error('[MINIO GET AUDIO ERROR]', err);
+    return { error: 'Gagal mengambil voice note dari penyimpanan objek.', status: 502 };
+  }
+  if (!rawBuffer || rawBuffer.length === 0) {
+    return { error: 'File voice note kosong atau tidak ditemukan di MinIO.', status: 404 };
+  }
+
+  const playable = await media.ensurePlayableAudio(rawBuffer, msg.mediaMime);
+  if (audioPlayCache.size >= 30) {
+    const oldestKey = audioPlayCache.keys().next().value;
+    audioPlayCache.delete(oldestKey);
+  }
+  audioPlayCache.set(messageId, playable);
+  return playable;
+}
+
+async function postGroupMatchMessage(groupId, creatorUserId, roomCode) {
+  if (!state.groups.has(groupId)) return null;
+  const creator = db.getUserById(creatorUserId);
+  const row = appendRawGroupMessage({
+    groupId,
+    senderId: creatorUserId,
+    type: 'match',
+    text: `🎲 ${creator?.name || 'Anggota'} membuat Match Grup! Kode room: ${roomCode}`,
+    matchCode: roomCode
+  });
+  return broadcastNewGroupMessage(row);
+}
+
+// ==========================================
+// LEADERBOARD KHUSUS GRUP
+// ==========================================
+
+function recordGroupMatchResult(groupId, { winnerPlayerId, players }) {
+  if (!groupId || !state.groups.has(groupId) || !players || players.length === 0) return;
+  const humans = players.filter(p => !p.isBot);
+  if (humans.length < 2) return;
+
+  if (!state.groupLeaderboard.has(groupId)) state.groupLeaderboard.set(groupId, new Map());
+  const lbMap = state.groupLeaderboard.get(groupId);
+  const updates = [];
+
+  for (const p of humans) {
+    const user = p.userId ? db.getUserById(p.userId) : null;
+    if (!user) continue;
+    let entry = lbMap.get(user.id);
+    if (!entry) {
+      entry = { groupId, userId: user.id, wins: 0, matchesPlayed: 0, points: 0 };
+      lbMap.set(user.id, entry);
+    }
+    const won = p.id === winnerPlayerId;
+    const deltaWins = won ? 1 : 0;
+    const deltaPoints = won ? WIN_POINTS : PLAY_POINTS;
+    entry.matchesPlayed += 1;
+    entry.wins += deltaWins;
+    entry.points += deltaPoints;
+    updates.push({ userId: user.id, deltaWins, deltaPoints });
+  }
+
+  if (updates.length > 0) {
+    persistLocalSocial();
+    db.execPgTransaction(async client => {
+      for (const u of updates) {
+        await client.query(
+          `INSERT INTO group_leaderboard (group_id, user_id, wins, matches_played, points)
+           VALUES ($1, $2, $3, 1, $4)
+           ON CONFLICT (group_id, user_id) DO UPDATE SET
+             wins = group_leaderboard.wins + EXCLUDED.wins,
+             matches_played = group_leaderboard.matches_played + 1,
+             points = group_leaderboard.points + EXCLUDED.points`,
+          [groupId, u.userId, u.deltaWins, u.deltaPoints]
+        );
+      }
+    });
+    emitToGroup(groupId, 'group:leaderboard', { groupId });
+  }
+}
+
+function getGroupLeaderboard(groupId, userId) {
+  if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
+  if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
+
+  const lbMap = state.groupLeaderboard.get(groupId) || new Map();
+  const membersMap = state.groupMembers.get(groupId) || new Map();
+
+  // Sertakan semua anggota grup (meski belum main = 0 menang, 0 poin) + mantan anggota yang pernah punya skor
+  const userIds = new Set([...membersMap.keys(), ...lbMap.keys()]);
+  const rows = [];
+  for (const uid of userIds) {
+    const u = db.getUserById(uid);
+    if (!u) continue;
+    const stats = lbMap.get(uid) || { wins: 0, matchesPlayed: 0, points: 0 };
+    const winRate = stats.matchesPlayed > 0 ? Math.round((stats.wins / stats.matchesPlayed) * 100) : 0;
+    rows.push({
+      userId: u.id,
+      username: u.username,
+      name: u.name,
+      avatar: u.avatar || '🎯',
+      wins: stats.wins,
+      matchesPlayed: stats.matchesPlayed,
+      points: stats.points,
+      winRate
+    });
+  }
+
+  rows.sort((a, b) =>
+    b.wins - a.wins ||
+    b.points - a.points ||
+    b.winRate - a.winRate ||
+    a.name.localeCompare(b.name)
+  );
+
+  return {
+    leaderboard: rows.map((r, idx) => ({ ...r, rank: idx + 1 }))
+  };
+}
+
+module.exports = {
+  hydrateFromPostgres,
+  identifySocket,
+  detachSocket,
+  isUserOnline,
+  userSummary,
+  emitToUser,
+  emitToGroup,
+  areFriends,
+  listFriends,
+  requestFriend,
+  acceptFriend,
+  removeFriend,
+  isGroupMember,
+  getGroupBasic,
+  listUserGroups,
+  getGroupDetail,
+  createGroup,
+  renameGroup,
+  deleteGroup,
+  inviteToGroup,
+  listUserGroupInvites,
+  acceptGroupInvite,
+  declineGroupInvite,
+  setMemberRole,
+  removeGroupMember,
+  listGroupMessages,
+  sendGroupTextMessage,
+  sendGroupMediaMessage,
+  getGroupMessageAudio,
+  postGroupMatchMessage,
+  recordGroupMatchResult,
+  getGroupLeaderboard
+};
+

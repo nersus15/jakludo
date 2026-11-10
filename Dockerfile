@@ -27,8 +27,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5172
 
-# Install postgresql-client agar perintah `npm run backup` (pg_dump) berjalan di dalam container
-RUN apk add --no-cache postgresql-client
+# Install postgresql-client (pg_dump) dan ffmpeg (kompresi voice note Opus)
+RUN apk add --no-cache postgresql-client ffmpeg
 
 # Salin package manifest
 COPY package*.json ./

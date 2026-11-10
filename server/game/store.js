@@ -1,6 +1,7 @@
 // State room di memori: broadcast ke klien, snapshot ke SQLite, dan siklus hidup room.
 const db = require('../db');
 const inventory = require('./inventory');
+const social = require('../social/store');
 const { getMovablePawns, getBlackHoles } = require('./rules');
 const { ROOM_IDLE_TTL_MS, ROOM_SAVE_DELAY_MS, LOBBY_SEAT_GRACE_MS, MAX_HISTORY } = require('./config');
 
@@ -48,6 +49,7 @@ function publicRoom(r) {
     : [];
   return {
     code: r.code,
+    group: r.groupId ? social.getGroupBasic(r.groupId) : null,
     host: r.host,
     players: r.players.map(p => publicPlayer(p, r)),
     started: r.started,

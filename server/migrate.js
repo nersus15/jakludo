@@ -129,6 +129,30 @@ function listMigrationFiles(dir = MIGRATIONS_DIR) {
     });
 }
 
+// Buat database otomatis jika belum ada di server PostgreSQL lokal (error code 3D000)
+async function ensureDatabaseExists(poolConfig) {
+  if (!poolConfig || !poolConfig.database || !/^[a-zA-Z0-9_-]+$/.test(poolConfig.database)) return;
+  const testPool = new Pool({ ...poolConfig, max: 1 });
+  try {
+    const client = await testPool.connect();
+    client.release();
+  } catch (err) {
+    if (err && err.code === '3D000') {
+      const adminPool = new Pool({ ...poolConfig, database: 'postgres', max: 1 });
+      try {
+        await adminPool.query(`CREATE DATABASE "${poolConfig.database}"`);
+        console.log(`[PG MIGRATE] Database "${poolConfig.database}" belum ada, berhasil dibuat otomatis.`);
+      } finally {
+        await adminPool.end().catch(() => {});
+      }
+    } else {
+      throw err;
+    }
+  } finally {
+    await testPool.end().catch(() => {});
+  }
+}
+
 // Jalankan semua file migrasi SQL yang belum tercatat di tabel schema_migrations
 async function runSchemaMigrations(pool) {
   const files = listMigrationFiles();
@@ -481,6 +505,7 @@ async function runCli() {
     process.exit(1);
   }
 
+  await ensureDatabaseExists(poolConfig);
   const pool = new Pool(poolConfig);
   try {
     await runSchemaMigrations(pool);
@@ -522,8 +547,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  loadDotEnv,
   parseDatabaseUrl,
   getPoolConfig,
+  ensureDatabaseExists,
   listMigrationFiles,
   runSchemaMigrations,
   readSqliteDatabase,

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jakludo-pwa-v3';
+const CACHE_NAME = 'jakludo-pwa-v4';
 
 const STATIC_ASSETS = [
   '/',
@@ -59,6 +59,15 @@ self.addEventListener('fetch', event => {
 
   // Jangan intersep request API dinamis (biarkan live network)
   if (url.pathname.startsWith('/api')) {
+    return;
+  }
+
+  // Jangan intersep modul Vite dev server saat pengembangan lokal
+  if (
+    url.pathname.startsWith('/client/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.startsWith('/@')
+  ) {
     return;
   }
 

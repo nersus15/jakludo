@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import Modal from './components/Modal';
+import Icon from './components/Icon';
 import { sound } from './sound';
 
 async function postJson(url, body) {
@@ -46,7 +47,7 @@ function PasswordField({ id, label, value, onChange, autoComplete, describedBy, 
           required
         />
         <button type="button" className="icon-btn icon-btn--plain" aria-pressed={visible} aria-label={visible ? 'Sembunyikan password' : 'Tampilkan password'} onClick={() => setVisible(v => !v)}>
-          <span aria-hidden="true">{visible ? '🙈' : '👁️'}</span>
+          <Icon name={visible ? 'eye-off' : 'eye'} size={18} />
         </button>
       </div>
     </div>

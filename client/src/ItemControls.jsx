@@ -1,4 +1,5 @@
 import React from 'react';
+import Icon from './components/Icon';
 import { sound } from './sound';
 import { itemStock } from './items';
 
@@ -11,7 +12,9 @@ export function InventoryChips({ catalog, player }) {
         const stock = itemStock(player, item.id);
         return (
           <li key={item.id} className={`inventory__item ${stock.count ? 'has-stock' : ''}`} title={item.highlight || item.description}>
-            <span className="inventory__icon" aria-hidden="true">{item.icon}</span>
+            <span className="inventory__icon" aria-hidden="true">
+              <Icon name={item.icon || item.id} size={20} />
+            </span>
             <span className="inventory__text">
               <strong>{item.name}</strong>
               <span className="muted">
@@ -39,7 +42,9 @@ export function ActiveItemActions({ catalog, player, enabled, targetingItemId, o
     return (
       <section key={item.id} className="action-card card" aria-label={item.name}>
         <div className="action-card__head">
-          <span className="action-card__icon" aria-hidden="true">{item.icon}</span>
+          <span className="action-card__icon" aria-hidden="true">
+            <Icon name={item.icon || item.id} size={22} />
+          </span>
           <div>
             <strong>{item.name} siap dipakai</strong>
             <p className="muted">

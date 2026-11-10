@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Modal from '../Modal';
+import Icon from '../Icon';
 import ThemeToggle from '../ThemeToggle';
 import { NetworkIndicator } from '../NetworkStatus';
 import { sound } from '../../sound';
@@ -13,7 +14,11 @@ export default function GameHeader({ room, audio, network, theme, onOpenShop, on
     <header className="game-header">
       <div className="game-header__room">
         <span className="muted">Room</span> <strong className="code-text">{room.code}</strong>
-        {room.settings?.blackHole && <span className="badge badge--warning">🕳️ Black Hole</span>}
+        {room.settings?.blackHole && (
+          <span className="badge badge--warning">
+            <Icon name="vortex" size={14} /> Black Hole
+          </span>
+        )}
       </div>
       <div className="game-header__actions">
         <NetworkIndicator {...network} />
@@ -27,10 +32,10 @@ export default function GameHeader({ room, audio, network, theme, onOpenShop, on
             onOpenShop();
           }}
         >
-          <span aria-hidden="true">🏪</span>
+          <Icon name="shop" size={20} />
         </button>
         <button type="button" className="icon-btn" aria-label="Pengaturan suara" title="Pengaturan suara" onClick={onOpenAudio}>
-          <span aria-hidden="true">{muted ? '🔇' : '🔊'}</span>
+          <Icon name={muted ? 'volume-off' : 'volume-on'} size={20} />
         </button>
         <ThemeToggle theme={theme} />
         <button type="button" className="btn btn--danger" onClick={() => setConfirmLeave(true)}>

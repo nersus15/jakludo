@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Modal from './components/Modal';
+import Icon from './components/Icon';
 
-const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
+const MEDAL_ICONS = { 1: 'medal-1', 2: 'medal-2', 3: 'medal-3' };
 
 function Avatar({ value, name }) {
   if (value?.startsWith('http')) return <img src={value} alt="" width="36" height="36" className="lb-avatar" />;
-  return <span className="lb-avatar" aria-hidden="true">{value || name?.slice(0, 1).toUpperCase() || '?'}</span>;
+  return <span className="lb-avatar" aria-hidden="true">{name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}</span>;
 }
 
 export default function LeaderboardModal({ isOpen, onClose, currentUser, socket }) {
@@ -75,7 +76,9 @@ export default function LeaderboardModal({ isOpen, onClose, currentUser, socket 
         <>
           {king && (
             <div className="lb-king">
-              <span className="lb-king__crown" aria-hidden="true">👑</span>
+              <span className="lb-king__crown" aria-hidden="true">
+                <Icon name="crown" size={28} />
+              </span>
               <div>
                 <p className="muted">Ludo King saat ini</p>
                 <strong>{king.name}</strong> <span className="muted">@{king.username}</span>
@@ -87,7 +90,9 @@ export default function LeaderboardModal({ isOpen, onClose, currentUser, socket 
               const isMe = currentUser && p.userId === currentUser.id;
               return (
                 <li key={p.userId} className={`lb-row ${isMe ? 'is-me' : ''} ${p.rank <= 3 ? 'is-top' : ''}`}>
-                  <span className="lb-row__rank">{MEDALS[p.rank] || `#${p.rank}`}</span>
+                  <span className="lb-row__rank">
+                    {MEDAL_ICONS[p.rank] ? <Icon name={MEDAL_ICONS[p.rank]} size={22} /> : `#${p.rank}`}
+                  </span>
                   <Avatar value={p.avatar} name={p.name} />
                   <span className="lb-row__who">
                     <strong>

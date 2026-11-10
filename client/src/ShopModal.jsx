@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Modal from './components/Modal';
+import Icon from './components/Icon';
 import { sound } from './sound';
 import { storage } from './storage';
 import { useItemCatalogState } from './items';
@@ -76,9 +77,9 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       isOpen={isOpen}
       onClose={onClose}
       size="lg"
-      icon="🏪"
+      icon="shop"
       title="Toko item"
-      subtitle={currentUser ? `Saldo Poin / Diamond: ${points.toLocaleString('id-ID')} 💎` : 'Masuk dulu untuk membeli item.'}
+      subtitle={currentUser ? `Saldo Poin / Diamond: ${points.toLocaleString('id-ID')}` : 'Masuk dulu untuk membeli item.'}
     >
       {feedback && (
         <p className={`alert alert--${feedback.type === 'success' ? 'success' : 'error'} shop__feedback`} role={feedback.type === 'success' ? 'status' : 'alert'}>
@@ -169,7 +170,9 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
           return (
             <li key={item.id} className="shop-item card">
               <div className="shop-item__head">
-                <span className="shop-item__icon" aria-hidden="true">{item.icon}</span>
+                <span className="shop-item__icon" aria-hidden="true">
+                  <Icon name={item.icon || item.id} size={26} />
+                </span>
                 <div>
                   <h3>{item.name}</h3>
                   <p className="muted">{KIND_LABELS[item.kind] || 'Bekerja otomatis'} · dimiliki {owned[item.id] || 0}</p>
@@ -178,7 +181,9 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
               <p className="shop-item__desc">{item.description}</p>
               {item.highlight && <p className="shop-item__note">{item.highlight}</p>}
               <div className="shop-item__buy">
-                <span className="shop-item__price">💎 {item.price} poin</span>
+                <span className="shop-item__price">
+                  <Icon name="diamond" size={16} /> {item.price} poin
+                </span>
                 <button
                   type="button"
                   className="btn btn--primary"

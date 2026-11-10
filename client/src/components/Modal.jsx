@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef } from 'react';
+import Icon from './Icon';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -20,8 +21,10 @@ export default function Modal({ isOpen, onClose, title, subtitle, icon, variant 
 
     const onKeyDown = e => {
       if (e.key === 'Escape') {
-        e.stopPropagation();
-        onCloseRef.current?.();
+        if (onCloseRef.current) {
+          e.stopPropagation();
+          onCloseRef.current();
+        }
         return;
       }
       if (e.key !== 'Tab' || !panel) return;
@@ -62,14 +65,18 @@ export default function Modal({ isOpen, onClose, title, subtitle, icon, variant 
       >
         {title && (
           <header className="modal__header">
-            {icon && <span className="modal__icon" aria-hidden="true">{icon}</span>}
+            {icon && (
+              <span className="modal__icon" aria-hidden="true">
+                {typeof icon === 'string' ? <Icon name={icon} size={24} /> || icon : icon}
+              </span>
+            )}
             <div className="modal__titles">
               <h2 id={titleId} className="modal__title">{title}</h2>
               {subtitle && <p className="modal__subtitle">{subtitle}</p>}
             </div>
             {onClose && (
               <button type="button" className="icon-btn modal__close" onClick={onClose} aria-label="Tutup">
-                <span aria-hidden="true">✕</span>
+                <Icon name="close" size={18} />
               </button>
             )}
           </header>

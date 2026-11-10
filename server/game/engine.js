@@ -4,6 +4,7 @@ const db = require('../db');
 const items = require('../items');
 const inventory = require('./inventory');
 const store = require('./store');
+const social = require('../social/store');
 const {
   COLORS,
   FINISH,
@@ -74,12 +75,17 @@ function declareWinner(room, winnerPlayer) {
   room.message = `🏆 SELAMAT! ${winnerPlayer.name} MENANG!`;
   addHistory(room, `🎉 ${winnerPlayer.name} berhasil memenangkan pertandingan JakLudo!`);
 
-  db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players });
-  room.players.forEach(p => {
-    p.isLudoKing = db.checkIsLudoKing(p.userId);
-  });
+  if (room.groupId) {
+    // Match khusus grup hanya dihitung di leaderboard grup (tidak memengaruhi poin/peringkat global)
+    social.recordGroupMatchResult(room.groupId, { winnerPlayerId: winnerPlayer.id, players: room.players });
+  } else {
+    db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players });
+    room.players.forEach(p => {
+      p.isLudoKing = db.checkIsLudoKing(p.userId);
+    });
+    store.getIo().emit('leaderboard:update', db.getLeaderboard());
+  }
 
-  store.getIo().emit('leaderboard:update', db.getLeaderboard());
   emitRoom(room);
   store.scheduleCleanup(room);
 }

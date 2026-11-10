@@ -1,0 +1,596 @@
+/* Fitur sosial: teman, grup, chat grup, media, dan undangan room */
+
+.social-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.social-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.social-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.social-inline-form .input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.social-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.social-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+}
+
+.social-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-grid;
+}
+
+.social-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--surface-3);
+  color: var(--text);
+  border: 2px solid var(--ink-line);
+  font: 700 1.1rem var(--font-display);
+  object-fit: cover;
+}
+
+.social-avatar--sm {
+  width: 32px;
+  height: 32px;
+  font-size: 0.95rem;
+}
+
+.status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+}
+
+.status-dot--online {
+  background: var(--success);
+}
+
+.status-dot--offline {
+  background: var(--text-3);
+}
+
+.text-online {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.social-row__info {
+  flex: 1 1 140px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-sm);
+}
+
+.social-row__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.social-row__info strong,
+.social-row__info .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.social-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.btn--sm {
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  font-size: var(--fs-sm);
+}
+
+.social-empty {
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Kartu Grup ---------- */
+
+.group-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  text-align: left;
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.group-card:hover {
+  background: var(--surface-2);
+  border-color: var(--ink-line);
+}
+
+.group-card__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.group-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.group-card__count {
+  font-size: var(--fs-xs);
+  margin-left: auto;
+}
+
+.group-card__preview {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Detail Grup ---------- */
+
+.group-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.group-detail__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.tabs--three {
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: var(--space-2);
+}
+
+.group-rename-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+
+.social-danger-zone {
+  padding-top: var(--space-2);
+  border-top: 2px solid var(--border);
+}
+
+.confirm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+/* ---------- Chat Grup ---------- */
+
+.group-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.group-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 280px;
+  max-height: 50dvh;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.group-chat__more {
+  display: flex;
+  justify-content: center;
+  padding-bottom: var(--space-2);
+}
+
+.gmsg {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: 88%;
+}
+
+.gmsg--other {
+  align-self: flex-start;
+}
+
+.gmsg--me {
+  align-self: flex-end;
+}
+
+.gmsg--system {
+  align-self: center;
+  max-width: 95%;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-align: center;
+}
+
+.gmsg--match {
+  align-self: stretch;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--brand-soft);
+  border-color: var(--ink-line);
+  box-shadow: var(--lift-1);
+}
+
+.gmsg__match-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  flex: 1 1 200px;
+  font-size: var(--fs-sm);
+}
+
+.gmsg__match-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.gmsg__bubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 2px solid var(--border);
+  min-width: 0;
+}
+
+.gmsg--me .gmsg__bubble {
+  background: var(--brand-soft);
+  border-color: var(--ink-line);
+}
+
+.gmsg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--fs-xs);
+}
+
+.gmsg__time {
+  margin-left: auto;
+}
+
+.gmsg__text {
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gmsg__image-btn {
+  padding: 0;
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  overflow: hidden;
+  max-width: 240px;
+}
+
+.gmsg__image {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
+
+.gmsg__audio-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.gmsg__audio {
+  width: min(240px, 65vw);
+  height: 40px;
+}
+
+.gmsg__duration {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.group-chat__composer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.group-chat__composer .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-chat__uploading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+}
+
+.group-chat__recorder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--danger);
+  background: var(--danger-soft);
+  font-size: var(--fs-sm);
+}
+
+.recorder-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+}
+
+.recorder-timer {
+  flex: 1;
+  min-width: 140px;
+}
+
+.recorder-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ---------- Lightbox Foto ---------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: var(--gutter);
+  background: var(--overlay);
+}
+
+.lightbox__close {
+  position: fixed;
+  top: var(--gutter);
+  right: var(--gutter);
+  border-color: var(--ink-line);
+  box-shadow: var(--lift-1);
+}
+
+.lightbox__img {
+  max-width: min(92vw, 960px);
+  max-height: 85dvh;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--ink-line);
+  box-shadow: var(--lift-2);
+  background: var(--surface);
+  object-fit: contain;
+}
+
+/* ---------- Lobby: Undang Teman & Badge Match Grup ---------- */
+
+.lobby__group-badge {
+  font-size: var(--fs-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 2px solid var(--ink-line);
+}
+
+.lobby__invite {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 768px) {
+  .lobby__invite {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- Toast Undangan Room ---------- */
+
+.toast--invite {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  background: var(--brand-soft);
+}
+
+.toast__invite-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.toast__invite-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- Link Card Badge ---------- */
+
+.link-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- Ikon Vektor Bertema Papan ---------- */
+
+.jl-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.account__item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tabs__tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+/* ---------- Custom Voice Note Player ---------- */
+
+.vn-player {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: min(260px, 70vw);
+  max-width: 320px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 2px solid var(--ink-line);
+  background: var(--surface-alt);
+  box-shadow: var(--lift-1);
+}
+
+.vn-player__btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--ink-line);
+  background: var(--brand);
+  color: var(--ink-on-brand);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--lift-1);
+  transition: transform 80ms ease;
+}
+
+.vn-player__btn:active {
+  transform: translate(1px, 1px);
+}
+
+.vn-player__track {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.vn-player__slider {
+  width: 100%;
+  accent-color: var(--brand);
+  cursor: pointer;
+  height: 6px;
+}
+
+.vn-player__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+}
+
+.vn-player__time {
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.vn-player__err {
+  color: var(--danger);
+  font-weight: 700;
+}
+

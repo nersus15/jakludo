@@ -1,79 +1,89 @@
 import React, { useEffect, useState } from 'react';
 import Modal from './Modal';
+import Icon from './Icon';
 import { sound } from '../sound';
 import { getNotificationPermission, notify, requestNotificationPermission } from '../notifications';
 
-const DISMISS_KEY = 'jakludo_notif_prompt_dismissed';
-
-// Pop up di landing page yang mengajak pemain mengizinkan notifikasi browser.
-// Muncul selama izin belum diputuskan; "Nanti saja" hanya menyembunyikan untuk sesi tab ini.
+// Pop up di landing page yang mewajibkan pemain mengizinkan notifikasi browser sebelum bermain.
+// Backdrop, tombol Escape, dan tombol tutup dinonaktifkan sampai izin notifikasi diberikan ('granted').
 export default function NotificationPrompt({ enabled }) {
   const [permission, setPermission] = useState(getNotificationPermission);
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return sessionStorage.getItem(DISMISS_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
   const [ready, setReady] = useState(false);
 
-  // Beri jeda sebentar agar pop up tidak menimpa halaman yang baru tampil
+  // Beri jeda sebentar agar pop up muncul mulus setelah halaman tampil
   useEffect(() => {
-    const timer = setTimeout(() => setReady(true), 900);
+    const timer = setTimeout(() => setReady(true), 600);
     return () => clearTimeout(timer);
   }, []);
 
-  const close = () => {
-    setDismissed(true);
-    try {
-      sessionStorage.setItem(DISMISS_KEY, '1');
-    } catch {
-      // sessionStorage diblokir: cukup sembunyikan di state
+  // Pantau perubahan izin notifikasi secara langsung jika pemain mengubah dari pengaturan browser
+  useEffect(() => {
+    const syncPermission = () => {
+      setPermission(getNotificationPermission());
+    };
+    window.addEventListener('focus', syncPermission);
+    document.addEventListener('visibilitychange', syncPermission);
+
+    let permStatus = null;
+    if (navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: 'notifications' })
+        .then(status => {
+          permStatus = status;
+          permStatus.onchange = () => {
+            const next = getNotificationPermission();
+            setPermission(next);
+          };
+        })
+        .catch(() => {});
     }
-  };
+
+    return () => {
+      window.removeEventListener('focus', syncPermission);
+      document.removeEventListener('visibilitychange', syncPermission);
+      if (permStatus) permStatus.onchange = null;
+    };
+  }, []);
 
   const allow = async () => {
     sound.playClick();
     const result = await requestNotificationPermission();
     setPermission(result);
     if (result === 'granted') {
-      notify('🔔 Notifikasi JakLudo aktif', {
-        body: 'Kamu akan diberi tahu saat giliran mengocok dadu dan saat ada bidak yang diinjak.',
+      notify('Notifikasi JakLudo aktif', {
+        body: 'Kamu akan diberi tahu saat giliran mengocok dadu, undangan match, dan pesan grup.',
         tag: 'jakludo-welcome',
         force: true
       });
-      close();
     }
   };
 
-  const isOpen = enabled && ready && !dismissed && (permission === 'default' || permission === 'denied');
+  const isOpen = enabled && ready && (permission === 'default' || permission === 'denied');
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={close}
       size="sm"
-      icon="🔔"
+      icon="bell"
       title="Aktifkan notifikasi"
       footer={
-        permission === 'denied' ? (
-          <button type="button" className="btn btn--primary" onClick={close}>Mengerti</button>
-        ) : (
-          <>
-            <button type="button" className="btn btn--secondary" onClick={close}>Nanti saja</button>
-            <button type="button" className="btn btn--primary" onClick={allow}>Izinkan notifikasi</button>
-          </>
-        )
+        <button type="button" className="btn btn--primary btn--block" onClick={allow}>
+          <Icon name="bell" size={18} />
+          <span>{permission === 'denied' ? 'Sudah diizinkan, cek ulang' : 'Izinkan notifikasi'}</span>
+        </button>
       }
     >
-      <p>Silahkan allow notifikasi web browser anda untuk pengalaman bermain yang interaktif.</p>
+      <p>
+        Untuk bermain di JakLudo, silakan izinkan notifikasi browser agar kamu tidak melewatkan giliran dadu, undangan match, dan pesan grup.
+      </p>
       {permission === 'denied' ? (
         <p className="alert alert--error" role="alert">
-          Notifikasi sedang diblokir. Buka pengaturan situs (ikon gembok di samping alamat web), lalu ubah izin Notifikasi menjadi "Izinkan".
+          Notifikasi saat ini diblokir di browser kamu. Klik ikon gembok / pengaturan situs di samping bilah alamat web, ubah izin <strong>Notifikasi</strong> menjadi <strong>"Izinkan" (Allow)</strong>, lalu klik tombol di bawah.
         </p>
       ) : (
-        <p className="muted">Kamu akan diberi tahu saat giliran mengocok dadu dan saat ada bidak yang diinjak, walaupun sedang membuka tab lain.</p>
+        <p className="muted">
+          Klik tombol <strong>Izinkan notifikasi</strong> di bawah lalu pilih <strong>Allow / Izinkan</strong> pada pop up browser.
+        </p>
       )}
     </Modal>
   );

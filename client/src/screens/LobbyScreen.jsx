@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import Icon from '../components/Icon';
 import { sound } from '../sound';
 
 function shareInvite(room) {
@@ -55,7 +56,11 @@ function PlayerSlot({ player, index, playerId }) {
           {player.name}
           {player.id === playerId && <span className="badge">Kamu</span>}
           {player.isHost && <span className="badge badge--brand">Host</span>}
-          {player.isLudoKing && <span className="badge badge--warning">👑 King</span>}
+          {player.isLudoKing && (
+            <span className="badge badge--warning">
+              <Icon name="crown" size={14} /> King
+            </span>
+          )}
         </strong>
         <span className="muted">{role}</span>
       </span>
@@ -66,13 +71,74 @@ function PlayerSlot({ player, index, playerId }) {
   );
 }
 
-export default function LobbyScreen({ room, me, playerId, error, actions }) {
+export default function LobbyScreen({ room, me, playerId, currentUser, error, actions, social, onOpenFriends }) {
   const [copyState, setCopyState] = useState('');
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [inviteStatus, setInviteStatus] = useState({}); // { [userId]: 'sending' | 'sent' }
+  const [inviteError, setInviteError] = useState('');
   const safeZones = room.settings?.safeZones !== false;
   const blackHole = !!room.settings?.blackHole;
   const blackHoleMode = room.settings?.blackHoleMode === 'random' ? 'random' : 'static';
   const count = room.players.length;
   const isHost = !!me?.isHost;
+
+  // Jika ini Match Grup, ambil daftar anggota grup agar bisa diundang langsung dari lobby
+  const getGroupFn = social?.actions?.getGroup;
+  useEffect(() => {
+    const groupId = room.group?.id;
+    if (!groupId || !getGroupFn) {
+      setGroupMembers([]);
+      return undefined;
+    }
+    let cancelled = false;
+    getGroupFn(groupId)
+      .then(detail => {
+        if (!cancelled && Array.isArray(detail?.members)) {
+          setGroupMembers(detail.members);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [room.group?.id, getGroupFn]);
+
+  const onInviteUser = async userId => {
+    if (!social?.actions?.inviteToRoom) return;
+    sound.playClick();
+    setInviteError('');
+    setInviteStatus(prev => ({ ...prev, [userId]: 'sending' }));
+    try {
+      await social.actions.inviteToRoom(userId);
+      setInviteStatus(prev => ({ ...prev, [userId]: 'sent' }));
+      setTimeout(() => {
+        setInviteStatus(prev => {
+          const next = { ...prev };
+          delete next[userId];
+          return next;
+        });
+      }, 4000);
+    } catch (err) {
+      setInviteStatus(prev => {
+        const next = { ...prev };
+        delete next[userId];
+        return next;
+      });
+      setInviteError(err.message);
+    }
+  };
+
+  // Kandidat yang bisa diundang: anggota grup (jika Match Grup) atau daftar teman
+  const playerUserIds = new Set(room.players.map(p => p.userId).filter(Boolean));
+  const playerUsernames = new Set(room.players.map(p => p.username?.toLowerCase()).filter(Boolean));
+  const rawPool = room.group ? groupMembers : social?.friends || [];
+  const invitableList = rawPool.filter(u => {
+    if (!u?.userId) return false;
+    if (currentUser && u.userId === currentUser.id) return false;
+    if (playerUserIds.has(u.userId)) return false;
+    if (u.username && playerUsernames.has(u.username.toLowerCase())) return false;
+    return true;
+  });
 
   const onShare = async () => {
     sound.playClick();
@@ -90,9 +156,18 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
   return (
     <main className="lobby" id="main">
       <section className="lobby__code card card--focus">
+        {room.group && (
+          <span className="badge badge--brand lobby__group-badge">
+            <Icon name="trophy" size={14} /> Match Grup: {room.group.name} · Khusus leaderboard grup
+          </span>
+        )}
         <p className="muted">Kode room</p>
         <p className="lobby__code-value code-text" aria-label={`Kode room ${room.code.split('').join(' ')}`}>{room.code}</p>
-        <p className="muted lobby__code-hint">Bagikan kode atau link ini ke teman. Maksimal 4 pemain.</p>
+        <p className="muted lobby__code-hint">
+          {room.group
+            ? `Hanya anggota grup "${room.group.name}" yang bisa masuk ke room ini.`
+            : 'Bagikan kode atau link ini ke teman. Maksimal 4 pemain.'}
+        </p>
         <button type="button" className="btn btn--primary btn--block" onClick={onShare}>
           Bagikan link undangan
         </button>
@@ -136,7 +211,9 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
         </div>
         <div className="setting">
           <div>
-            <strong>Black Hole 🕳️</strong>
+            <strong>
+              Black Hole <Icon name="vortex" size={16} />
+            </strong>
             <p className="muted">{blackHole ? 'Bidak yang mendarat di lubang hitam kembali ke markas.' : 'Lubang hitam tidak dipakai.'}</p>
           </div>
           {isHost ? (
@@ -176,6 +253,80 @@ export default function LobbyScreen({ room, me, playerId, error, actions }) {
         )}
         <p className="setting__note muted">Kotak start hanya aman bagi warnanya sendiri. Bidak warna lain yang singgah di sana bisa dimakan.</p>
       </section>
+
+      {social && (
+        <section className="lobby__invite card" aria-labelledby="invite-friends-title">
+          <div className="section-head">
+            <h2 id="invite-friends-title">
+              {room.group ? `Undang teman (${room.group.name})` : 'Undang teman'}
+            </h2>
+            {!room.group && onOpenFriends && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={onOpenFriends}
+              >
+                <Icon name="friends" size={16} />
+                <span>Kelola teman</span>
+              </button>
+            )}
+          </div>
+          {inviteError && (
+            <p className="alert alert--error" role="alert">
+              {inviteError}
+            </p>
+          )}
+          {invitableList.length === 0 ? (
+            <p className="social-empty muted">
+              {room.group
+                ? 'Semua anggota grup sudah berada di room ini atau belum ada anggota lain.'
+                : 'Belum ada teman untuk diundang. Tambah teman dulu lewat menu Teman.'}
+            </p>
+          ) : (
+            <ul className="social-list">
+              {invitableList.map(u => {
+                const state = inviteStatus[u.userId];
+                return (
+                  <li key={u.userId} className="social-row">
+                    <div className="social-avatar-wrap">
+                      <span className="social-avatar" aria-hidden="true">
+                        {u.name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}
+                      </span>
+                      <span
+                        className={`status-dot ${u.online ? 'status-dot--online' : 'status-dot--offline'}`}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div className="social-row__info">
+                      <strong>{u.name}</strong>
+                      <span className="muted">
+                        @{u.username} ·{' '}
+                        <span className={u.online ? 'text-online' : ''}>
+                          {u.online ? 'Online' : 'Offline'}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="social-row__actions">
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        disabled={!!state || count >= 4}
+                        onClick={() => onInviteUser(u.userId)}
+                      >
+                        {state === 'sending'
+                          ? 'Mengirim...'
+                          : state === 'sent'
+                          ? 'Terkirim ✓'
+                          : 'Undang'}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
 
       <section className="lobby__start">
         {error && <p className="alert alert--error" role="alert">{error}</p>}

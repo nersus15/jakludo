@@ -80,7 +80,17 @@ File [`docker-compose.yml`](docker-compose.yml) sudah menyertakan container **`j
    POSTGRES_PASSWORD=PasswordKuatJakLudo123!
    POSTGRES_DB=jakludo
    POSTGRES_PORT=5433
+
+   # Konfigurasi MinIO S3 (sudah tersedia di server, tanpa container tambahan)
+   S3_ENDPOINT=https://s3.domainkamu.com
+   S3_PUBLIC_ENDPOINT=https://s3.domainkamu.com
+   S3_ACCESS_KEY=AKIA_ACCESS_KEY_KAMU
+   S3_SECRET_KEY=SECRET_KEY_KAMU
+   S3_BUCKET=jakludo
+   S3_REGION=us-east-1
+   S3_FORCE_PATH_STYLE=true
    ```
+   > **Catatan Bucket MinIO**: Buat bucket bernama `jakludo` (biarkan **private**, tidak perlu *public anonymous access* karena server menggunakan *Presigned URL*). Pastikan CORS di MinIO mengizinkan method `GET` dan `HEAD` dari domain JakLudo kamu.
 
 2. Pastikan izin folder `server/data` dapat diakses oleh container (`uid 1000`) agar file SQLite lama (`jakludo.db`) bisa dibaca dan di-backup:
    ```bash

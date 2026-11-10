@@ -9,6 +9,8 @@ const http = require('http');
 const path = require('path');
 const cors = require('cors');
 const { Server } = require('socket.io');
+const { loadDotEnv } = require('./migrate');
+loadDotEnv();
 const db = require('./db');
 const store = require('./game/store');
 const engine = require('./game/engine');

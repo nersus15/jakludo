@@ -43,6 +43,25 @@ Variabel lingkungan:
 | `DATABASE_URL` | kosong | URL koneksi PostgreSQL (`postgresql://user:pass@host:5432/jakludo`) |
 | `PGSSLMODE` | kosong | Set `require` atau `verify-full` jika PostgreSQL mewajibkan koneksi SSL |
 | `JAKLUDO_DATA_DIR` | `server/data` | Folder data untuk backup & sumber migrasi otomatis `jakludo.db` lama |
+| `S3_ENDPOINT` | kosong | Endpoint internal/publik MinIO S3 (`https://minio.contoh.com`) untuk unggah foto & voice note grup |
+| `S3_PUBLIC_ENDPOINT` | `S3_ENDPOINT` | Endpoint publik MinIO yang dipakai menandatangani presigned URL untuk browser pemain |
+| `S3_ACCESS_KEY` | kosong | Access Key MinIO S3 |
+| `S3_SECRET_KEY` | kosong | Secret Key MinIO S3 |
+| `S3_BUCKET` | `jakludo` | Nama bucket privat di MinIO |
+| `S3_REGION` | `us-east-1` | Region S3 / MinIO |
+| `S3_FORCE_PATH_STYLE` | `true` | Path-style URL untuk kompatibilitas MinIO |
+
+## Fitur Sosial, Grup & MinIO Media
+
+- **Pertemanan & Undangan Match (`username`)**: Pemain terdaftar dapat menambah teman menggunakan `username`, melihat status online realtime, dan mengundang teman atau anggota grup langsung ke dalam lobby room.
+- **Grup & Peran (`owner`, `admin`, `member`)**:
+  - Semua anggota (`owner`, `admin`, `member`) dapat mengundang pemain lain ke grup melalui `username`.
+  - `owner` (pembuat grup) dapat mengangkat/menurunkan `admin`, mengubah nama grup, mengeluarkan anggota, dan membubarkan grup.
+  - `admin` dapat mengubah nama grup dan mengeluarkan `member` biasa.
+- **Chat Grup, Foto & Voice Note Terkompresi (MinIO S3)**:
+  - **Kompresi 2 Lapis**: Foto diperkecil di sisi browser (Canvas WebP maks 1600px, kualitas 0.75) lalu divalidasi & dikompres ulang di server dengan `sharp` (WebP kualitas 75, orientasi otomatis, tanpa EXIF). Voice note direkam di browser dengan `MediaRecorder` Opus 24 kbps (maks 2 menit) lalu dikompres ulang di server dengan `ffmpeg` (`libopus` 24 kbps mono WebM).
+  - **Bucket Privat + Presigned URL**: File disimpan di bucket MinIO privat pada key `groups/<groupId>/<yyyy-mm>/<uuid>.<ext>` dan diakses melalui *presigned GET URL* berumur 10 menit yang hanya diberikan kepada anggota grup.
+- **Match Khusus Grup & Leaderboard Grup**: Anggota grup dapat membuat room khusus grup (`room:create` dengan `groupId`). Hanya anggota grup tersebut yang dapat bergabung, kartu undangan otomatis dikirim ke chat grup, dan hasil akhir pertandingan **hanya** tercatat pada `group_leaderboard` grup tersebut tanpa memengaruhi poin/leaderboard global.
 
 ## Migrasi Database (SQLite -> PostgreSQL)
 

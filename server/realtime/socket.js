@@ -3,6 +3,7 @@ const db = require('../db');
 const store = require('../game/store');
 const lobby = require('../game/lobby');
 const engine = require('../game/engine');
+const social = require('../social/store');
 const { createLimiter } = require('../lib/limiter');
 const { EMOJIS, MAX_CHATS } = require('../game/config');
 
@@ -57,6 +58,52 @@ function registerSocketHandlers(io) {
     on(socket, 'room:create', payload => lobby.createRoom(socket, payload));
     on(socket, 'room:join', payload => lobby.joinRoom(socket, payload.code, payload));
     on(socket, 'leaderboard:get', () => socket.emit('leaderboard:update', db.getLeaderboard()));
+
+    // Identifikasi sesi user pada koneksi Socket.IO untuk fitur teman, chat grup, & undangan room
+    on(socket, 'social:identify', ({ token }, cb) => {
+      const user = social.identifySocket(socket, token);
+      if (typeof cb === 'function') cb({ ok: Boolean(user) });
+    });
+
+    on(socket, 'social:logout', () => {
+      social.detachSocket(socket);
+    });
+
+    // Undang teman atau sesama anggota grup ke dalam room tempat pengirim berada
+    on(socket, 'room:invite', ({ userId: targetUserId }, cb) => {
+      const reply = payload => { if (typeof cb === 'function') cb(payload); };
+      const r = currentRoom();
+      if (!r || r.started) return reply({ ok: false, error: 'Room tidak tersedia atau permainan sudah dimulai.' });
+      if (r.players.length >= 4) return reply({ ok: false, error: 'Room sudah penuh.' });
+
+      const mePlayer = r.players.find(p => p.id === socket.id);
+      const senderUserId = socket.data.userId || mePlayer?.userId;
+      if (!senderUserId) return reply({ ok: false, error: 'Silakan login terlebih dahulu.' });
+      if (!targetUserId || targetUserId === senderUserId) return reply({ ok: false, error: 'Target undangan tidak valid.' });
+
+      if (r.players.some(p => p.userId === targetUserId)) {
+        return reply({ ok: false, error: 'Pemain tersebut sudah berada di dalam room.' });
+      }
+
+      if (r.groupId) {
+        if (!social.isGroupMember(r.groupId, targetUserId)) {
+          return reply({ ok: false, error: 'Hanya anggota grup yang dapat diundang ke match grup ini.' });
+        }
+      } else if (!social.areFriends(senderUserId, targetUserId)) {
+        return reply({ ok: false, error: 'Kamu hanya dapat mengundang pemain yang sudah menjadi teman.' });
+      }
+
+      if (!social.isUserOnline(targetUserId)) {
+        return reply({ ok: false, error: 'Teman sedang offline.' });
+      }
+
+      social.emitToUser(targetUserId, 'room:invite', {
+        code: r.code,
+        from: social.userSummary(senderUserId),
+        group: r.groupId ? social.getGroupBasic(r.groupId) : null
+      });
+      reply({ ok: true });
+    });
 
     // Cek apakah user memiliki room yang masih aktif (butuh sessionId rahasia atau token)
     on(socket, 'room:check_active', ({ code, sessionId, token }, callback) => {
@@ -164,6 +211,7 @@ function registerSocketHandlers(io) {
 
     socket.on('disconnect', reason => {
       logConnection(socket, 'disconnect', ` reason="${reason}" after=${Math.round((Date.now() - connectedAt) / 1000)}s`);
+      social.detachSocket(socket);
       try {
         const r = currentRoom();
         if (r) lobby.handleDeparture(socket, r, { intentional: false });

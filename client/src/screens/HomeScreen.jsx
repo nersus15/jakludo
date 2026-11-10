@@ -1,4 +1,5 @@
 import React from 'react';
+import Icon from '../components/Icon';
 import jakludoLogo from '../assets/jakludo-logo.webp';
 
 const COLORS = ['red', 'green', 'yellow', 'blue'];
@@ -26,7 +27,22 @@ function ActiveRoomCard({ room, onJoin }) {
   );
 }
 
-export default function HomeScreen({ user, checkingAuth, code, error, activeRooms, isInstalled, actions, onOpenAuth, onOpenLeaderboard, onInstall }) {
+export default function HomeScreen({
+  user,
+  checkingAuth,
+  code,
+  error,
+  activeRooms,
+  isInstalled,
+  actions,
+  friendBadgeCount = 0,
+  groupBadgeCount = 0,
+  onOpenFriends,
+  onOpenGroups,
+  onOpenAuth,
+  onOpenLeaderboard,
+  onInstall
+}) {
   return (
     <main className="home" id="main">
       <section className="home__hero">
@@ -99,8 +115,42 @@ export default function HomeScreen({ user, checkingAuth, code, error, activeRoom
         </div>
 
         <div className="home__links">
+          {onOpenFriends && (
+            <button type="button" className="link-card card" onClick={onOpenFriends}>
+              <span className="link-card__icon" aria-hidden="true">
+                <Icon name="friends" size={24} />
+              </span>
+              <span>
+                <strong className="link-card__head">
+                  Teman
+                  {friendBadgeCount > 0 && (
+                    <span className="badge badge--brand">{friendBadgeCount} baru</span>
+                  )}
+                </strong>
+                <span className="muted">Tambah teman dan lihat siapa yang online</span>
+              </span>
+            </button>
+          )}
+          {onOpenGroups && (
+            <button type="button" className="link-card card" onClick={onOpenGroups}>
+              <span className="link-card__icon" aria-hidden="true">
+                <Icon name="chat" size={24} />
+              </span>
+              <span>
+                <strong className="link-card__head">
+                  Grup & Chat
+                  {groupBadgeCount > 0 && (
+                    <span className="badge badge--brand">{groupBadgeCount} undangan</span>
+                  )}
+                </strong>
+                <span className="muted">Obrolan grup, foto, voice note, dan Match Grup</span>
+              </span>
+            </button>
+          )}
           <button type="button" className="link-card card" onClick={onOpenLeaderboard}>
-            <span className="link-card__icon" aria-hidden="true">🏆</span>
+            <span className="link-card__icon" aria-hidden="true">
+              <Icon name="trophy" size={24} />
+            </span>
             <span>
               <strong>Peringkat pemain</strong>
               <span className="muted">Lihat siapa Ludo King saat ini</span>
@@ -108,7 +158,9 @@ export default function HomeScreen({ user, checkingAuth, code, error, activeRoom
           </button>
           {!isInstalled && (
             <button type="button" className="link-card card" onClick={onInstall}>
-              <span className="link-card__icon" aria-hidden="true">📲</span>
+              <span className="link-card__icon" aria-hidden="true">
+                <Icon name="install" size={24} />
+              </span>
               <span>
                 <strong>Pasang di layar utama</strong>
                 <span className="muted">Buka JakLudo layar penuh tanpa bilah browser</span>

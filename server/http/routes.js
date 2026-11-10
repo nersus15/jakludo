@@ -5,6 +5,7 @@ const items = require('../items');
 const inventory = require('../game/inventory');
 const store = require('../game/store');
 const { createLimiter } = require('../lib/limiter');
+const { registerSocialRoutes } = require('../social/routes');
 
 const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
 const registerLimiter = createLimiter({ windowMs: 60 * 60 * 1000, max: 10 });
@@ -145,6 +146,8 @@ function createApiRouter() {
       user: withKing(result.user)
     });
   });
+
+  registerSocialRoutes(api);
 
   api.use((req, res) => res.status(404).json({ success: false, error: 'Endpoint tidak ditemukan.' }));
 

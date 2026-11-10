@@ -4,6 +4,7 @@ const db = require('../db');
 const inventory = require('./inventory');
 const store = require('./store');
 const engine = require('./engine');
+const social = require('../social/store');
 const { nextFreeColor } = require('./rules');
 const { MAX_PLAYERS, BOT_NAMES } = require('./config');
 
@@ -13,6 +14,15 @@ const makeRoomCode = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 const makeSessionId = () => 'sess_' + crypto.randomBytes(12).toString('hex');
 
 function createRoom(socket, payload) {
+  const groupId = typeof payload?.groupId === 'string' && payload.groupId.trim() ? payload.groupId.trim() : null;
+  let creatorUser = null;
+  if (groupId) {
+    creatorUser = typeof payload?.token === 'string' ? db.getUserByToken(payload.token) : null;
+    if (!creatorUser || !social.isGroupMember(groupId, creatorUser.id)) {
+      return socket.emit('room:error', 'Kamu harus menjadi anggota grup untuk membuat match grup.');
+    }
+  }
+
   let code;
   do {
     code = makeRoomCode();
@@ -20,6 +30,7 @@ function createRoom(socket, payload) {
 
   const room = {
     code,
+    groupId,
     host: socket.id,
     players: [],
     started: false,
@@ -40,6 +51,12 @@ function createRoom(socket, payload) {
   store.resetRoomEvents(room);
   rooms.set(code, room);
   joinRoom(socket, code, payload);
+
+  if (groupId && creatorUser) {
+    social.postGroupMatchMessage(groupId, creatorUser.id, code).catch(err => {
+      console.error('[room group match msg]', err);
+    });
+  }
 }
 
 function joinRoom(socket, code, payload) {
@@ -55,6 +72,7 @@ function joinRoom(socket, code, payload) {
   }
 
   const user = typeof payload.token === 'string' ? db.getUserByToken(payload.token) : null;
+  if (user && payload.token) social.identifySocket(socket, payload.token);
   const sessionId = typeof payload.sessionId === 'string' && payload.sessionId ? payload.sessionId : null;
 
   // Reconnect hanya lewat bukti yang tidak bisa ditebak: sessionId rahasia atau token login
@@ -62,6 +80,10 @@ function joinRoom(socket, code, payload) {
     !p.isBot && ((sessionId && p.sessionId === sessionId) || (user && p.userId === user.id))
   );
   if (existingPlayer) return rejoinPlayer(socket, room, existingPlayer, user);
+
+  if (room.groupId && (!user || !social.isGroupMember(room.groupId, user.id))) {
+    return socket.emit('room:error', 'Room ini khusus untuk anggota grup.');
+  }
 
   if (room.started) return socket.emit('room:error', 'Permainan sudah dimulai.');
   if (room.players.length >= MAX_PLAYERS) return socket.emit('room:error', `Room sudah penuh (maksimal ${MAX_PLAYERS} pemain).`);

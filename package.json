@@ -3,22 +3,26 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite --host 0.0.0.0",
     "dev:server": "node server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
     "db:migrate": "node server/migrate.js",
     "db:status": "node server/migrate.js --status",
-    "test": "node --test --test-concurrency=1 server/game/rules.test.js server/items/items.test.js server/server.test.js server/migrate.test.js",
+    "test": "node --test --test-concurrency=1 server/game/rules.test.js server/items/items.test.js server/server.test.js server/migrate.test.js server/social/social.test.js",
     "backup": "node server/backup.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1165.0",
+    "@aws-sdk/s3-request-presigner": "^3.1165.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "multer": "^2.5.0",
     "pg": "^8.23.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sharp": "^0.35.5",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
   },

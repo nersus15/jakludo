@@ -43,9 +43,16 @@
     <div id="root"></div>
     <script type="module" src="/client/src/main.jsx"></script>
     <script>
-      // Registrasi Service Worker PWA
+      // Registrasi Service Worker PWA (nonaktifkan di port dev Vite agar tidak meng-cache modul dev)
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
+          var isViteDev = location.port === '5173' || location.port === '5174';
+          if (isViteDev) {
+            navigator.serviceWorker.getRegistrations().then(regs => {
+              regs.forEach(r => r.unregister());
+            });
+            return;
+          }
           navigator.serviceWorker.register('/sw.js')
             .then(reg => console.log('JakLudo PWA ServiceWorker active:', reg.scope))
             .catch(err => console.log('JakLudo ServiceWorker registration error:', err));

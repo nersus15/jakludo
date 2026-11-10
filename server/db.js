@@ -8,6 +8,7 @@ const { promisify } = require('util');
 const { Pool } = require('pg');
 const {
   getPoolConfig,
+  ensureDatabaseExists,
   runSchemaMigrations,
   migrateSqliteToPostgres,
   migrateLegacyJsonToPostgres,
@@ -296,6 +297,9 @@ async function init(options = {}) {
     const poolConfig = customPool ? null : getPoolConfig(options.env || process.env);
 
     if (customPool || poolConfig) {
+      if (!customPool && poolConfig) {
+        await ensureDatabaseExists(poolConfig);
+      }
       pool = customPool || new Pool(poolConfig);
       pool.on('error', err => console.error('[PG POOL ERROR]', err.message));
 
@@ -305,6 +309,7 @@ async function init(options = {}) {
         await migrateSqliteToPostgres(pool, { sqliteFile: DB_FILE, renameAfter: true });
       }
       await hydrateFromPostgres(pool);
+      await require('./social/store').hydrateFromPostgres();
       console.log(`[PG] Terhubung ke PostgreSQL (${state.usersById.size} user, ${state.leaderboard.size} leaderboard, ${state.rooms.size} room aktif).`);
     } else {
       console.warn('[DB] DATABASE_URL belum diset; berjalan dengan penyimpanan lokal di', DATA_DIR);
@@ -816,9 +821,15 @@ async function close() {
 
 module.exports = {
   DB_FILE,
+  DATA_DIR,
   init,
   flush,
   getStatus,
+  // Dipakai modul lain (server/social) untuk menulis ke PostgreSQL dengan antrean yang sama
+  getPool: () => (closed ? null : pool),
+  execPg,
+  execPgTransaction,
+  getUserByUsername: findUserByUsername,
   validateUsername,
   validatePassword,
   hashPassword,

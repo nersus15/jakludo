@@ -262,11 +262,15 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     return false;
   };
 
-  const createRoom = () => {
+  const createRoom = groupId => {
     if (!requireLogin()) return;
     sound.playClick();
     setError('');
-    socket.emit('room:create', { name: currentUser.name, token: authToken });
+    socket.emit('room:create', {
+      name: currentUser.name,
+      token: authToken,
+      groupId: typeof groupId === 'string' && groupId ? groupId : undefined
+    });
   };
 
   const joinRoom = targetCode => {

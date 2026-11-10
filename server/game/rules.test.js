@@ -139,3 +139,66 @@ test('petak start tetap aman bagi pemiliknya walaupun safe zone dimatikan', () =
   red.isOut = true;
   assert.equal(canPawnMove(room, blue, 0, 5), true);
 });
+
+// ---------- Dadu seimbang ----------
+
+const { diceWeights, rollWeighted, captureFaces } = require('./rules');
+const freshStats = () => ({ counts: [0, 0, 0, 0, 0, 0], total: 0 });
+const share = (w, faces) => faces.reduce((s, f) => s + w[f - 1], 0) / w.reduce((a, b) => a + b, 0);
+
+test('dadu tanpa koreksi sama dengan dadu biasa', () => {
+  const room = makeRoom({ a: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+  const w = diceWeights(room, room.players[0], freshStats(), { beta: 0, gamma: 0 });
+  assert.deepEqual(w, [1, 1, 1, 1, 1, 1]);
+});
+
+test('koreksi defisit memberi bobot terbesar ke angka yang paling jarang keluar', () => {
+  const room = makeRoom({ a: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+  const stats = { counts: [0, 5, 5, 5, 5, 5], total: 25 };
+  const w = diceWeights(room, room.players[0], stats, { beta: 0.3 });
+  assert.equal(w.indexOf(Math.max(...w)), 0);
+  assert.ok(share(w, [1]) < 0.5, 'tetap acak, bukan dipaksa keluar');
+});
+
+test('angka yang bisa memakan lawan didorong sesuai gamma', () => {
+  // Merah val 2 (track 1); hijau val 35 -> track 4: hanya angka 3 yang memakan
+  const room = makeRoom({ a: [2, 0, 0, 0], b: [35, 0, 0, 0] });
+  assert.deepEqual([...captureFaces(room, room.players[0])], [3]);
+  const w = diceWeights(room, room.players[0], freshStats(), { gamma: 0.4, maxAdd: 0.06 });
+  assert.ok(Math.abs(share(w, [3]) - 1.4 / 6.4) < 1e-9);
+});
+
+test('dorongan makan dibatasi maksimal +6 poin persen', () => {
+  // Hijau di track 3, 4, 5 -> angka 2, 3, 4 semuanya memakan (awalnya 50%)
+  const room = makeRoom({ a: [2, 0, 0, 0], b: [34, 35, 36, 0] });
+  assert.deepEqual([...captureFaces(room, room.players[0])].sort(), [2, 3, 4]);
+  const w = diceWeights(room, room.players[0], freshStats(), { gamma: 0.4, maxAdd: 0.06 });
+  assert.ok(Math.abs(share(w, [2, 3, 4]) - 0.56) < 1e-9);
+});
+
+test('bidak lawan yang terlindungi tidak memicu dorongan makan', () => {
+  // Merah val 8 (track 7) + 3 -> track 10 = start hijau, ditempati hijau sendiri (kebal)
+  const room = makeRoom({ a: [8, 0, 0, 0], b: [1, 0, 0, 0] });
+  assert.equal(captureFaces(room, room.players[0]).size, 0);
+});
+
+test('rollWeighted memetakan angka acak ke sisi dadu sesuai bobot', () => {
+  const w = [1, 1, 1, 1, 1, 1];
+  assert.equal(rollWeighted(w, () => 0), 1);
+  assert.equal(rollWeighted(w, () => 0.5), 4);
+  assert.equal(rollWeighted(w, () => 0.999999), 6);
+});
+
+test('dalam jangka panjang tiap angka tetap keluar sekitar 1/6', () => {
+  const room = makeRoom({ a: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+  const counts = [0, 0, 0, 0, 0, 0];
+  let stats = freshStats();
+  for (let i = 0; i < 60000; i++) {
+    if (stats.total === 50) stats = freshStats(); // satu permainan
+    const face = rollWeighted(diceWeights(room, room.players[0], stats, { beta: 0.3 }), Math.random);
+    stats.counts[face - 1]++;
+    stats.total++;
+    counts[face - 1]++;
+  }
+  for (const c of counts) assert.ok(Math.abs(c / 60000 - 1 / 6) < 0.01, `frekuensi ${c / 60000}`);
+});

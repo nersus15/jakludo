@@ -234,6 +234,63 @@ function chooseBestPawn(room, player, dice) {
   return best.pawnIdx;
 }
 
+// ==========================================
+// DADU SEIMBANG (lihat riset "Dadu Seimbang JakLudo")
+// ==========================================
+
+// Angka dadu (1-6) yang membuat salah satu bidak pemain memakan bidak lawan
+function captureFaces(room, player) {
+  const colorIdx = COLORS.indexOf(player.color);
+  const faces = new Set();
+  for (let face = 1; face <= 6; face++) {
+    for (let i = 0; i < 4; i++) {
+      if (!canPawnMove(room, player, i, face)) continue;
+      const from = room.pawns[player.id][i];
+      const to = from === 0 ? 1 : from + face;
+      if (to > 39) continue;
+      const victim = opponentPawnAt(room, player, getTrackIndex(colorIdx, to));
+      if (victim && !isPawnProtected(room, victim.player, getTrackIndex(colorIdx, to))) {
+        faces.add(face);
+        break;
+      }
+    }
+  }
+  return faces;
+}
+
+// Bobot tiap angka untuk lemparan berikutnya:
+// 1. Koreksi defisit (beta): angka yang kurang keluar di permainan ini sedikit lebih mungkin muncul,
+//    sehingga nasib buruk beruntun ditekan tapi peluang jangka panjang tetap 1/6.
+// 2. Dorongan makan (gamma): angka yang bisa memakan lawan dikali (1 + gamma), dengan total
+//    peluangnya naik paling banyak maxAdd (mis. 0.06 = 6 poin persen).
+// stats = { counts: [6 angka], total } milik pemain di permainan ini.
+function diceWeights(room, player, stats, { beta = 0, gamma = 0, maxAdd = 1 } = {}) {
+  const expected = stats.total / 6;
+  let weights = stats.counts.map(c => Math.exp(beta * (expected - c)));
+  if (gamma <= 0) return weights;
+
+  const capture = captureFaces(room, player);
+  if (capture.size === 0 || capture.size === 6) return weights;
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const captureWeight = [...capture].reduce((s, f) => s + weights[f - 1], 0);
+  const before = captureWeight / sum;
+  const boosted = (captureWeight * (1 + gamma)) / (sum + captureWeight * gamma);
+  const target = Math.min(boosted, before + maxAdd);
+  const k = (target * (sum - captureWeight)) / ((1 - target) * captureWeight);
+  weights = weights.map((w, i) => (capture.has(i + 1) ? w * k : w));
+  return weights;
+}
+
+// random() -> [0, 1)
+function rollWeighted(weights, random) {
+  let r = random() * weights.reduce((a, b) => a + b, 0);
+  for (let face = 1; face <= 6; face++) {
+    r -= weights[face - 1];
+    if (r < 0) return face;
+  }
+  return 6;
+}
+
 // Validasi indeks bidak dari payload klien
 function isPawnIndex(v) {
   return Number.isInteger(v) && v >= 0 && v <= 3;
@@ -255,5 +312,8 @@ module.exports = {
   captureRisk,
   evaluateMove,
   chooseBestPawn,
+  captureFaces,
+  diceWeights,
+  rollWeighted,
   isPawnIndex
 };

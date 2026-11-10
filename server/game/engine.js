@@ -14,12 +14,17 @@ const {
   getBlackHoles,
   relocateBlackHoles,
   isPawnProtected,
+  diceWeights,
+  rollWeighted,
   isPawnIndex
 } = require('./rules');
-const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY, SHIELD_DECISION_MS } = require('./config');
+const { TURN_TIMEOUT_MS, DISCONNECTED_TURN_DELAY_MS, OFFLINE_OUT_MS, MAX_AUTO_PLAY, SHIELD_DECISION_MS, DICE } = require('./config');
 
 const { addHistory, emitRoom, roomTimeout, clearRoomTimers } = store;
 const eventId = () => Date.now() + Math.random();
+// Sumber acak kriptografis [0, 1) untuk dadu
+const secureRandom = () => crypto.randomInt(2 ** 47) / 2 ** 47;
+const newDiceStats = () => ({ counts: [0, 0, 0, 0, 0, 0], total: 0 });
 
 // ==========================================
 // MULAI & SELESAI
@@ -29,6 +34,7 @@ function resetPlayerForGame(p) {
   p.autoPlayCount = 0;
   p.isOut = false;
   p.finishedCount = 0;
+  p.diceStats = newDiceStats();
   inventory.resetForMatch(p);
   if (p.userId) inventory.loadOwned(p, db.getUserItems(p.userId));
 }
@@ -219,7 +225,12 @@ function handleRoll(room, playerId, isAuto = false) {
   if (room.rollTimer) clearTimeout(room.rollTimer);
   room.rollTimer = roomTimeout(room, () => {
     room.rolling = false;
-    const roll = 1 + crypto.randomInt(6);
+    // Room dari snapshot lama belum punya catatan lemparan
+    if (!currentPlayer.diceStats) currentPlayer.diceStats = newDiceStats();
+    const stats = currentPlayer.diceStats;
+    const roll = rollWeighted(diceWeights(room, currentPlayer, stats, DICE), secureRandom);
+    stats.counts[roll - 1]++;
+    stats.total++;
     room.dice = roll;
     room.consecutiveSixes = roll === 6 ? (room.consecutiveSixes || 0) + 1 : 0;
 

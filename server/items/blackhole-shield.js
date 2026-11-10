@@ -5,6 +5,7 @@ module.exports = {
   icon: '🛡️',
   price: 100,
   kind: 'passive',
+  protects: ['blackHole'],
   sound: 'chime',
   badge: 'Perisai Pasif Otomatis',
   badgeColor: '#3b82f6',

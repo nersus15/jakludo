@@ -75,7 +75,7 @@ test('setiap item di registry memenuhi kontrak dan tampil di katalog toko', asyn
   assert.deepEqual(res.items.map(i => i.id), items.list().map(i => i.id));
   for (const item of res.items) {
     assert.ok(item.name && item.icon && item.description && Number.isInteger(item.price));
-    assert.ok(['active', 'passive'].includes(item.kind));
+    assert.ok(['active', 'passive', 'reactive'].includes(item.kind));
     assert.equal(typeof item.use, 'undefined', 'function tidak ikut dikirim ke klien');
   }
 });
@@ -96,11 +96,11 @@ test('Force Return yang dibeli bisa langsung dipakai tanpa harus menginjak lawan
   assert.equal(room.turn, 0, 'giliran tetap milik pemain yang memakai item');
 });
 
-test('menginjak bidak lawan 3 kali memberi 1 Force Return gratis', async () => {
+test('menginjak lawan dan memasukkan 3 bidak tidak lagi memberi Force Return gratis', async () => {
   const { room, pa, pb } = await startedRoom();
   for (let i = 0; i < 3; i++) {
     // Merah val 2 + dadu 3 -> track 4; hijau val 35 -> track (10 + 34) % 40 = 4
-    room.pawns[pa.id] = [2, 0, 0, 0];
+    room.pawns[pa.id] = [2, 44, 44, 44 - i];
     room.pawns[pb.id] = [35, 0, 0, 0];
     room.turn = 0;
     room.dice = 3;
@@ -109,9 +109,8 @@ test('menginjak bidak lawan 3 kali memberi 1 Force Return gratis', async () => {
     await wait(3 * 220 + 500);
     assert.equal(room.pawns[pb.id][0], 0);
   }
-  assert.equal(pa.items.forceReturn.earned, 1);
-  assert.equal(pa.items.forceReturn.state.stomps, 0, 'progres injakan kembali ke 0 setelah dapat item');
-  assert.equal(room.lastItemEvent.title, 'FORCE RETURN DIDAPAT!');
+  assert.equal(pa.items.forceReturn?.earned || 0, 0);
+  assert.equal(pa.skillPoints, undefined, 'skill eliminasi sudah dihapus');
 });
 
 test('item gratis dari pertandingan dipakai lebih dulu, item yang dibeli tetap tersimpan', async () => {

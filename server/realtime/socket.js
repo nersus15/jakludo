@@ -107,8 +107,7 @@ function registerSocketHandlers(io) {
       if (r) engine.handleMove(r, socket.id, pawn);
     });
 
-    on(socket, 'game:use_skill', payload => engine.useSkill(socket, currentRoom(), { target: readTarget(payload) }));
-    on(socket, 'game:accumulate_skill', () => engine.accumulateSkill(socket, currentRoom()));
+    on(socket, 'game:shield_decision', payload => engine.decideShield(socket, currentRoom(), { use: payload?.use === true }));
 
     // Satu event untuk semua item aktif: { itemId, target }
     on(socket, 'game:use_item', ({ itemId, target }) => engine.useItem(socket, currentRoom(), { itemId, target }));

@@ -128,8 +128,7 @@ test('restart hanya setelah ada pemenang dan mereset state pemain', async () => 
   await wait(50);
   assert.equal(room.winner, null);
 
-  room.players[0].items.forceReturn = { owned: 0, earned: 2, state: { stomps: 2 } };
-  room.players[0].skillPoints = 4;
+  room.players[0].items.forceReturn = { owned: 0, earned: 2, state: { note: 'x' } };
   host.emit('game:start'); // start ulang di tengah game harus ditolak
   await wait(50);
   assert.equal(room.players[0].items.forceReturn.earned, 2);
@@ -140,24 +139,7 @@ test('restart hanya setelah ada pemenang dan mereset state pemain', async () => 
   assert.equal(room.winner, null);
   assert.equal(room.players[0].items.forceReturn.earned, 0, 'item hasil pertandingan hilang saat main lagi');
   assert.deepEqual(room.players[0].items.forceReturn.state, {});
-  assert.equal(room.players[0].skillPoints, 0);
   assert.deepEqual(room.pawns[room.players[0].id], [0, 0, 0, 0]);
-});
-
-test('skill tidak bisa dipakai setelah dadu dilempar', async () => {
-  const { sockets, room } = await createRoomWith(['A', 'B']);
-  const a = sockets[0].socket;
-  a.emit('game:start');
-  await wait(50);
-  room.pawns[room.players[0].id] = [44, 44, 44, 0];
-  room.players[0].skillPoints = 1;
-  room.pawns[room.players[1].id] = [5, 0, 0, 0];
-  room.dice = 3;
-  const err = once(a, 'room:error');
-  a.emit('game:use_skill', { targetPlayerId: room.players[1].id, targetPawnIdx: 0 });
-  assert.match(await err, /sebelum melempar dadu/);
-  assert.equal(room.pawns[room.players[1].id][0], 5);
-  assert.equal(room.dice, 3);
 });
 
 test('chat dikirim sebagai event terpisah dan dibatasi kecepatannya', async () => {

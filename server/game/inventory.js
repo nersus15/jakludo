@@ -1,7 +1,7 @@
 // Stok item milik pemain di dalam room: player.items[itemId] = { owned, earned, state }
 //   owned  : item milik akun (dibeli di toko, tersimpan di database)
 //   earned : item yang didapat selama pertandingan (hilang saat pertandingan baru dimulai)
-//   state  : data progres milik item, mis. jumlah injakan untuk Force Return
+//   state  : data bebas milik item (disimpan per pertandingan)
 const db = require('../db');
 const items = require('../items');
 
@@ -50,7 +50,7 @@ function resetForMatch(player) {
   }
 }
 
-// Ringkasan untuk klien: jumlah, asal stok, dan progres tiap item di katalog
+// Ringkasan untuk klien: jumlah dan asal stok tiap item di katalog
 function publicItems(player) {
   const out = {};
   for (const item of items.list()) {
@@ -58,8 +58,7 @@ function publicItems(player) {
     out[item.id] = {
       count: s.owned + s.earned,
       owned: s.owned,
-      earned: s.earned,
-      progress: item.progress ? item.progress(s.state) : null
+      earned: s.earned
     };
   }
   return out;
@@ -70,7 +69,6 @@ function normalizeLegacy(player) {
   if (player.items) return;
   player.items = {};
   for (const [itemId, qty] of Object.entries(player.inventory || {})) slot(player, itemId).owned = qty || 0;
-  if (player.stompCount) slot(player, 'forceReturn').state.stomps = player.stompCount % 3;
   delete player.inventory;
   delete player.stompCount;
 }

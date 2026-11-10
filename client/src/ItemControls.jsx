@@ -2,7 +2,7 @@ import React from 'react';
 import { sound } from './sound';
 import { itemStock } from './items';
 
-// Daftar item yang dimiliki pemain beserta progresnya (mis. 2/3 injakan menuju Force Return gratis)
+// Daftar item yang dimiliki pemain
 export function InventoryChips({ catalog, player }) {
   if (catalog.length === 0) return <p className="muted">Memuat item...</p>;
   return (
@@ -17,7 +17,6 @@ export function InventoryChips({ catalog, player }) {
               <span className="muted">
                 {stock.count} dimiliki
                 {stock.earned > 0 ? ` (${stock.earned} gratis)` : ''}
-                {stock.progress ? ` · ${stock.progress.value}/${stock.progress.max} ${stock.progress.label}` : ''}
               </span>
             </span>
           </li>

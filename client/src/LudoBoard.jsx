@@ -42,8 +42,8 @@ function LudoBoardView({
   isMyTurn,
   movablePawns = [],
   onMovePawn,
-  skillTargeting = false,
-  onSelectSkillTarget
+  targeting = false,
+  onSelectTarget
 }) {
   const [animPawn, setAnimPawn] = useState(null);
   const activeAnimId = useRef(null);
@@ -51,7 +51,6 @@ function LudoBoardView({
   const lastPlayedCaptureIdRef = useRef(room.lastCapture?.id ?? null);
   const lastPlayedBlackHoleIdRef = useRef(room.lastBlackHole?.id ?? null);
   const lastPlayedGoalIdRef = useRef(room.lastGoal?.id ?? null);
-  const lastPlayedSkillIdRef = useRef(room.lastSkillUse?.id ?? null);
 
   const currentTurnPlayer = room.players[room.turn];
   const safeZonesActive = room.settings?.safeZones !== false;
@@ -199,14 +198,6 @@ function LudoBoardView({
       sound.playGoalCelebration();
     }
   }, [room.lastGoal]);
-
-  // Cek Ultimate Skill Strike effect (petir menggelegar saat skill eliminasi digunakan)
-  useEffect(() => {
-    if (room.lastSkillUse && room.lastSkillUse.id && room.lastSkillUse.id !== lastPlayedSkillIdRef.current) {
-      lastPlayedSkillIdRef.current = room.lastSkillUse.id;
-      sound.playThunderSkill();
-    }
-  }, [room.lastSkillUse]);
 
   // Kumpulkan posisi semua bidak yang ada di luar markas (val > 0)
   const pawnsByCoord = {};
@@ -381,13 +372,13 @@ function LudoBoardView({
         {cellPawns.length > 0 && (
           <div className={`pawn-cluster cluster-size-${Math.min(cellPawns.length, 4)}`}>
             {cellPawns.map(({ player, pawnIdx, val, isHopping, canMove }, idx) => {
-              const isSkillTarget = skillTargeting && player.id !== myPlayerId && val >= 1 && val <= 39;
-              const isInteractive = canMove || isSkillTarget;
+              const isTarget = targeting && player.id !== myPlayerId && val >= 1 && val <= 39;
+              const isInteractive = canMove || isTarget;
 
               let btnClass = `pawn-token pawn-${player.color}`;
               if (canMove) btnClass += ' pawn-can-move pulse-anim';
               if (isHopping) btnClass += ' pawn-stepping';
-              if (isSkillTarget) btnClass += ' pawn-skill-target pulse-skill-target';
+              if (isTarget) btnClass += ' pawn-target pulse-target';
 
               return (
                 <button
@@ -396,25 +387,25 @@ function LudoBoardView({
                   className={btnClass}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (isSkillTarget) {
+                    if (isTarget) {
                       sound.playClick();
-                      onSelectSkillTarget && onSelectSkillTarget(player.id, pawnIdx);
+                      onSelectTarget && onSelectTarget(player.id, pawnIdx);
                       return;
                     }
                     handlePawnClick(pawnIdx, canMove);
                   }}
                   disabled={!isInteractive}
                   aria-label={
-                    isSkillTarget
+                    isTarget
                       ? `Pilih bidak ${pawnIdx + 1} milik ${player.name} sebagai target`
                       : canMove
                       ? `Jalankan bidak ${pawnIdx + 1}`
                       : `Bidak ${pawnIdx + 1} milik ${player.name}`
                   }
-                  style={{ zIndex: isHopping ? 100 : (isSkillTarget ? 90 : 10 + idx) }}
+                  style={{ zIndex: isHopping ? 100 : (isTarget ? 90 : 10 + idx) }}
                 >
                   <span className="pawn-inner" style={counterStyle}>{pawnIdx + 1}</span>
-                  {isSkillTarget && <span className="pawn-target-crosshair" aria-hidden="true">🎯</span>}
+                  {isTarget && <span className="pawn-target-crosshair" aria-hidden="true">🎯</span>}
                 </button>
               );
             })}

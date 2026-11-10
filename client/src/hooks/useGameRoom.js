@@ -27,9 +27,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
   const [chatToast, setChatToast] = useState(null);
   const [reactions, setReactions] = useState([]);
   const [memberNotice, setMemberNotice] = useState(null);
-  const [skillNotice, setSkillNotice] = useState(null);
   const [itemNotice, setItemNotice] = useState(null);
-  const [skillTargeting, setSkillTargeting] = useState(false);
   // Item aktif yang sedang menunggu pemain memilih target (id item), null jika tidak ada
   const [itemTargeting, setItemTargeting] = useState(null);
 
@@ -37,9 +35,8 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
   const chatToastTimer = useRef(null);
   const errorTimer = useRef(null);
   const hasCelebrated = useRef(false);
-  const lastSkillUnlockId = useRef(null);
   const lastItemEventId = useRef(null);
-  // Saat baru masuk/kembali ke room, event lama (skill, item) tidak boleh diputar ulang
+  // Saat baru masuk/kembali ke room, event item lama tidak boleh diputar ulang
   const seedEvents = useRef(false);
   const playerIdRef = useRef('');
   playerIdRef.current = playerId;
@@ -55,7 +52,6 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     setChats([]);
     setPlayerId('');
     setUnreadChats(0);
-    setSkillTargeting(false);
     setItemTargeting(null);
     setScreen('home');
   }, []);
@@ -98,7 +94,6 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
       'room:update': updated => {
         if (seedEvents.current) {
           seedEvents.current = false;
-          lastSkillUnlockId.current = updated.lastSkillUnlock?.id ?? null;
           lastItemEventId.current = updated.lastItemEvent?.id ?? null;
           // Kembali ke room yang sudah selesai tidak perlu memutar ulang perayaan menang
           hasCelebrated.current = !!updated.winner;
@@ -173,24 +168,13 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     };
   }, [socket, showError, resetRoomState]);
 
-  // Peringatan saat ada pemain yang membuka Skill Eliminasi
-  useEffect(() => {
-    const event = room?.lastSkillUnlock;
-    if (!event || event.id === lastSkillUnlockId.current) return undefined;
-    lastSkillUnlockId.current = event.id;
-    setSkillNotice({ ...event, isMe: event.playerId === playerId });
-    sound.playThunderSkill();
-    const timer = setTimeout(() => setSkillNotice(null), 7000);
-    return () => clearTimeout(timer);
-  }, [room?.lastSkillUnlock, playerId]);
-
-  // Pengumuman item ke semua pemain (perisai aktif, item dipakai, item gratis didapat)
+  // Pengumuman item ke semua pemain (perisai aktif, item dipakai)
   useEffect(() => {
     const event = room?.lastItemEvent;
     if (!event || event.id === lastItemEventId.current) return undefined;
     lastItemEventId.current = event.id;
     setItemNotice({ id: event.id, icon: event.icon, title: event.title, text: event.text });
-    if (event.sound === 'thunder') sound.playThunderSkill();
+    if (event.sound === 'thunder') sound.playThunder();
     else sound.playJoinNotification();
     const timer = setTimeout(() => setItemNotice(null), 5500);
     return () => clearTimeout(timer);
@@ -206,7 +190,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
   const me = room?.players?.find(p => p.id === playerId) || null;
   const currentTurnPlayer = room?.players?.[room.turn] || null;
   const isTurn = !!currentTurnPlayer && currentTurnPlayer.id === playerId;
-  const canAct = isTurn && room?.dice === null && !room?.rolling && !room?.animatingMove;
+  const canAct = isTurn && room?.dice === null && !room?.rolling && !room?.animatingMove && !room?.pendingShield;
 
   // Bidak yang boleh dijalankan dihitung server (satu sumber aturan main)
   const movablePawns = useMemo(
@@ -262,7 +246,6 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
 
   const movePawn = useCallback(pawnIdx => {
     socket.emit('game:move', { pawn: pawnIdx });
-    setSkillTargeting(false);
   }, [socket]);
 
   // Auto-move: jika hanya ada 1 bidak yang bisa jalan, jalankan otomatis
@@ -277,14 +260,9 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
   itemTargetingRef.current = itemTargeting;
   const selectTarget = useCallback((targetPlayerId, targetPawnIdx) => {
     sound.playClick();
-    const target = { playerId: targetPlayerId, pawnIdx: targetPawnIdx };
-    if (itemTargetingRef.current) {
-      socket.emit('game:use_item', { itemId: itemTargetingRef.current, target });
-      setItemTargeting(null);
-    } else {
-      socket.emit('game:use_skill', { target });
-      setSkillTargeting(false);
-    }
+    if (!itemTargetingRef.current) return;
+    socket.emit('game:use_item', { itemId: itemTargetingRef.current, target: { playerId: targetPlayerId, pawnIdx: targetPawnIdx } });
+    setItemTargeting(null);
   }, [socket]);
 
   const actions = {
@@ -302,20 +280,9 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     rollDice: () => socket.emit('game:roll'),
     movePawn,
     selectTarget,
-    toggleSkillTargeting: () => {
-      sound.playClick();
-      setSkillTargeting(v => !v);
-      setItemTargeting(null);
-    },
-    setItemTargeting: id => {
-      setItemTargeting(id);
-      setSkillTargeting(false);
-    },
+    setItemTargeting,
     useItem: itemId => socket.emit('game:use_item', { itemId }),
-    accumulateSkill: () => {
-      emitWithClick('game:accumulate_skill');
-      setSkillTargeting(false);
-    },
+    decideShield: use => emitWithClick('game:shield_decision', { use }),
     sendReaction: emoji => emitWithClick('game:reaction', { emoji }),
     sendChat: text => {
       const clean = String(text || '').trim();
@@ -328,7 +295,6 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
       if (open) setUnreadChats(0);
     },
     dismissChatToast: () => setChatToast(null),
-    dismissSkillNotice: () => setSkillNotice(null),
     dismissItemNotice: () => setItemNotice(null)
   };
 
@@ -349,9 +315,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     chatToast,
     reactions,
     memberNotice,
-    skillNotice,
     itemNotice,
-    skillTargeting,
     itemTargeting,
     actions
   };

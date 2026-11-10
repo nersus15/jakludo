@@ -12,6 +12,7 @@ const {
   canPawnMove,
   getMovablePawns,
   chooseBestPawn,
+  rankPlayers,
   getBlackHoles,
   relocateBlackHoles,
   isPawnProtected,
@@ -75,7 +76,8 @@ function declareWinner(room, winnerPlayer) {
   room.message = `🏆 SELAMAT! ${winnerPlayer.name} MENANG!`;
   addHistory(room, `🎉 ${winnerPlayer.name} berhasil memenangkan pertandingan JakLudo!`);
 
-  db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players });
+  // Poin sama untuk permainan biasa dan grup (leaderboard grup diambil dari leaderboard yang sama)
+  db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking: rankPlayers(room, winnerPlayer.id) });
   room.players.forEach(p => {
     p.isLudoKing = db.checkIsLudoKing(p.userId);
   });

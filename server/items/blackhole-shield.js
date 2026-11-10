@@ -3,7 +3,7 @@ module.exports = {
   id: 'blackholeShield',
   name: 'Blackhole Shield',
   icon: '🛡️',
-  price: 100,
+  price: 50,
   kind: 'passive',
   protects: ['blackHole'],
   sound: 'chime',

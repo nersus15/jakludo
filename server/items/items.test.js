@@ -182,6 +182,13 @@ const giveForceReturn = player => {
   player.items.forceReturn = { owned: 0, earned: 1, state: {} };
 };
 
+test('harga item sesuai toko: Force Return 100, Blackhole Shield 50, Universal Shield 100', () => {
+  assert.equal(items.get('forceReturn').price, 100);
+  assert.equal(items.get('blackholeShield').price, 50);
+  assert.equal(items.get('universalShield').price, 100);
+  assert.equal(items.get('universalShield').kind, 'reactive');
+});
+
 test('target Force Return yang punya Universal Shield ditanya dan bisa menahannya', async () => {
   const { host, guest, room, pa, pb } = await startedRoom();
   giveForceReturn(pa);

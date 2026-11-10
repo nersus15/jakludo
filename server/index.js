@@ -38,7 +38,7 @@ const io = new Server(server, {
 store.init(io);
 registerSocketHandlers(io);
 
-app.get('/health', (_, res) => res.json({ ok: true, rooms: store.rooms.size }));
+app.get('/health', (_, res) => res.json({ ok: true, rooms: store.rooms.size, db: db.getStatus().engine }));
 app.use('/api', createApiRouter());
 
 app.use((err, req, res, next) => {
@@ -75,25 +75,33 @@ process.on('uncaughtException', err => {
 process.on('unhandledRejection', err => {
   console.error('[unhandledRejection]', err);
 });
-// Simpan snapshot semua room lalu tutup database. Room dipulihkan saat server start lagi.
+// Simpan snapshot semua room lalu tutup koneksi database. Room dipulihkan saat server start lagi.
 function shutdown() {
   store.stopAllTimers();
   store.flushRooms();
-  db.close();
+  return db.close();
 }
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => {
-    shutdown();
+  process.on(sig, async () => {
+    await shutdown();
     process.exit(0);
   });
 }
 
-store.restoreRooms({ onResume: engine.triggerTurn });
-
 const PORT = process.env.PORT || 5172;
 if (require.main === module) {
-  server.listen(PORT, () => console.log(`JakLudo server listening on ${server.address().port}`));
+  db.init()
+    .then(() => {
+      store.restoreRooms({ onResume: engine.triggerTurn });
+      server.listen(PORT, () => console.log(`JakLudo server listening on ${server.address().port}`));
+    })
+    .catch(err => {
+      console.error('[FATAL] Gagal menginisialisasi database:', err);
+      process.exit(1);
+    });
+} else {
+  store.restoreRooms({ onResume: engine.triggerTurn });
 }
 
 module.exports = { server, io, rooms: store.rooms, shutdown };

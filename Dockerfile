@@ -27,6 +27,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5172
 
+# Install postgresql-client agar perintah `npm run backup` (pg_dump) berjalan di dalam container
+RUN apk add --no-cache postgresql-client
+
 # Salin package manifest
 COPY package*.json ./
 
@@ -38,7 +41,7 @@ COPY --from=builder /app/dist ./dist
 
 # Salin backend server (tanpa file test)
 COPY server/ ./server/
-RUN rm -f server/*.test.js
+RUN rm -f server/*.test.js server/*/*.test.js
 
 # Siapkan direktori database SQLite milik user non-root `node` (uid 1000)
 RUN mkdir -p /app/server/data && chown -R node:node /app/server/data

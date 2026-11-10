@@ -281,7 +281,7 @@ test('lobby yang ditinggal semua pemain tetap ada (dijadwalkan dihapus setelah 5
   assert.ok(room.cleanupTimer, 'penghapusan dijadwalkan');
 });
 
-test('data JSON lama dipindahkan ke SQLite saat pertama kali start', () => {
+test('data JSON lama dipindahkan saat pertama kali start', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-migrate-'));
   fs.writeFileSync(path.join(dir, 'users.json'), JSON.stringify([
     { id: 'u1', username: 'lama', name: 'Lama', passwordHash: 'scrypt:a:b', authType: 'password', inventory: { blackholeShield: 2, forceReturn: 1 } }
@@ -295,7 +295,7 @@ test('data JSON lama dipindahkan ke SQLite saat pertama kali start', () => {
     console.log(JSON.stringify({ name: u && u.name, inv: u && u.inventory, entry: db.getLeaderboard().find(e => e.userId === 'u1') }));
     db.close();`;
   const r = spawnSync(process.execPath, ['-e', script], {
-    cwd: path.join(__dirname, '..'), env: { ...process.env, JAKLUDO_DATA_DIR: dir }, encoding: 'utf8'
+    cwd: path.join(__dirname, '..'), env: { ...process.env, JAKLUDO_DATA_DIR: dir, DATABASE_URL: '' }, encoding: 'utf8'
   });
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout.trim().split('\n').pop());
@@ -303,7 +303,6 @@ test('data JSON lama dipindahkan ke SQLite saat pertama kali start', () => {
   assert.deepEqual(out.inv, { blackholeShield: 2, forceReturn: 1 });
   assert.equal(out.entry.points, 90);
   assert.ok(fs.readdirSync(dir).some(f => f.startsWith('users.json.migrated-')), 'file JSON lama diberi tanda migrated');
-  assert.ok(fs.existsSync(path.join(dir, 'jakludo.db')));
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

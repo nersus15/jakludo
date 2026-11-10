@@ -1,13 +1,24 @@
+// Layer database JakLudo berbasis PostgreSQL (pg.Pool) dengan write-through cache
+// di memori agar loop permainan realtime (Socket.IO) tetap sinkron dan bebas race condition,
+// sekaligus menyimpan seluruh perubahan secara transaksional ke PostgreSQL.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { promisify } = require('util');
-const { DatabaseSync } = require('node:sqlite');
+const { Pool } = require('pg');
+const {
+  getPoolConfig,
+  runSchemaMigrations,
+  migrateSqliteToPostgres,
+  migrateLegacyJsonToPostgres,
+  readSqliteDatabase
+} = require('./migrate');
 
 const scrypt = promisify(crypto.scrypt);
 
 const DATA_DIR = process.env.JAKLUDO_DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'jakludo.db');
+const LOCAL_STATE_FILE = path.join(DATA_DIR, 'jakludo-state.json');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
 const STARTER_POINTS = 200;
@@ -19,108 +30,162 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 // ==========================================
-// DATABASE SQLITE (satu file di folder data, dipasang sebagai volume di Docker)
+// STATE WRITE-THROUGH & KONEKSI POSTGRESQL
 // ==========================================
 
-const db = new DatabaseSync(DB_FILE);
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA synchronous = NORMAL;
-  PRAGMA foreign_keys = ON;
-  PRAGMA busy_timeout = 5000;
-`);
+const state = {
+  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, createdAt }
+  usersByUsername: new Map(), // lower(username) -> id
+  userItems: new Map(),       // userId -> { [itemId]: quantity }
+  sessions: new Map(),        // tokenHash -> { tokenHash, userId, createdAt, expiresAt }
+  leaderboard: new Map(),     // userId -> { userId, username, name, avatar, wins, matchesPlayed, points, authType }
+  rooms: new Map()            // code -> { code, state, updatedAt }
+};
 
-// Setiap versi skema adalah satu langkah migrasi. Tambah langkah baru di akhir daftar.
-const MIGRATIONS = [
-  // v1: tabel awal
-  () => db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      name TEXT NOT NULL,
-      password_hash TEXT,
-      auth_type TEXT NOT NULL DEFAULT 'password',
-      avatar TEXT,
-      email TEXT,
-      shield_count INTEGER NOT NULL DEFAULT 0,
-      force_return_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
-    );
-
-    -- Token disimpan sebagai hash SHA-256: file database yang bocor tidak berisi token login yang bisa dipakai
-    CREATE TABLE IF NOT EXISTS sessions (
-      token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
-
-    -- user_id tanpa foreign key: database lama bisa berisi baris tanpa akun (bot/tamu/contoh)
-    CREATE TABLE IF NOT EXISTS leaderboard (
-      user_id TEXT PRIMARY KEY,
-      username TEXT NOT NULL,
-      name TEXT NOT NULL,
-      avatar TEXT,
-      wins INTEGER NOT NULL DEFAULT 0,
-      matches_played INTEGER NOT NULL DEFAULT 0,
-      points INTEGER NOT NULL DEFAULT 0,
-      auth_type TEXT NOT NULL
-    );
-
-    -- Snapshot room yang sedang berjalan agar permainan selamat dari restart/deploy server
-    CREATE TABLE IF NOT EXISTS rooms (
-      code TEXT PRIMARY KEY,
-      state TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `),
-
-  // v2: inventaris generik per item (sebelumnya satu kolom per jenis item di tabel users),
-  // supaya item baru bisa ditambahkan tanpa mengubah skema database
-  () => db.exec(`
-    CREATE TABLE user_items (
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      item_id TEXT NOT NULL,
-      quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-      PRIMARY KEY (user_id, item_id)
-    );
-    INSERT INTO user_items (user_id, item_id, quantity)
-      SELECT id, 'blackholeShield', shield_count FROM users WHERE shield_count > 0;
-    INSERT INTO user_items (user_id, item_id, quantity)
-      SELECT id, 'forceReturn', force_return_count FROM users WHERE force_return_count > 0;
-    ALTER TABLE users DROP COLUMN shield_count;
-    ALTER TABLE users DROP COLUMN force_return_count;
-  `)
-];
-
-function migrate() {
-  const { user_version: version } = db.prepare('PRAGMA user_version').get();
-  for (let v = version; v < MIGRATIONS.length; v++) {
-    transaction(() => {
-      MIGRATIONS[v]();
-      db.exec(`PRAGMA user_version = ${v + 1}`);
-    });
-  }
-}
-
-function transaction(fn) {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-}
+let pool = null;
+let initialized = false;
+let initPromise = null;
+let closed = false;
+const pendingQueries = new Set();
 
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 
-// Impor sekali dari penyimpanan JSON lama (users.json, sessions.json, leaderboard.json).
-// File JSON yang rusak menghentikan server agar data tidak diam-diam hilang.
-function importLegacyJson() {
+function trackQuery(promise) {
+  const tracked = promise.catch(err => {
+    console.error('[PG ERROR]', err.message);
+  }).finally(() => {
+    pendingQueries.delete(tracked);
+  });
+  pendingQueries.add(tracked);
+  return tracked;
+}
+
+function execPg(text, params = []) {
+  if (!pool || closed) return Promise.resolve();
+  return trackQuery(pool.query(text, params));
+}
+
+function execPgTransaction(fn) {
+  if (!pool || closed) return Promise.resolve();
+  const run = (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await fn(client);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  })();
+  return trackQuery(run);
+}
+
+// Persistensi cadangan lokal jika berjalan di mode test lokal tanpa server PostgreSQL aktif
+function persistLocalFallback() {
+  if (pool || closed) return;
+  try {
+    const dump = {
+      users: Array.from(state.usersById.values()),
+      userItems: Object.fromEntries(state.userItems.entries()),
+      sessions: Array.from(state.sessions.values()),
+      leaderboard: Array.from(state.leaderboard.values()),
+      rooms: Array.from(state.rooms.values())
+    };
+    fs.writeFileSync(LOCAL_STATE_FILE, JSON.stringify(dump));
+  } catch (err) {
+    console.error('[DB LOCAL]', err.message);
+  }
+}
+
+function setUserInState(u) {
+  const row = {
+    id: u.id,
+    username: u.username,
+    name: u.name || u.username,
+    passwordHash: u.passwordHash ?? u.password_hash ?? null,
+    authType: u.authType || u.auth_type || 'password',
+    avatar: u.avatar || null,
+    email: u.email || null,
+    createdAt: u.createdAt || u.created_at || new Date().toISOString()
+  };
+  state.usersById.set(row.id, row);
+  state.usersByUsername.set(row.username.toLowerCase(), row.id);
+}
+
+function setItemInState(userId, itemId, quantity) {
+  const qty = Number(quantity || 0);
+  if (!state.userItems.has(userId)) state.userItems.set(userId, {});
+  const items = state.userItems.get(userId);
+  if (qty > 0) items[itemId] = qty;
+  else delete items[itemId];
+}
+
+// Impor dari JSON lama atau SQLite lokal untuk kebutuhan offline/test
+function bootstrapLocalState() {
+  if (fs.existsSync(LOCAL_STATE_FILE)) {
+    try {
+      const dump = JSON.parse(fs.readFileSync(LOCAL_STATE_FILE, 'utf8'));
+      for (const u of dump.users || []) setUserInState(u);
+      for (const [uid, items] of Object.entries(dump.userItems || {})) {
+        for (const [itemId, qty] of Object.entries(items || {})) setItemInState(uid, itemId, qty);
+      }
+      for (const s of dump.sessions || []) {
+        if (s.expiresAt > Date.now()) state.sessions.set(s.tokenHash, s);
+      }
+      for (const e of dump.leaderboard || []) state.leaderboard.set(e.userId, e);
+      for (const r of dump.rooms || []) state.rooms.set(r.code, r);
+    } catch {
+      // Abaikan jika gagal dibaca
+    }
+  }
+
+  // Cek juga file SQLite (jakludo.db) jika ada
+  if (fs.existsSync(DB_FILE)) {
+    try {
+      const sq = readSqliteDatabase(DB_FILE);
+      if (sq) {
+        for (const u of sq.users) {
+          setUserInState(u);
+          if (Number(u.shield_count) > 0) setItemInState(u.id, 'blackholeShield', Number(u.shield_count));
+          if (Number(u.force_return_count) > 0) setItemInState(u.id, 'forceReturn', Number(u.force_return_count));
+        }
+        for (const it of sq.user_items) setItemInState(it.user_id, it.item_id, it.quantity);
+        for (const s of sq.sessions) {
+          if (Number(s.expires_at) > Date.now()) {
+            state.sessions.set(s.token_hash, {
+              tokenHash: s.token_hash,
+              userId: s.user_id,
+              createdAt: Number(s.created_at),
+              expiresAt: Number(s.expires_at)
+            });
+          }
+        }
+        for (const e of sq.leaderboard) {
+          state.leaderboard.set(e.user_id, {
+            userId: e.user_id,
+            username: e.username,
+            name: e.name || e.username,
+            avatar: e.avatar || null,
+            wins: Number(e.wins || 0),
+            matchesPlayed: Number(e.matches_played || 0),
+            points: Number(e.points || 0),
+            authType: e.auth_type || 'password'
+          });
+        }
+        for (const r of sq.rooms) {
+          try {
+            const parsed = typeof r.state === 'string' ? JSON.parse(r.state) : r.state;
+            state.rooms.set(r.code, { code: r.code, state: parsed, updatedAt: Number(r.updated_at) });
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // Impor file JSON generasi pertama (users.json, sessions.json, leaderboard.json)
   const files = {
     users: path.join(DATA_DIR, 'users.json'),
     sessions: path.join(DATA_DIR, 'sessions.json'),
@@ -135,115 +200,165 @@ function importLegacyJson() {
     try {
       return JSON.parse(content);
     } catch (err) {
-      throw new Error(`[DB FATAL] ${file} tidak valid (${err.message}). Perbaiki/pulihkan file ini agar data bisa dipindahkan ke SQLite.`);
+      throw new Error(`[DB FATAL] ${file} tidak valid (${err.message}). Perbaiki/pulihkan file ini agar data bisa dipindahkan.`);
     }
   };
   const users = load(files.users, []);
   const sessions = load(files.sessions, {});
   const leaderboard = load(files.leaderboard, []);
 
-  transaction(() => {
-    const insertUser = db.prepare(`INSERT OR IGNORE INTO users
-      (id, username, name, password_hash, auth_type, avatar, email, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-    const insertItem = db.prepare('INSERT OR IGNORE INTO user_items (user_id, item_id, quantity) VALUES (?, ?, ?)');
-    for (const u of users) {
-      insertUser.run(u.id, u.username, u.name || u.username, u.passwordHash || null, u.authType || 'password',
-        u.avatar || null, u.email || null, u.createdAt || new Date().toISOString());
-      for (const [itemId, quantity] of Object.entries(u.inventory || {})) {
-        if (quantity > 0) insertItem.run(u.id, itemId, quantity);
-      }
+  for (const u of users) {
+    setUserInState(u);
+    for (const [itemId, qty] of Object.entries(u.inventory || {})) {
+      if (qty > 0) setItemInState(u.id, itemId, qty);
     }
-    const insertSession = db.prepare('INSERT OR IGNORE INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)');
-    const userExists = db.prepare('SELECT 1 FROM users WHERE id = ?');
-    for (const [token, s] of Object.entries(sessions)) {
-      if (s && userExists.get(s.userId) && s.expiresAt > Date.now()) {
-        insertSession.run(hashToken(token), s.userId, s.createdAt || Date.now(), s.expiresAt);
-      }
+  }
+  for (const [token, s] of Object.entries(sessions)) {
+    if (s && state.usersById.has(s.userId) && s.expiresAt > Date.now()) {
+      const th = hashToken(token);
+      state.sessions.set(th, { tokenHash: th, userId: s.userId, createdAt: s.createdAt || Date.now(), expiresAt: s.expiresAt });
     }
-    const insertEntry = db.prepare(`INSERT OR IGNORE INTO leaderboard
-      (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-    for (const e of leaderboard) {
-      if (!e.userId || !e.username) continue;
-      insertEntry.run(e.userId, e.username, e.name || e.username, e.avatar || null, e.wins || 0,
-        e.matchesPlayed || 0, e.points || 0, e.authType || 'player');
-    }
-  });
+  }
+  for (const e of leaderboard) {
+    if (!e.userId || !e.username) continue;
+    state.leaderboard.set(e.userId, {
+      userId: e.userId,
+      username: e.username,
+      name: e.name || e.username,
+      avatar: e.avatar || null,
+      wins: e.wins || 0,
+      matchesPlayed: e.matchesPlayed || 0,
+      points: e.points || 0,
+      authType: e.authType || 'player'
+    });
+  }
 
   const stamp = Date.now();
   for (const file of Object.values(files)) {
     if (fs.existsSync(file)) fs.renameSync(file, `${file}.migrated-${stamp}`);
   }
-  console.log(`[DB] Data JSON lama dipindahkan ke SQLite: ${users.length} user, ${leaderboard.length} baris leaderboard.`);
+  persistLocalFallback();
+  console.log(`[DB] Data JSON lama dimigrasikan: ${users.length} user, ${leaderboard.length} baris leaderboard.`);
 }
 
-migrate();
-importLegacyJson();
+async function hydrateFromPostgres(activePool) {
+  state.usersById.clear();
+  state.usersByUsername.clear();
+  state.userItems.clear();
+  state.sessions.clear();
+  state.leaderboard.clear();
+  state.rooms.clear();
 
-const q = {
-  userById: db.prepare('SELECT * FROM users WHERE id = ?'),
-  userByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
-  insertUser: db.prepare(`INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at)
-    VALUES (?, ?, ?, ?, 'password', ?, ?)`),
-  insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
-  sessionByHash: db.prepare('SELECT * FROM sessions WHERE token_hash = ?'),
-  deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
-  pruneSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
-  entryByUser: db.prepare('SELECT * FROM leaderboard WHERE user_id = ?'),
-  insertEntry: db.prepare(`INSERT OR IGNORE INTO leaderboard
-    (user_id, username, name, avatar, wins, matches_played, points, auth_type) VALUES (?, ?, ?, ?, 0, 0, ?, ?)`),
-  addResult: db.prepare(`UPDATE leaderboard SET matches_played = matches_played + 1,
-    wins = wins + ?, points = points + ? WHERE user_id = ?`),
-  // Hanya akun asli: baris bot, tamu, dan pemain contoh (seed) versi lama tidak ikut peringkat
-  ranked: db.prepare(`SELECT * FROM leaderboard WHERE auth_type NOT IN ('bot', 'player', 'seed')
-    ORDER BY wins DESC, points DESC,
-      CASE WHEN matches_played > 0 THEN CAST(wins AS REAL) / matches_played ELSE 0 END DESC`),
-  spendPoints: db.prepare('UPDATE leaderboard SET points = points - ? WHERE user_id = ? AND points >= ?'),
-  addPoints: db.prepare('UPDATE leaderboard SET points = points + ? WHERE user_id = ?'),
-  userItems: db.prepare('SELECT item_id, quantity FROM user_items WHERE user_id = ? AND quantity > 0'),
-  addItem: db.prepare(`INSERT INTO user_items (user_id, item_id, quantity) VALUES (?, ?, ?)
-    ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity`),
-  useItem: db.prepare('UPDATE user_items SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ? AND quantity > 0'),
-  saveRoom: db.prepare(`INSERT INTO rooms (code, state, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(code) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`),
-  deleteRoom: db.prepare('DELETE FROM rooms WHERE code = ?'),
-  allRooms: db.prepare('SELECT code, state, updated_at FROM rooms')
-};
+  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes] = await Promise.all([
+    activePool.query('SELECT * FROM users'),
+    activePool.query('SELECT user_id, item_id, quantity FROM user_items WHERE quantity > 0'),
+    activePool.query('SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE expires_at > $1', [Date.now()]),
+    activePool.query('SELECT * FROM leaderboard'),
+    activePool.query('SELECT code, state, updated_at FROM rooms')
+  ]);
 
-// Bentuk user sama seperti versi JSON sebelumnya agar kode pemanggil tidak berubah
-function rowToUser(row) {
+  for (const r of usersRes.rows) setUserInState(r);
+  for (const r of itemsRes.rows) setItemInState(r.user_id, r.item_id, Number(r.quantity));
+  for (const r of sessionsRes.rows) {
+    state.sessions.set(r.token_hash, {
+      tokenHash: r.token_hash,
+      userId: r.user_id,
+      createdAt: Number(r.created_at),
+      expiresAt: Number(r.expires_at)
+    });
+  }
+  for (const r of lbRes.rows) {
+    state.leaderboard.set(r.user_id, {
+      userId: r.user_id,
+      username: r.username,
+      name: r.name,
+      avatar: r.avatar,
+      wins: Number(r.wins),
+      matchesPlayed: Number(r.matches_played),
+      points: Number(r.points),
+      authType: r.auth_type
+    });
+  }
+  for (const r of roomsRes.rows) {
+    const parsed = typeof r.state === 'string' ? JSON.parse(r.state) : r.state;
+    state.rooms.set(r.code, { code: r.code, state: parsed, updatedAt: Number(r.updated_at) });
+  }
+}
+
+// Inisialisasi koneksi PostgreSQL, jalankan migrasi skema & migrasi data SQLite otomatis, lalu muat state
+async function init(options = {}) {
+  if (initialized && !options.force) return;
+  if (initPromise && !options.force) return initPromise;
+
+  initPromise = (async () => {
+    closed = false;
+    const customPool = options.pool || null;
+    const poolConfig = customPool ? null : getPoolConfig(options.env || process.env);
+
+    if (customPool || poolConfig) {
+      pool = customPool || new Pool(poolConfig);
+      pool.on('error', err => console.error('[PG POOL ERROR]', err.message));
+
+      await runSchemaMigrations(pool);
+      await migrateLegacyJsonToPostgres(pool, DATA_DIR);
+      if (fs.existsSync(DB_FILE)) {
+        await migrateSqliteToPostgres(pool, { sqliteFile: DB_FILE, renameAfter: true });
+      }
+      await hydrateFromPostgres(pool);
+      console.log(`[PG] Terhubung ke PostgreSQL (${state.usersById.size} user, ${state.leaderboard.size} leaderboard, ${state.rooms.size} room aktif).`);
+    } else {
+      console.warn('[DB] DATABASE_URL belum diset; berjalan dengan penyimpanan lokal di', DATA_DIR);
+    }
+
+    initialized = true;
+  })();
+
+  return initPromise;
+}
+
+// Jalankan bootstrap lokal sinkron saat modul di-require agar unit test langsung siap
+bootstrapLocalState();
+
+function getStatus() {
+  return {
+    engine: pool ? 'postgresql' : 'local-fallback',
+    initialized,
+    pendingWrites: pendingQueries.size
+  };
+}
+
+// ==========================================
+// HELPER USER & ITEM
+// ==========================================
+
+function getUserItems(userId) {
+  return { ...(state.userItems.get(userId) || {}) };
+}
+
+function buildUserObject(row) {
   if (!row) return null;
   return {
     id: row.id,
     username: row.username,
     name: row.name,
-    passwordHash: row.password_hash,
-    authType: row.auth_type,
+    passwordHash: row.passwordHash,
+    authType: row.authType,
     avatar: row.avatar,
     email: row.email || undefined,
-    createdAt: row.created_at,
+    createdAt: row.createdAt,
     inventory: getUserItems(row.id)
   };
 }
 
-// Stok item milik akun: { [itemId]: jumlah }
-function getUserItems(userId) {
-  const items = {};
-  for (const row of q.userItems.all(userId)) items[row.item_id] = row.quantity;
-  return items;
+function findUserById(id) {
+  if (typeof id !== 'string') return null;
+  return buildUserObject(state.usersById.get(id));
 }
 
-function rowToEntry(row) {
-  return {
-    userId: row.user_id,
-    username: row.username,
-    name: row.name,
-    avatar: row.avatar,
-    wins: row.wins,
-    matchesPlayed: row.matches_played,
-    points: row.points,
-    authType: row.auth_type
-  };
+function findUserByUsername(username) {
+  if (!username) return null;
+  const id = state.usersByUsername.get(String(username).toLowerCase());
+  return id ? findUserById(id) : null;
 }
 
 // ==========================================
@@ -289,7 +404,6 @@ function validatePassword(password) {
   return { valid: true };
 }
 
-// Scrypt async agar hashing tidak memblokir event loop game
 async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const derivedKey = await scrypt(password, salt, 64);
@@ -314,14 +428,6 @@ async function verifyPassword(password, storedHash) {
 // MANAJEMEN USER
 // ==========================================
 
-function findUserById(id) {
-  return typeof id === 'string' ? rowToUser(q.userById.get(id)) : null;
-}
-
-function findUserByUsername(username) {
-  return rowToUser(q.userByUsername.get(String(username)));
-}
-
 async function registerUser({ username, password, name }) {
   const userValid = validateUsername(username);
   if (!userValid.valid) return { error: userValid.message };
@@ -334,21 +440,58 @@ async function registerUser({ username, password, name }) {
   }
 
   const passwordHash = await hashPassword(password);
+  // Cek ulang setelah proses scrypt async selesai untuk mencegah pendaftaran ganda bersamaan
+  if (findUserByUsername(userValid.cleanUsername)) {
+    return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+  }
+
   const displayName = (typeof name === 'string' ? name.trim().slice(0, 18) : '') || userValid.cleanUsername;
   const id = 'user_' + crypto.randomUUID();
+  const createdAt = new Date().toISOString();
 
-  try {
-    transaction(() => {
-      q.insertUser.run(id, userValid.cleanUsername, displayName, passwordHash, '🎯', new Date().toISOString());
-      q.insertEntry.run(id, userValid.cleanUsername, displayName, '🎯', STARTER_POINTS, 'password');
-    });
-  } catch (err) {
-    // Dua pendaftaran bersamaan dengan username yang sama: constraint UNIQUE yang menentukan
-    if (String(err.message).includes('UNIQUE')) {
-      return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+  if (pool && !closed) {
+    try {
+      await execPgTransaction(async client => {
+        await client.query(
+          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at)
+           VALUES ($1, $2, $3, $4, 'password', '🎯', $5)`,
+          [id, userValid.cleanUsername, displayName, passwordHash, createdAt]
+        );
+        await client.query(
+          `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+           VALUES ($1, $2, $3, '🎯', 0, 0, $4, 'password')
+           ON CONFLICT (user_id) DO NOTHING`,
+          [id, userValid.cleanUsername, displayName, STARTER_POINTS]
+        );
+      });
+    } catch (err) {
+      if (String(err.code) === '23505' || String(err.message).includes('unique')) {
+        return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+      }
+      throw err;
     }
-    throw err;
   }
+
+  setUserInState({
+    id,
+    username: userValid.cleanUsername,
+    name: displayName,
+    passwordHash,
+    authType: 'password',
+    avatar: '🎯',
+    createdAt
+  });
+  state.leaderboard.set(id, {
+    userId: id,
+    username: userValid.cleanUsername,
+    name: displayName,
+    avatar: '🎯',
+    wins: 0,
+    matchesPlayed: 0,
+    points: STARTER_POINTS,
+    authType: 'password'
+  });
+  persistLocalFallback();
 
   return { user: sanitizeUser(findUserById(id)), token: createSession(id) };
 }
@@ -374,7 +517,7 @@ async function loginUser({ username, password }) {
 
 function sanitizeUser(u) {
   if (!u) return null;
-  const entry = q.entryByUser.get(u.id);
+  const entry = state.leaderboard.get(u.id);
   return {
     id: u.id,
     username: u.username,
@@ -394,29 +537,57 @@ function sanitizeUser(u) {
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const now = Date.now();
-  q.insertSession.run(hashToken(token), userId, now, now + SESSION_TTL_MS);
+  const expiresAt = now + SESSION_TTL_MS;
+  const tokenHash = hashToken(token);
+
+  state.sessions.set(tokenHash, { tokenHash, userId, createdAt: now, expiresAt });
+  execPg(
+    `INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+    [tokenHash, userId, now, expiresAt]
+  );
+  persistLocalFallback();
   return token;
 }
 
 function getUserByToken(token) {
   if (!token || typeof token !== 'string') return null;
   const hash = hashToken(token);
-  const session = q.sessionByHash.get(hash);
+  const session = state.sessions.get(hash);
   if (!session) return null;
-  if (Date.now() > session.expires_at) {
-    q.deleteSession.run(hash);
+  if (Date.now() > session.expiresAt) {
+    state.sessions.delete(hash);
+    execPg('DELETE FROM sessions WHERE token_hash = $1', [hash]);
+    persistLocalFallback();
     return null;
   }
-  return findUserById(session.user_id);
+  return findUserById(session.userId);
 }
 
 function deleteSession(token) {
   if (!token || typeof token !== 'string') return false;
-  return q.deleteSession.run(hashToken(token)).changes > 0;
+  const hash = hashToken(token);
+  const existed = state.sessions.delete(hash);
+  if (existed) {
+    execPg('DELETE FROM sessions WHERE token_hash = $1', [hash]);
+    persistLocalFallback();
+  }
+  return existed;
 }
 
 function pruneExpiredSessions() {
-  return Number(q.pruneSessions.run(Date.now()).changes);
+  const now = Date.now();
+  let removed = 0;
+  for (const [hash, s] of state.sessions.entries()) {
+    if (s.expiresAt < now) {
+      state.sessions.delete(hash);
+      removed++;
+    }
+  }
+  if (removed > 0) persistLocalFallback();
+  execPg('DELETE FROM sessions WHERE expires_at < $1', [now]);
+  return removed;
 }
 
 pruneExpiredSessions();
@@ -427,31 +598,78 @@ setInterval(pruneExpiredSessions, 60 * 60 * 1000).unref();
 // ==========================================
 
 function ensureLeaderboardEntry(user) {
-  q.insertEntry.run(user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType);
+  if (!state.leaderboard.has(user.id)) {
+    state.leaderboard.set(user.id, {
+      userId: user.id,
+      username: user.username,
+      name: user.name,
+      avatar: user.avatar || '🎲',
+      wins: 0,
+      matchesPlayed: 0,
+      points: STARTER_POINTS,
+      authType: user.authType
+    });
+  }
+  return state.leaderboard.get(user.id);
 }
 
-// Catat hasil pertandingan. Hanya akun terdaftar yang mendapat poin, dan hanya
-// jika lawannya mencakup minimal satu manusia lain (menang lawan bot tidak dihitung).
 function recordMatchResult({ winnerPlayerId, players }) {
   if (!players || players.length === 0) return;
   const humans = players.filter(p => !p.isBot);
   if (humans.length < 2) return;
 
-  transaction(() => {
-    for (const p of humans) {
-      const user = p.userId ? findUserById(p.userId) : null;
-      if (!user) continue;
-      ensureLeaderboardEntry(user);
-      const won = p.id === winnerPlayerId;
-      q.addResult.run(won ? 1 : 0, won ? WIN_POINTS : PLAY_POINTS, user.id);
-    }
-  });
+  const updates = [];
+  for (const p of humans) {
+    const user = p.userId ? findUserById(p.userId) : null;
+    if (!user) continue;
+    const entry = ensureLeaderboardEntry(user);
+    const won = p.id === winnerPlayerId;
+    const deltaWins = won ? 1 : 0;
+    const deltaPoints = won ? WIN_POINTS : PLAY_POINTS;
+    entry.matchesPlayed += 1;
+    entry.wins += deltaWins;
+    entry.points += deltaPoints;
+    updates.push({ user, deltaWins, deltaPoints });
+  }
+
+  if (updates.length > 0) {
+    persistLocalFallback();
+    execPgTransaction(async client => {
+      for (const { user, deltaWins, deltaPoints } of updates) {
+        await client.query(
+          `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+           VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
+           ON CONFLICT (user_id) DO NOTHING`,
+          [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
+        );
+        await client.query(
+          `UPDATE leaderboard
+           SET matches_played = matches_played + 1,
+               wins = wins + $1,
+               points = points + $2
+           WHERE user_id = $3`,
+          [deltaWins, deltaPoints, user.id]
+        );
+      }
+    });
+  }
 }
 
-// Urutkan: wins -> points -> win rate. Baris bot/tamu lama tidak ditampilkan.
+function getRankedEntries() {
+  const excluded = new Set(['bot', 'player', 'seed']);
+  return Array.from(state.leaderboard.values())
+    .filter(e => !excluded.has(e.authType))
+    .sort((a, b) => {
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.points !== a.points) return b.points - a.points;
+      const wrA = a.matchesPlayed > 0 ? a.wins / a.matchesPlayed : 0;
+      const wrB = b.matchesPlayed > 0 ? b.wins / b.matchesPlayed : 0;
+      return wrB - wrA;
+    });
+}
+
 function getLeaderboard() {
-  return q.ranked.all().map((row, index) => {
-    const player = rowToEntry(row);
+  return getRankedEntries().map((player, index) => {
     const rank = index + 1;
     const winRate = player.matchesPlayed > 0 ? Math.round((player.wins / player.matchesPlayed) * 100) : 0;
     return { ...player, rank, winRate, isLudoKing: rank === 1 && player.wins > 0 };
@@ -460,33 +678,61 @@ function getLeaderboard() {
 
 function checkIsLudoKing(userId) {
   if (!userId) return false;
-  const king = q.ranked.get();
-  return !!(king && king.wins > 0 && king.user_id === userId);
+  const king = getRankedEntries()[0];
+  return !!(king && king.wins > 0 && king.userId === userId);
 }
 
-// Beli item: pengurangan poin dan penambahan stok terjadi dalam satu transaksi.
-// Katalog & harga item ditentukan oleh registry item (server/items), bukan oleh database.
+// ==========================================
+// TOKO & INVENTARIS ITEM
+// ==========================================
+
 function purchaseItem({ userId, itemId, price }) {
   const user = findUserById(userId);
   if (!user) return { error: 'Pengguna tidak ditemukan.' };
 
-  const bought = transaction(() => {
-    ensureLeaderboardEntry(user);
-    if (q.spendPoints.run(price, user.id, price).changes === 0) return false;
-    q.addItem.run(user.id, itemId, 1);
-    return true;
+  const entry = ensureLeaderboardEntry(user);
+  if (entry.points < price) {
+    return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${entry.points} poin.` };
+  }
+
+  entry.points -= price;
+  const currentQty = getUserItems(user.id)[itemId] || 0;
+  setItemInState(user.id, itemId, currentQty + 1);
+  persistLocalFallback();
+
+  execPgTransaction(async client => {
+    await client.query(
+      `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+       VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
+    );
+    await client.query(
+      'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
+      [price, user.id]
+    );
+    await client.query(
+      `INSERT INTO user_items (user_id, item_id, quantity) VALUES ($1, $2, 1)
+       ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = user_items.quantity + 1`,
+      [user.id, itemId]
+    );
   });
 
-  if (!bought) {
-    const points = q.entryByUser.get(user.id)?.points || 0;
-    return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${points} poin.` };
-  }
   return { success: true, user: sanitizeUser(findUserById(user.id)) };
 }
 
 function consumeUserItem({ userId, itemId }) {
   if (!userId || typeof itemId !== 'string') return false;
-  return q.useItem.run(userId, itemId).changes > 0;
+  const currentQty = getUserItems(userId)[itemId] || 0;
+  if (currentQty <= 0) return false;
+
+  setItemInState(userId, itemId, currentQty - 1);
+  persistLocalFallback();
+  execPg(
+    'UPDATE user_items SET quantity = quantity - 1 WHERE user_id = $1 AND item_id = $2 AND quantity > 0',
+    [userId, itemId]
+  );
+  return true;
 }
 
 function addPoints({ userId, amount }) {
@@ -494,52 +740,85 @@ function addPoints({ userId, amount }) {
   if (!user) return { error: 'Pengguna tidak ditemukan.' };
   if (!Number.isInteger(amount) || amount <= 0) return { error: 'Jumlah diamond tidak valid.' };
 
-  transaction(() => {
-    ensureLeaderboardEntry(user);
-    q.addPoints.run(amount, user.id);
+  const entry = ensureLeaderboardEntry(user);
+  entry.points += amount;
+  persistLocalFallback();
+
+  execPgTransaction(async client => {
+    await client.query(
+      `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+       VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
+    );
+    await client.query(
+      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+      [amount, user.id]
+    );
   });
 
   return { success: true, user: sanitizeUser(findUserById(user.id)) };
 }
 
-let closed = false;
-
 // ==========================================
 // SNAPSHOT ROOM
 // ==========================================
 
-// Setelah database ditutup (server berhenti) snapshot tidak lagi disimpan
-function saveRoom(code, state) {
+function saveRoom(code, roomState) {
   if (closed) return;
-  q.saveRoom.run(code, JSON.stringify(state), Date.now());
+  const now = Date.now();
+  state.rooms.set(code, { code, state: roomState, updatedAt: now });
+  persistLocalFallback();
+  execPg(
+    `INSERT INTO rooms (code, state, updated_at) VALUES ($1, $2::jsonb, $3)
+     ON CONFLICT (code) DO UPDATE SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at`,
+    [code, JSON.stringify(roomState), now]
+  );
 }
 
 function deleteRoom(code) {
   if (closed) return;
-  q.deleteRoom.run(code);
+  state.rooms.delete(code);
+  persistLocalFallback();
+  execPg('DELETE FROM rooms WHERE code = $1', [code]);
 }
 
 function loadRooms() {
   const result = [];
-  for (const row of q.allRooms.all()) {
+  for (const row of state.rooms.values()) {
     try {
-      result.push({ code: row.code, state: JSON.parse(row.state), updatedAt: row.updated_at });
+      const parsed = typeof row.state === 'string' ? JSON.parse(row.state) : row.state;
+      result.push({ code: row.code, state: JSON.parse(JSON.stringify(parsed)), updatedAt: row.updatedAt });
     } catch (err) {
       console.error(`[DB] Snapshot room ${row.code} rusak, dilewati:`, err.message);
-      q.deleteRoom.run(row.code);
+      deleteRoom(row.code);
     }
   }
   return result;
 }
 
-function close() {
+async function flush() {
+  if (pendingQueries.size > 0) {
+    await Promise.allSettled(Array.from(pendingQueries));
+  }
+}
+
+async function close() {
   if (closed) return;
+  await flush();
   closed = true;
-  db.close();
+  if (pool) {
+    const activePool = pool;
+    pool = null;
+    await activePool.end().catch(err => console.error('[PG CLOSE]', err.message));
+  }
 }
 
 module.exports = {
   DB_FILE,
+  init,
+  flush,
+  getStatus,
   validateUsername,
   validatePassword,
   hashPassword,

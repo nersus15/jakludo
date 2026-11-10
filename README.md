@@ -4,10 +4,13 @@ Game Ludo multiplayer realtime dengan React/Vite di sisi klien dan Node/Express/
 
 ## Menjalankan secara lokal
 
-Butuh Node.js 22.13+ (memakai `node:sqlite` bawaan Node, tanpa dependency native).
+Butuh Node.js 20+ dan PostgreSQL (opsional untuk test lokal, wajib untuk produksi lewat `DATABASE_URL`).
 
 ```bash
 npm ci
+cp .env.example .env
+# Sesuaikan DATABASE_URL di .env, lalu jalankan migrasi:
+npm run db:migrate
 npm run dev
 ```
 
@@ -37,14 +40,32 @@ Variabel lingkungan:
 | `PORT` | `5172` | Port HTTP/Socket.IO |
 | `TRUST_PROXY` | `0` | Set `1` jika di belakang Nginx agar rate limit login memakai IP asli |
 | `CORS_ORIGIN` | kosong | Daftar origin (dipisah koma) bila klien di-host di domain lain |
-| `JAKLUDO_DATA_DIR` | `server/data` | Folder database SQLite (`jakludo.db`) |
+| `DATABASE_URL` | kosong | URL koneksi PostgreSQL (`postgresql://user:pass@host:5432/jakludo`) |
+| `PGSSLMODE` | kosong | Set `require` atau `verify-full` jika PostgreSQL mewajibkan koneksi SSL |
+| `JAKLUDO_DATA_DIR` | `server/data` | Folder data untuk backup & sumber migrasi otomatis `jakludo.db` lama |
+
+## Migrasi Database (SQLite -> PostgreSQL)
+
+Saat pertama kali dijalankan dengan `DATABASE_URL`, server otomatis:
+1. Menerapkan seluruh file skema SQL di `server/migrations/*.sql` (dilacak pada tabel `schema_migrations` dengan PostgreSQL *advisory lock*).
+2. Jika menemukan file SQLite lama (`server/data/jakludo.db`) atau JSON lama, seluruh data (`users`, `user_items`, `sessions`, `leaderboard`, `rooms`) otomatis dipindahkan ke PostgreSQL dalam satu transaksi idempoten, lalu file lama diubah namanya menjadi `jakludo.db.migrated-<timestamp>`.
+
+Kamu juga bisa menjalankan migrasi atau mengecek status secara manual:
+```bash
+npm run db:migrate                              # jalankan skema + impor server/data/jakludo.db
+node server/migrate.js --from-sqlite path.db    # impor eksplisit dari file SQLite tertentu
+npm run db:status                               # cek versi migrasi & jumlah baris di PostgreSQL
+npm run backup                                  # backup PostgreSQL (pg_dump / JSON)
+```
 
 ## Arsitektur singkat
 
 ```
 server/
-  index.js            bootstrap: Express, Socket.IO, restore room, shutdown
-  db.js               SQLite: user, sesi (token di-hash), leaderboard, stok item, snapshot room
+  index.js            bootstrap: Express, Socket.IO, inisialisasi PostgreSQL, restore room, shutdown
+  db.js               PostgreSQL (pg.Pool) + write-through state: user, sesi, leaderboard, stok item, room
+  migrate.js          migrasi skema SQL berversi & migrasi data dari SQLite (jakludo.db) ke PostgreSQL
+  migrations/         file skema SQL berurutan (001_initial_schema.sql, dst.)
   backup.js           backup database tanpa menghentikan server (npm run backup)
   http/routes.js      REST API: auth, leaderboard, room aktif, toko
   realtime/socket.js  event Socket.IO -> aksi lobby/engine

@@ -61,16 +61,37 @@ cd /opt/jakludo
 ```
 *(Atau upload folder proyek `ludo-party` menggunakan `scp` / `rsync` / SFTP ke server).*
 
-### B. Pastikan Izin Folder Data
-Semua data (akun, sesi login, leaderboard, inventaris, dan room yang sedang berjalan) disimpan di database SQLite `server/data/jakludo.db`. Folder ini di-mount ke container, sehingga datanya **tetap ada** saat container di-restart, di-rebuild, atau di-deploy ulang. File database **tidak** ikut di repository git. Container berjalan sebagai user non-root `node` (uid 1000), jadi folder ini harus bisa ditulis oleh uid 1000:
-```bash
-mkdir -p server/data
-sudo chown -R 1000:1000 server/data
-```
+### B. Konfigurasi Container PostgreSQL & Migrasi Otomatis dari SQLite
 
-**Pindah dari versi lama (JSON):** saat pertama kali start, server otomatis memindahkan `users.json`, `sessions.json`, dan `leaderboard.json` ke `jakludo.db`, lalu mengganti nama file lama menjadi `*.migrated-<waktu>` (tidak dihapus). Pemain tetap login dan poinnya tidak hilang. Jika salah satu file JSON rusak, server sengaja **menolak start** (pesan `[DB FATAL]` di log) supaya data tidak hilang diam-diam. Perbaiki atau pulihkan file tersebut, lalu jalankan ulang.
+File [`docker-compose.yml`](docker-compose.yml) sudah menyertakan container **`jakludo-postgres`** (`postgres:17-alpine`) yang terisolasi khusus untuk JakLudo:
+- **Bebas bentrok dengan PostgreSQL lain di server**: Container `jakludo-app` terhubung ke `postgres:5432` lewat jaringan internal Docker, sedangkan ke host Ubuntu dipetakan di `127.0.0.1:5433` (bukan `5432`) sehingga **tidak akan bentrok** dengan PostgreSQL lain yang sudah berjalan di server kamu.
+- **Hemat RAM**: Dikonfigurasi dengan `shared_buffers=64MB` dan `max_connections=50`.
+- **Data persisten**: Disimpan di Docker named volume `jakludo_pgdata`.
 
-Jangan menghapus `server/data/` saat update. Jika folder ini hilang, seluruh akun dan leaderboard ikut hilang.
+1. Siapkan file `.env` di folder `/opt/jakludo`:
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
+   Isi minimal:
+   ```env
+   TRUST_PROXY=1
+   POSTGRES_USER=jakludo
+   POSTGRES_PASSWORD=PasswordKuatJakLudo123!
+   POSTGRES_DB=jakludo
+   POSTGRES_PORT=5433
+   ```
+
+2. Pastikan izin folder `server/data` dapat diakses oleh container (`uid 1000`) agar file SQLite lama (`jakludo.db`) bisa dibaca dan di-backup:
+   ```bash
+   mkdir -p server/data
+   sudo chown -R 1000:1000 server/data
+   ```
+
+3. **Migrasi Otomatis dari `jakludo.db` (SQLite) ke PostgreSQL**:
+   Saat container `jakludo-app` pertama kali menyala setelah `jakludo-postgres` berstatus *healthy*:
+   - Modul [`server/migrate.js`](server/migrate.js) otomatis menerapkan seluruh skema tabel di `server/migrations/*.sql`.
+   - Jika terdapat file `server/data/jakludo.db` dari versi sebelumnya, seluruh data (`users`, `user_items`, `sessions`, `leaderboard`, dan `rooms` aktif) otomatis dipindahkan ke PostgreSQL dalam satu transaksi, lalu file lama diubah namanya menjadi `jakludo.db.migrated-<waktu>` sebagai cadangan aman.
 
 ### C. Build & Jalankan Container
 Cukup jalankan satu perintah:
@@ -79,10 +100,15 @@ docker compose up -d --build
 ```
 
 Container akan otomatis:
-1. Mem-build frontend Vite (React).
-2. Memasang dependensi produksi Express & Socket.io.
-3. Menjalankan container `jakludo-app` di port `5172`.
-4. Mem-mount folder `./server/data` (berisi `jakludo.db`) sehingga data pemain dan room yang sedang berjalan tidak hilang saat container di-restart atau di-deploy ulang.
+1. Menjalankan container `jakludo-postgres` dan menunggu hingga *healthy*.
+2. Mem-build frontend Vite (React) dan image `jakludo-app`.
+3. Menjalankan migrasi skema & migrasi data `jakludo.db` ke PostgreSQL, serta memulihkan room yang sedang berjalan.
+4. Menjalankan server `jakludo-app` di port `5172`.
+
+Verifikasi status migrasi kapan saja dengan:
+```bash
+docker compose exec jakludo npm run db:status
+```
 
 ---
 
@@ -209,6 +235,8 @@ Pemain yang terputus otomatis menyambung ulang ke kursinya. Kursi di lobby ditah
 | **Restart Aplikasi** | `docker compose restart` |
 | **Update / Rebuild Kode Terbaru** | `git pull && docker compose up -d --build` |
 | **Melihat Log** | `docker compose logs -f --tail=100` |
-| **Backup Database (aman saat server berjalan)** | `docker compose exec jakludo node server/backup.js` → `server/data/backups/jakludo-<waktu>.db` |
-| **Restore Database** | `docker compose down`, salin file backup menjadi `server/data/jakludo.db` (hapus `jakludo.db-wal` & `jakludo.db-shm`), lalu `docker compose up -d` |
+| **Cek Status Migrasi PostgreSQL** | `docker compose exec jakludo npm run db:status` |
+| **Masuk ke Shell psql** | `docker compose exec postgres psql -U ${POSTGRES_USER:-jakludo} -d ${POSTGRES_DB:-jakludo}` |
+| **Backup Database PostgreSQL (aman saat server berjalan)** | `docker compose exec jakludo npm run backup` → `server/data/backups/jakludo-pg-<waktu>.sql` |
+| **Restore Database PostgreSQL** | `docker compose exec -T postgres psql -U ${POSTGRES_USER:-jakludo} -d ${POSTGRES_DB:-jakludo} < server/data/backups/jakludo-pg-<waktu>.sql` |
 

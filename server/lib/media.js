@@ -14,6 +14,8 @@ const MAX_AUDIO_INPUT_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_AUDIO_DURATION_MS = 120_000;         // 2 menit
 const IMAGE_MAX_DIMENSION = 1600;
 const IMAGE_WEBP_QUALITY = 75;
+const AVATAR_DIMENSION = 256;
+const AVATAR_WEBP_QUALITY = 80;
 
 function resolveFfmpegBin() {
   if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
@@ -62,6 +64,46 @@ async function compressImage(inputBuffer) {
     ext: 'webp',
     width: info.width || null,
     height: info.height || null
+  };
+}
+
+async function compressAvatar(inputBuffer) {
+  if (!Buffer.isBuffer(inputBuffer) || inputBuffer.length === 0) {
+    throw new Error('File foto profil kosong atau tidak valid.');
+  }
+  if (inputBuffer.length > MAX_IMAGE_INPUT_BYTES) {
+    throw new Error('Ukuran foto profil terlalu besar (maksimal 8 MB).');
+  }
+
+  let metadata;
+  try {
+    metadata = await sharp(inputBuffer, { limitInputPixels: 40_000_000 }).metadata();
+  } catch {
+    throw new Error('Format gambar tidak dikenali atau rusak.');
+  }
+
+  const allowedFormats = new Set(['jpeg', 'png', 'webp', 'gif', 'avif', 'heif']);
+  if (!metadata?.format || !allowedFormats.has(metadata.format)) {
+    throw new Error('Format foto profil tidak didukung. Gunakan JPG, PNG, atau WebP.');
+  }
+
+  const { data, info } = await sharp(inputBuffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize({
+      width: AVATAR_DIMENSION,
+      height: AVATAR_DIMENSION,
+      fit: 'cover',
+      position: 'centre'
+    })
+    .webp({ quality: AVATAR_WEBP_QUALITY, effort: 4 })
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    buffer: data,
+    mime: 'image/webp',
+    ext: 'webp',
+    width: info.width || AVATAR_DIMENSION,
+    height: info.height || AVATAR_DIMENSION
   };
 }
 
@@ -218,6 +260,7 @@ module.exports = {
   MAX_AUDIO_INPUT_BYTES,
   MAX_AUDIO_DURATION_MS,
   compressImage,
+  compressAvatar,
   compressAudio,
   ensurePlayableAudio,
   detectAudioContainer

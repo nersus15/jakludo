@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Modal from './components/Modal';
 import Icon from './components/Icon';
+import { isAvatarUrl } from './social/media';
 
 const MEDAL_ICONS = { 1: 'medal-1', 2: 'medal-2', 3: 'medal-3' };
 
 function Avatar({ value, name }) {
-  if (value?.startsWith('http')) return <img src={value} alt="" width="36" height="36" className="lb-avatar" />;
+  if (isAvatarUrl(value)) return <img src={value} alt="" width="36" height="36" className="lb-avatar" />;
   return <span className="lb-avatar" aria-hidden="true">{name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}</span>;
 }
 
-export default function LeaderboardModal({ isOpen, onClose, currentUser, socket }) {
+export default function LeaderboardModal({ isOpen, onClose, currentUser, socket, onViewProfile }) {
   const [state, setState] = useState({ status: 'idle', list: [] });
 
   const load = useCallback(async () => {
@@ -81,7 +82,18 @@ export default function LeaderboardModal({ isOpen, onClose, currentUser, socket 
               </span>
               <div>
                 <p className="muted">Ludo King saat ini</p>
-                <strong>{king.name}</strong> <span className="muted">@{king.username}</span>
+                {onViewProfile ? (
+                  <button
+                    type="button"
+                    className="user-link"
+                    onClick={() => onViewProfile(king.userId)}
+                  >
+                    <strong>{king.name}</strong>
+                  </button>
+                ) : (
+                  <strong>{king.name}</strong>
+                )}{' '}
+                <span className="muted">@{king.username}</span>
               </div>
             </div>
           )}
@@ -89,7 +101,13 @@ export default function LeaderboardModal({ isOpen, onClose, currentUser, socket 
             {list.map(p => {
               const isMe = currentUser && p.userId === currentUser.id;
               return (
-                <li key={p.userId} className={`lb-row ${isMe ? 'is-me' : ''} ${p.rank <= 3 ? 'is-top' : ''}`}>
+                <li
+                  key={p.userId}
+                  className={`lb-row ${isMe ? 'is-me' : ''} ${p.rank <= 3 ? 'is-top' : ''} ${
+                    onViewProfile ? 'lb-row--clickable' : ''
+                  }`}
+                  onClick={onViewProfile ? () => onViewProfile(p.userId) : undefined}
+                >
                   <span className="lb-row__rank">
                     {MEDAL_ICONS[p.rank] ? <Icon name={MEDAL_ICONS[p.rank]} size={22} /> : `#${p.rank}`}
                   </span>
@@ -98,7 +116,7 @@ export default function LeaderboardModal({ isOpen, onClose, currentUser, socket 
                     <strong>
                       {p.name} {isMe && <span className="badge">Kamu</span>}
                     </strong>
-                    <span className="muted">@{p.username} · menang {p.winRate}%</span>
+                    <span className="muted">@{p.username} · menang {p.winRate}% · Klik lihat profil</span>
                   </span>
                   <span className="lb-row__stats">
                     <strong>{p.wins}</strong> <span className="muted">menang</span>

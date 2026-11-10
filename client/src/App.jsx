@@ -5,10 +5,12 @@ import Toasts from './components/Toasts';
 import { ReconnectBar } from './components/NetworkStatus';
 import InstallGuide from './components/InstallGuide';
 import NotificationPrompt from './components/NotificationPrompt';
+import SocialOnboardingTour from './components/SocialOnboardingTour';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
 import AudioSettingsModal from './AudioSettingsModal';
+import PlayerProfileModal from './social/PlayerProfileModal';
 import { useAuth } from './hooks/useAuth';
 import { useGameRoom } from './hooks/useGameRoom';
 import { useSocial } from './hooks/useSocial';
@@ -40,6 +42,8 @@ function preloadDialogs() {
 
 export default function App() {
   const [modal, setModal] = useState(null); // 'auth' | 'shop' | 'audio' | 'leaderboard' | 'friends' | 'groups' | null
+  const [profileUserId, setProfileUserId] = useState('');
+  const [initialChatFriendId, setInitialChatFriendId] = useState('');
   const [audio, setAudio] = useState(sound.getState());
   const [sheet, setSheet] = useState(null); // bottom sheet di layar permainan: 'chat' | 'scores'
   const auth = useAuth();
@@ -51,7 +55,8 @@ export default function App() {
   const social = useSocial({
     socket: game.socket,
     authToken: auth.authToken,
-    currentUser: auth.currentUser
+    currentUser: auth.currentUser,
+    onUpdateUser: auth.setCurrentUser
   });
   const network = useNetworkStatus(game.socket);
   const theme = useTheme();
@@ -68,8 +73,23 @@ export default function App() {
     game.actions.setChatOpen(name === 'chat');
   };
 
-  const open = name => () => setModal(name);
-  const close = () => setModal(null);
+  const open = name => () => {
+    if (name === 'friends') setInitialChatFriendId('');
+    setModal(name);
+  };
+  const close = () => {
+    setInitialChatFriendId('');
+    setModal(null);
+  };
+  const openProfile = userId => {
+    if (!userId) return;
+    setProfileUserId(String(userId));
+  };
+  const openChatWithFriend = friendId => {
+    setProfileUserId('');
+    setInitialChatFriendId(String(friendId || ''));
+    setModal('friends');
+  };
   const openAudio = () => {
     sound.init();
     sound.playClick();
@@ -108,6 +128,8 @@ export default function App() {
           onOpenAudio={openAudio}
           onOpenAuth={open('auth')}
           onOpenLeaderboard={open('leaderboard')}
+          onViewProfile={openProfile}
+          onUploadAvatar={social.actions.uploadAvatar}
           onLogout={auth.logout}
         />
       )}
@@ -143,6 +165,7 @@ export default function App() {
           actions={game.actions}
           social={social}
           onOpenFriends={open('friends')}
+          onViewProfile={openProfile}
         />
       ) : game.screen === 'room' ? (
         <main className="loading-screen" id="main" role="status">
@@ -185,7 +208,15 @@ export default function App() {
             }}
           />
         )}
-        {modal === 'leaderboard' && <LeaderboardModal isOpen onClose={close} currentUser={auth.currentUser} socket={game.socket} />}
+        {modal === 'leaderboard' && (
+          <LeaderboardModal
+            isOpen
+            onClose={close}
+            currentUser={auth.currentUser}
+            socket={game.socket}
+            onViewProfile={openProfile}
+          />
+        )}
         {modal === 'shop' && <ShopModal isOpen onClose={close} currentUser={auth.currentUser} onUpdateUser={auth.setCurrentUser} authToken={auth.authToken} />}
         {modal === 'friends' && (
           <FriendsModal
@@ -193,6 +224,8 @@ export default function App() {
             onClose={close}
             currentUser={auth.currentUser}
             social={social}
+            initialChatFriendId={initialChatFriendId}
+            onViewProfile={openProfile}
             onOpenAuth={open('auth')}
           />
         )}
@@ -203,13 +236,24 @@ export default function App() {
             currentUser={auth.currentUser}
             social={social}
             gameActions={game.actions}
+            onViewProfile={openProfile}
             onOpenAuth={open('auth')}
           />
         )}
       </Suspense>
+      <PlayerProfileModal
+        userId={profileUserId}
+        isOpen={!!profileUserId}
+        onClose={() => setProfileUserId('')}
+        currentUser={auth.currentUser}
+        social={social}
+        onOpenChatWithFriend={openChatWithFriend}
+        onOpenAuth={open('auth')}
+      />
       <AudioSettingsModal isOpen={modal === 'audio'} onClose={close} />
       <InstallGuide platform={pwa.installGuide} onClose={pwa.closeInstallGuide} />
-      <NotificationPrompt enabled={game.screen === 'home' && !modal && !pwa.installGuide} />
+      <NotificationPrompt enabled={game.screen === 'home' && !modal && !profileUserId && !pwa.installGuide} />
+      <SocialOnboardingTour enabled={game.screen === 'home' && !modal && !profileUserId && !pwa.installGuide} />
     </div>
   );
 }

@@ -116,7 +116,7 @@ export default function HomeScreen({
 
         <div className="home__links">
           {onOpenFriends && (
-            <button type="button" className="link-card card" onClick={onOpenFriends}>
+            <button type="button" className="link-card card" data-tour="friends" onClick={onOpenFriends}>
               <span className="link-card__icon" aria-hidden="true">
                 <Icon name="friends" size={24} />
               </span>
@@ -132,7 +132,7 @@ export default function HomeScreen({
             </button>
           )}
           {onOpenGroups && (
-            <button type="button" className="link-card card" onClick={onOpenGroups}>
+            <button type="button" className="link-card card" data-tour="groups" onClick={onOpenGroups}>
               <span className="link-card__icon" aria-hidden="true">
                 <Icon name="chat" size={24} />
               </span>
@@ -147,7 +147,7 @@ export default function HomeScreen({
               </span>
             </button>
           )}
-          <button type="button" className="link-card card" onClick={onOpenLeaderboard}>
+          <button type="button" className="link-card card" data-tour="leaderboard" onClick={onOpenLeaderboard}>
             <span className="link-card__icon" aria-hidden="true">
               <Icon name="trophy" size={24} />
             </span>

@@ -37,12 +37,13 @@ async function activeRegistration() {
 
 // Tampilkan notifikasi. Mengembalikan { ok, reason } agar kegagalan bisa dijelaskan ke pemain.
 // tag yang sama menggantikan notifikasi sebelumnya sehingga tidak menumpuk.
-export async function notify(title, { body, tag, force = false } = {}) {
+export async function notify(title, { body, tag, icon, force = false } = {}) {
   if (!isNotificationSupported()) return { ok: false, reason: 'unsupported' };
   if (Notification.permission !== 'granted') return { ok: false, reason: Notification.permission };
   if (!force && !isPageHidden()) return { ok: false, reason: 'visible' };
 
-  const options = { body, tag, icon: ICON, badge: ICON, renotify: !!tag, data: { url: location.href } };
+  const resolvedIcon = icon && (icon.startsWith('http') || icon.startsWith('/')) ? icon : ICON;
+  const options = { body, tag, icon: resolvedIcon, badge: ICON, renotify: !!tag, data: { url: location.href } };
   let lastError = null;
 
   // 1) Lewat service worker: wajib di Android Chrome dan PWA terpasang

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ThemeToggle from './ThemeToggle';
 import Icon from './Icon';
 import { NetworkIndicator } from './NetworkStatus';
+import { isAvatarUrl } from '../social/media';
 import { sound } from '../sound';
 import jakludoLogo from '../assets/jakludo-logo-sm.webp';
 
@@ -10,10 +11,23 @@ function soundIconName(audio) {
   return 'volume-on';
 }
 
-// Menu akun: profil, poin, teman, grup, peringkat, dan keluar akun
-function AccountMenu({ user, friendBadgeCount = 0, groupBadgeCount = 0, onOpenFriends, onOpenGroups, onOpenLeaderboard, onLogout }) {
+// Menu akun: profil, ubah avatar, poin, teman, grup, peringkat, dan keluar akun
+function AccountMenu({
+  user,
+  friendBadgeCount = 0,
+  groupBadgeCount = 0,
+  onOpenFriends,
+  onOpenGroups,
+  onOpenLeaderboard,
+  onViewProfile,
+  onUploadAvatar,
+  onLogout
+}) {
   const [open, setOpen] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarFeedback, setAvatarFeedback] = useState(null);
   const ref = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -37,32 +51,109 @@ function AccountMenu({ user, friendBadgeCount = 0, groupBadgeCount = 0, onOpenFr
     fn?.();
   };
 
+  const handleSelectAvatar = async e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || uploadingAvatar || !onUploadAvatar) return;
+    sound.playClick();
+    setUploadingAvatar(true);
+    setAvatarFeedback(null);
+    try {
+      await onUploadAvatar(file);
+      sound.playWin();
+      setAvatarFeedback({ type: 'success', text: 'Foto profil diperbarui!' });
+    } catch (err) {
+      setAvatarFeedback({ type: 'error', text: err.message });
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   return (
     <div className="account" ref={ref}>
       <button
         type="button"
         className="account__trigger"
+        data-tour="account"
         aria-expanded={open}
         aria-haspopup="true"
         aria-label={`Akun ${user.name}`}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => {
+          setAvatarFeedback(null);
+          setOpen(v => !v);
+        }}
       >
-        <span className="account__avatar" aria-hidden="true">
-          {user.name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}
-        </span>
+        {isAvatarUrl(user.avatar) ? (
+          <img src={user.avatar} alt="" width="28" height="28" className="account__avatar account__avatar--img" />
+        ) : (
+          <span className="account__avatar" aria-hidden="true">
+            {user.name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}
+          </span>
+        )}
         <span className="account__name">{user.name}</span>
       </button>
       {open && (
         <div className="account__menu card">
           <div className="account__profile">
-            <strong>
-              {user.name} {user.isLudoKing && <Icon name="crown" size={16} label="Ludo King" />}
-            </strong>
-            <span className="muted">@{user.username}</span>
-            <span className="badge badge--brand">
-              <Icon name="diamond" size={14} /> {user.points ?? 0} poin
-            </span>
+            <div className="account__profile-top">
+              {isAvatarUrl(user.avatar) ? (
+                <img src={user.avatar} alt="" width="48" height="48" className="social-avatar social-avatar--lg" />
+              ) : (
+                <span className="social-avatar social-avatar--lg" aria-hidden="true">
+                  {user.name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={20} />}
+                </span>
+              )}
+              <div className="account__profile-info">
+                <strong>
+                  {user.name} {user.isLudoKing && <Icon name="crown" size={16} label="Ludo King" />}
+                </strong>
+                <span className="muted">@{user.username}</span>
+                <span className="badge badge--brand">
+                  <Icon name="diamond" size={14} /> {user.points ?? 0} poin
+                </span>
+              </div>
+            </div>
+            {onUploadAvatar && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleSelectAvatar}
+                  tabIndex={-1}
+                />
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm btn--block"
+                  disabled={uploadingAvatar}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Icon name="camera" size={15} />
+                  <span>{uploadingAvatar ? 'Mengunggah foto...' : 'Ubah foto profil'}</span>
+                </button>
+              </>
+            )}
+            {avatarFeedback && (
+              <p
+                className={`alert alert--${avatarFeedback.type === 'success' ? 'success' : 'error'}`}
+                role={avatarFeedback.type === 'success' ? 'status' : 'alert'}
+              >
+                {avatarFeedback.text}
+              </p>
+            )}
           </div>
+          {onViewProfile && (
+            <button
+              type="button"
+              className="account__item"
+              onClick={pick(() => onViewProfile(user.id))}
+            >
+              <span className="account__item-label">
+                <Icon name="pawn" size={17} /> Profil saya
+              </span>
+            </button>
+          )}
           {onOpenFriends && (
             <button type="button" className="account__item" onClick={pick(onOpenFriends)}>
               <span className="account__item-label">
@@ -109,6 +200,8 @@ export default function AppHeader({
   onOpenAudio,
   onOpenAuth,
   onOpenLeaderboard,
+  onViewProfile,
+  onUploadAvatar,
   onLogout
 }) {
   return (
@@ -189,12 +282,15 @@ export default function AppHeader({
             onOpenFriends={onOpenFriends}
             onOpenGroups={onOpenGroups}
             onOpenLeaderboard={onOpenLeaderboard}
+            onViewProfile={onViewProfile}
+            onUploadAvatar={onUploadAvatar}
             onLogout={onLogout}
           />
         ) : (
           <button
             type="button"
             className="btn btn--primary"
+            data-tour="account"
             onClick={() => {
               sound.playClick();
               onOpenAuth();

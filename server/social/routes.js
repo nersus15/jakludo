@@ -25,9 +25,84 @@ function requireUser(req, res) {
 
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+function sendAudioStream(req, res, result) {
+  const { buffer, mime } = result;
+  const total = buffer.length;
+  res.setHeader('Content-Type', mime || 'audio/mpeg');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+
+  const range = req.headers.range;
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end = match[2] ? Math.min(total - 1, parseInt(match[2], 10)) : total - 1;
+      if (start >= 0 && start <= end && start < total) {
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Content-Length', String(end - start + 1));
+        return res.end(buffer.subarray(start, end + 1));
+      }
+    }
+  }
+
+  res.setHeader('Content-Length', String(total));
+  res.end(buffer);
+}
+
 function registerSocialRoutes(api) {
   // ==========================================
-  // TEMAN (FRIENDS)
+  // FOTO PROFIL (AVATAR) USER DI MINIO S3
+  // ==========================================
+
+  api.post(
+    '/auth/avatar',
+    (req, res, next) => {
+      upload.single('file')(req, res, err => {
+        if (err) {
+          const msg = err.code === 'LIMIT_FILE_SIZE'
+            ? 'Ukuran foto profil terlalu besar (maksimal 8 MB).'
+            : 'Gagal membaca file foto profil.';
+          return res.status(400).json({ success: false, error: msg });
+        }
+        next();
+      });
+    },
+    asyncRoute(async (req, res) => {
+      const user = requireUser(req, res);
+      if (!user) return;
+      if (!req.file?.buffer) {
+        return res.status(400).json({ success: false, error: 'File foto profil wajib dilampirkan.' });
+      }
+      const result = await social.uploadUserAvatar(user.id, req.file.buffer);
+      if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+      res.json({
+        success: true,
+        user: { ...result.user, isLudoKing: db.checkIsLudoKing(user.id) },
+        avatarUrl: result.avatarUrl
+      });
+    })
+  );
+
+  api.get('/users/:userId/avatar', asyncRoute(async (req, res) => {
+    const result = await social.getUserAvatarBuffer(req.params.userId, req.query.key);
+    if (result.error) return res.status(result.status || 404).end();
+    res.setHeader('Content-Type', result.mime || 'image/webp');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Content-Length', String(result.buffer.length));
+    res.end(result.buffer);
+  }));
+
+  api.get('/users/:userId/profile', (req, res) => {
+    const viewer = db.getUserByToken(bearerToken(req));
+    const result = social.getUserPublicProfile(req.params.userId, viewer?.id || null);
+    if (result.error) return res.status(result.status || 404).json({ success: false, error: result.error });
+    res.json({ success: true, ...result });
+  });
+
+  // ==========================================
+  // TEMAN & CHAT PRIVATE (DIRECT MESSAGES)
   // ==========================================
 
   api.get('/friends', (req, res) => {
@@ -59,6 +134,71 @@ function registerSocialRoutes(api) {
     if (result.error) return res.status(400).json({ success: false, error: result.error });
     res.json({ success: true });
   });
+
+  api.get('/friends/:userId/messages', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const result = await social.listDirectMessages(user.id, req.params.userId, {
+      before: req.query.before,
+      limit: req.query.limit
+    });
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+    res.json({ success: true, ...result });
+  }));
+
+  api.post('/friends/:userId/messages', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const result = await social.sendDirectTextMessage(user.id, req.params.userId, req.body || {});
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+    res.json({ success: true, ...result });
+  }));
+
+  api.post(
+    '/friends/:userId/media',
+    (req, res, next) => {
+      upload.single('file')(req, res, err => {
+        if (err) {
+          const msg = err.code === 'LIMIT_FILE_SIZE'
+            ? 'Ukuran file terlalu besar (maksimal 8 MB).'
+            : 'Gagal membaca file upload.';
+          return res.status(400).json({ success: false, error: msg });
+        }
+        next();
+      });
+    },
+    asyncRoute(async (req, res) => {
+      const user = requireUser(req, res);
+      if (!user) return;
+      if (!req.file?.buffer) {
+        return res.status(400).json({ success: false, error: 'File media wajib dilampirkan.' });
+      }
+      const result = await social.sendDirectMediaMessage(user.id, req.params.userId, {
+        kind: req.body?.kind,
+        buffer: req.file.buffer,
+        durationMs: req.body?.durationMs,
+        text: req.body?.text
+      });
+      if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+      res.json({ success: true, ...result });
+    })
+  );
+
+  api.get('/friends/:userId/messages/:messageId/audio', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const result = await social.getDirectMessageAudio(req.params.messageId, user.id);
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+    sendAudioStream(req, res, result);
+  }));
+
+  api.get('/dm/:messageId/audio', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const result = await social.getDirectMessageAudio(req.params.messageId, user.id);
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+    sendAudioStream(req, res, result);
+  }));
 
   // ==========================================
   // GRUP & UNDANGAN GRUP
@@ -93,6 +233,40 @@ function registerSocialRoutes(api) {
     const result = await social.renameGroup(req.params.id, user.id, req.body || {});
     if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
     res.json({ success: true, ...result });
+  }));
+
+  api.post(
+    '/groups/:id/avatar',
+    (req, res, next) => {
+      upload.single('file')(req, res, err => {
+        if (err) {
+          const msg = err.code === 'LIMIT_FILE_SIZE'
+            ? 'Ukuran foto grup terlalu besar (maksimal 8 MB).'
+            : 'Gagal membaca file foto grup.';
+          return res.status(400).json({ success: false, error: msg });
+        }
+        next();
+      });
+    },
+    asyncRoute(async (req, res) => {
+      const user = requireUser(req, res);
+      if (!user) return;
+      if (!req.file?.buffer) {
+        return res.status(400).json({ success: false, error: 'File foto grup wajib dilampirkan.' });
+      }
+      const result = await social.uploadGroupAvatar(req.params.id, user.id, req.file.buffer);
+      if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+      res.json({ success: true, ...result });
+    })
+  );
+
+  api.get('/groups/:id/avatar', asyncRoute(async (req, res) => {
+    const result = await social.getGroupAvatarBuffer(req.params.id, req.query.key);
+    if (result.error) return res.status(result.status || 404).end();
+    res.setHeader('Content-Type', result.mime || 'image/webp');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Content-Length', String(result.buffer.length));
+    res.end(result.buffer);
   }));
 
   api.delete('/groups/:id', (req, res) => {
@@ -208,30 +382,7 @@ function registerSocialRoutes(api) {
     if (!user) return;
     const result = await social.getGroupMessageAudio(req.params.id, req.params.messageId, user.id);
     if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
-
-    const { buffer, mime } = result;
-    const total = buffer.length;
-    res.setHeader('Content-Type', mime || 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'private, max-age=3600');
-
-    const range = req.headers.range;
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-      if (match) {
-        const start = match[1] ? parseInt(match[1], 10) : 0;
-        const end = match[2] ? Math.min(total - 1, parseInt(match[2], 10)) : total - 1;
-        if (start >= 0 && start <= end && start < total) {
-          res.status(206);
-          res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
-          res.setHeader('Content-Length', String(end - start + 1));
-          return res.end(buffer.subarray(start, end + 1));
-        }
-      }
-    }
-
-    res.setHeader('Content-Length', String(total));
-    res.end(buffer);
+    sendAudioStream(req, res, result);
   }));
 
   api.get('/groups/:id/leaderboard', (req, res) => {

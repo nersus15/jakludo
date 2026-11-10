@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
 import Icon from '../components/Icon';
+import VoiceNotePlayer, { formatDuration } from '../social/VoiceNotePlayer';
 import { sound } from '../sound';
-import { compressImage, MAX_VOICE_DURATION_MS, startVoiceRecording } from '../social/media';
+import {
+  compressImage,
+  isAvatarUrl,
+  MAX_VOICE_DURATION_MS,
+  startVoiceRecording
+} from '../social/media';
 
 const ROLE_LABELS = {
   owner: 'Owner',
@@ -20,7 +26,7 @@ const MEDAL_ICONS = { 1: 'medal-1', 2: 'medal-2', 3: 'medal-3' };
 
 function UserAvatar({ user, className = 'social-avatar' }) {
   const val = user?.avatar;
-  if (val?.startsWith('http')) {
+  if (isAvatarUrl(val)) {
     return <img src={val} alt="" width="36" height="36" className={className} />;
   }
   const initial = user?.name?.slice(0, 1).toUpperCase();
@@ -31,135 +37,16 @@ function UserAvatar({ user, className = 'social-avatar' }) {
   );
 }
 
-// Pemutar Voice Note kustom bertema papan permainan JakLudo
-function VoiceNotePlayer({ groupId, msg, token, onExpiredUrl }) {
-  const audioRef = useRef(null);
-  const [playing, setPlaying] = useState(false);
-  const [currentSec, setCurrentSec] = useState(0);
-  const [totalSec, setTotalSec] = useState(
-    msg.media?.durationMs ? Math.max(1, Math.round(msg.media.durationMs / 1000)) : 0
-  );
-  const [useFallbackUrl, setUseFallbackUrl] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  const streamSrc = `/api/groups/${encodeURIComponent(groupId)}/messages/${encodeURIComponent(msg.id)}/audio${
-    token ? `?token=${encodeURIComponent(token)}` : ''
-  }`;
-  const activeSrc = useFallbackUrl && msg.media?.url ? msg.media.url : streamSrc;
-
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return undefined;
-
-    const onLoaded = () => {
-      if (Number.isFinite(el.duration) && el.duration > 0) {
-        setTotalSec(Math.round(el.duration));
-      }
-      setLoadFailed(false);
-    };
-    const onTime = () => {
-      setCurrentSec(Math.floor(el.currentTime || 0));
-      if (Number.isFinite(el.duration) && el.duration > 0) {
-        setTotalSec(Math.round(el.duration));
-      }
-    };
-    const onEnded = () => {
-      setPlaying(false);
-      setCurrentSec(0);
-    };
-    const onPause = () => setPlaying(false);
-    const onPlay = () => setPlaying(true);
-
-    el.addEventListener('loadedmetadata', onLoaded);
-    el.addEventListener('timeupdate', onTime);
-    el.addEventListener('ended', onEnded);
-    el.addEventListener('pause', onPause);
-    el.addEventListener('play', onPlay);
-    return () => {
-      el.removeEventListener('loadedmetadata', onLoaded);
-      el.removeEventListener('timeupdate', onTime);
-      el.removeEventListener('ended', onEnded);
-      el.removeEventListener('pause', onPause);
-      el.removeEventListener('play', onPlay);
-    };
-  }, [activeSrc]);
-
-  const togglePlay = async () => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (playing) {
-      el.pause();
-      return;
-    }
-    setLoadFailed(false);
-    try {
-      await el.play();
-    } catch {
-      if (!useFallbackUrl && msg.media?.url) {
-        setUseFallbackUrl(true);
-      } else {
-        setLoadFailed(true);
-        onExpiredUrl?.();
-      }
-    }
-  };
-
-  const onSeek = e => {
-    const el = audioRef.current;
-    if (!el || !totalSec) return;
-    const next = Number(e.target.value);
-    el.currentTime = next;
-    setCurrentSec(next);
-  };
-
-  const progressPct = totalSec > 0 ? Math.min(100, Math.round((currentSec / totalSec) * 100)) : 0;
-
+function GroupAvatar({ group, className = 'social-avatar', size = 38, fallbackIcon = null }) {
+  const val = group?.avatar;
+  if (isAvatarUrl(val)) {
+    return <img src={val} alt="" width={size} height={size} className={className} />;
+  }
+  const initial = group?.name?.slice(0, 1).toUpperCase();
   return (
-    <div className="vn-player">
-      <audio
-        ref={audioRef}
-        src={activeSrc}
-        preload="metadata"
-        onError={() => {
-          if (!useFallbackUrl && msg.media?.url) {
-            setUseFallbackUrl(true);
-          } else {
-            setLoadFailed(true);
-            onExpiredUrl?.();
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="vn-player__btn"
-        onClick={togglePlay}
-        aria-label={playing ? 'Jeda pesan suara' : 'Putar pesan suara'}
-      >
-        <Icon name={playing ? 'pause' : 'play'} size={16} />
-      </button>
-      <div className="vn-player__track">
-        <input
-          type="range"
-          min="0"
-          max={Math.max(1, totalSec)}
-          step="1"
-          value={Math.min(currentSec, Math.max(1, totalSec))}
-          onChange={onSeek}
-          className="vn-player__slider"
-          aria-label="Posisi putar pesan suara"
-          style={{ '--vn-pct': `${progressPct}%` }}
-        />
-        <div className="vn-player__meta">
-          <span className="vn-player__time">
-            <Icon name="mic" size={13} />
-            <span>
-              {formatDuration(currentSec * 1000)} / {formatDuration(totalSec * 1000 || msg.media?.durationMs || 0)}
-            </span>
-          </span>
-          {loadFailed && <span className="vn-player__err">Ketuk ulang untuk memutar</span>}
-        </div>
-      </div>
-    </div>
+    <span className={className} aria-hidden="true">
+      {fallbackIcon ? <Icon name={fallbackIcon} size={18} /> : initial || 'G'}
+    </span>
   );
 }
 
@@ -171,14 +58,6 @@ function formatTime(iso) {
   } catch {
     return '';
   }
-}
-
-function formatDuration(ms) {
-  if (!ms || ms < 0) return '0:00';
-  const totalSec = Math.round(ms / 1000);
-  const mins = Math.floor(totalSec / 60);
-  const secs = totalSec % 60;
-  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 function previewLastMessage(msg) {
@@ -193,7 +72,7 @@ function previewLastMessage(msg) {
 
 // -------------------- Tab Chat --------------------
 
-function GroupChatTab({ groupId, currentUser, social, onJoinMatch }) {
+function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile }) {
   const [messages, setMessages] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -512,7 +391,20 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch }) {
                 {!isMe && <UserAvatar user={msg.sender} className="social-avatar social-avatar--sm" />}
                 <div className="gmsg__bubble">
                   <div className="gmsg__meta">
-                    <strong>{isMe ? 'Kamu' : msg.sender?.name || 'Anggota'}</strong>
+                    {!isMe && msg.sender?.userId && onViewProfile ? (
+                      <button
+                        type="button"
+                        className="user-link"
+                        onClick={() => {
+                          sound.playClick();
+                          onViewProfile(msg.sender.userId);
+                        }}
+                      >
+                        <strong>{msg.sender?.name || 'Anggota'}</strong>
+                      </button>
+                    ) : (
+                      <strong>{isMe ? 'Kamu' : msg.sender?.name || 'Anggota'}</strong>
+                    )}
                     {!isMe && msg.sender?.username && (
                       <span className="muted">@{msg.sender.username}</span>
                     )}
@@ -675,15 +567,17 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch }) {
 
 // -------------------- Tab Anggota --------------------
 
-function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroupLeftOrDeleted }) {
+function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroupLeftOrDeleted, onViewProfile }) {
   const [inviteUsername, setInviteUsername] = useState('');
   const [inviting, setInviting] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState(detail?.name || '');
   const [savingName, setSavingName] = useState(false);
+  const [uploadingGroupAvatar, setUploadingGroupAvatar] = useState(false);
   const [busyUserId, setBusyUserId] = useState('');
   const [confirmAction, setConfirmAction] = useState(null); // 'leave' | 'delete' | null
   const [feedback, setFeedback] = useState(null);
+  const groupAvatarInputRef = useRef(null);
 
   useEffect(() => {
     setNewName(detail?.name || '');
@@ -825,6 +719,28 @@ function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroup
     }
   };
 
+  const handleSelectGroupAvatar = async e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || uploadingGroupAvatar) return;
+    sound.playClick();
+    setUploadingGroupAvatar(true);
+    setFeedback(null);
+    try {
+      const updated = await social.actions.uploadGroupAvatar(detail.id, file);
+      sound.playWin();
+      setFeedback({
+        type: 'success',
+        text: 'Foto profil (ava) grup berhasil dikompres dan diperbarui!'
+      });
+      onDetailUpdated(updated);
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message });
+    } finally {
+      setUploadingGroupAvatar(false);
+    }
+  };
+
   return (
     <div className="social-stack">
       {feedback && (
@@ -838,6 +754,35 @@ function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroup
 
       {canRename && (
         <section className="social-section">
+          <div className="group-avatar-bar">
+            <div className="group-avatar-bar__info">
+              <GroupAvatar group={detail} className="social-avatar social-avatar--lg" size={48} />
+              <div>
+                <strong>Foto profil grup</strong>
+                <p className="muted">Owner & Admin bisa mengganti foto ava grup (otomatis dikompres WebP)</p>
+              </div>
+            </div>
+            <div>
+              <input
+                ref={groupAvatarInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={handleSelectGroupAvatar}
+                tabIndex={-1}
+              />
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                disabled={uploadingGroupAvatar}
+                onClick={() => groupAvatarInputRef.current?.click()}
+              >
+                <Icon name="camera" size={15} />
+                <span>{uploadingGroupAvatar ? 'Mengunggah...' : 'Ganti foto ava grup'}</span>
+              </button>
+            </div>
+          </div>
+
           {editingName ? (
             <form className="social-inline-form" onSubmit={handleRename}>
               <label htmlFor="rename-group-input" className="sr-only">
@@ -918,7 +863,22 @@ function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroup
                     />
                   </div>
                   <div className="social-row__info">
-                    <strong>{f.name}</strong>
+                    <strong>
+                      {onViewProfile ? (
+                        <button
+                          type="button"
+                          className="user-link"
+                          onClick={() => {
+                            sound.playClick();
+                            onViewProfile(f.userId);
+                          }}
+                        >
+                          {f.name}
+                        </button>
+                      ) : (
+                        f.name
+                      )}
+                    </strong>
                     <span className="muted">
                       @{f.username} · {f.online ? 'Online' : 'Offline'}
                     </span>
@@ -1027,14 +987,27 @@ function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroup
                 </div>
                 <div className="social-row__info">
                   <strong className="social-row__title">
-                    {m.name}
+                    {onViewProfile ? (
+                      <button
+                        type="button"
+                        className="user-link"
+                        onClick={() => {
+                          sound.playClick();
+                          onViewProfile(m.userId);
+                        }}
+                      >
+                        {m.name}
+                      </button>
+                    ) : (
+                      m.name
+                    )}
                     {isMe && <span className="badge">Kamu</span>}
                     <span className={ROLE_BADGE_CLASS[m.role] || 'badge'}>
                       {ROLE_LABELS[m.role] || m.role}
                     </span>
                   </strong>
                   <span className="muted">
-                    @{m.username} · {m.online ? 'Online' : 'Offline'}
+                    @{m.username} · {m.online ? 'Online' : 'Offline'} · Klik nama lihat profil
                   </span>
                 </div>
                 {(canChangeRole || canKick) && (
@@ -1136,7 +1109,7 @@ function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroup
 
 // -------------------- Tab Peringkat Grup --------------------
 
-function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch }) {
+function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch, onViewProfile }) {
   const [state, setState] = useState({ status: 'loading', list: [] });
 
   const loadLeaderboard = useCallback(async () => {
@@ -1201,7 +1174,17 @@ function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch 
             return (
               <li
                 key={p.userId}
-                className={`lb-row ${isMe ? 'is-me' : ''} ${p.rank <= 3 ? 'is-top' : ''}`}
+                className={`lb-row ${isMe ? 'is-me' : ''} ${p.rank <= 3 ? 'is-top' : ''} ${
+                  onViewProfile ? 'lb-row--clickable' : ''
+                }`}
+                onClick={
+                  onViewProfile
+                    ? () => {
+                        sound.playClick();
+                        onViewProfile(p.userId);
+                      }
+                    : undefined
+                }
               >
                 <span className="lb-row__rank">
                   {MEDAL_ICONS[p.rank] ? <Icon name={MEDAL_ICONS[p.rank]} size={22} /> : `#${p.rank}`}
@@ -1212,7 +1195,7 @@ function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch 
                     {p.name} {isMe && <span className="badge">Kamu</span>}
                   </strong>
                   <span className="muted">
-                    @{p.username} · {p.matchesPlayed} main · menang {p.winRate}%
+                    @{p.username} · {p.matchesPlayed} main · menang {p.winRate}% · Klik lihat profil
                   </span>
                 </span>
                 <span className="lb-row__stats">
@@ -1236,6 +1219,7 @@ export default function GroupsScreen({
   currentUser,
   social,
   gameActions,
+  onViewProfile,
   onOpenAuth
 }) {
   const [activeGroupId, setActiveGroupId] = useState(null);
@@ -1402,10 +1386,21 @@ export default function GroupsScreen({
       ) : activeGroupId ? (
         <div className="group-detail">
           <div className="group-detail__bar">
-            <button type="button" className="btn btn--secondary btn--sm" onClick={() => backToList()}>
-              <Icon name="arrow-left" size={16} />
-              <span>Semua grup</span>
-            </button>
+            <div className="group-detail__bar-left">
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => backToList()}>
+                <Icon name="arrow-left" size={16} />
+                <span>Semua grup</span>
+              </button>
+              <div className="group-detail__identity">
+                <GroupAvatar group={groupDetail || activeSummary} size={36} />
+                <div>
+                  <strong>{currentGroupName}</strong>
+                  <span className="muted">
+                    {groupDetail?.members?.length ?? activeSummary?.memberCount ?? 1} anggota
+                  </span>
+                </div>
+              </div>
+            </div>
             <button type="button" className="btn btn--primary btn--sm" onClick={handleCreateGroupMatch}>
               <Icon name="dice" size={16} />
               <span>Buat match grup</span>
@@ -1460,6 +1455,7 @@ export default function GroupsScreen({
               currentUser={currentUser}
               social={social}
               onJoinMatch={handleJoinMatch}
+              onViewProfile={onViewProfile}
             />
           )}
 
@@ -1473,6 +1469,7 @@ export default function GroupsScreen({
                 else loadDetail(activeGroupId);
               }}
               onGroupLeftOrDeleted={msg => backToList(msg)}
+              onViewProfile={onViewProfile}
             />
           )}
 
@@ -1482,6 +1479,7 @@ export default function GroupsScreen({
               currentUser={currentUser}
               social={social}
               onCreateGroupMatch={handleCreateGroupMatch}
+              onViewProfile={onViewProfile}
             />
           )}
         </div>
@@ -1531,9 +1529,7 @@ export default function GroupsScreen({
               <ul className="social-list">
                 {groupInvites.map(inv => (
                   <li key={inv.id} className="social-row">
-                    <span className="social-avatar" aria-hidden="true">
-                      <Icon name="chat" size={18} />
-                    </span>
+                    <GroupAvatar group={inv.group} fallbackIcon="chat" />
                     <div className="social-row__info">
                       <strong>{inv.group?.name || 'Grup'}</strong>
                       <span className="muted">
@@ -1590,9 +1586,7 @@ export default function GroupsScreen({
                       className="group-card card"
                       onClick={() => openGroup(g.id)}
                     >
-                      <span className="social-avatar" aria-hidden="true">
-                        {g.name?.slice(0, 1).toUpperCase() || 'G'}
-                      </span>
+                      <GroupAvatar group={g} />
                       <span className="group-card__info">
                         <span className="group-card__head">
                           <strong>{g.name}</strong>

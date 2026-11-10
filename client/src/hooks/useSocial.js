@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { storage } from '../storage';
 import { sound } from '../sound';
-import { uploadGroupMedia } from '../social/media';
+import { notify } from '../notifications';
+import {
+  isAvatarUrl,
+  uploadDirectMedia,
+  uploadGroupAvatarMedia,
+  uploadGroupMedia,
+  uploadUserAvatar
+} from '../social/media';
 
-// Hook fitur sosial: teman, grup, undangan grup, chat grup, dan undangan room
-export function useSocial({ socket, authToken, currentUser }) {
+function formatMessageNotifBody(msg) {
+  if (!msg) return 'Pesan baru';
+  if (msg.type === 'image') return msg.text ? `📷 Foto: ${msg.text}` : '📷 Mengirim foto';
+  if (msg.type === 'audio') return msg.text ? `🎙️ Pesan suara: ${msg.text}` : '🎙️ Mengirim pesan suara';
+  if (msg.type === 'match') return `🎲 Mengajak Match Grup! Kode room: ${msg.match?.code || ''}`;
+  return msg.text || 'Pesan baru';
+}
+
+// Hook fitur sosial: teman, chat private, grup, undangan grup, chat grup, avatar S3, dan notifikasi browser
+export function useSocial({ socket, authToken, currentUser, onUpdateUser }) {
   const [friends, setFriends] = useState([]);
   const [incoming, setIncoming] = useState([]);
   const [outgoing, setOutgoing] = useState([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
+  const [unreadDmByFriend, setUnreadDmByFriend] = useState({});
 
   const [groups, setGroups] = useState([]);
   const [groupInvites, setGroupInvites] = useState([]);
@@ -21,6 +37,12 @@ export function useSocial({ socket, authToken, currentUser }) {
   tokenRef.current = authToken;
   const userRef = useRef(currentUser);
   userRef.current = currentUser;
+  const onUpdateUserRef = useRef(onUpdateUser);
+  onUpdateUserRef.current = onUpdateUser;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const activeDmFriendIdRef = useRef('');
+
   const hadTokenRef = useRef(false);
   const roomInviteTimerRef = useRef(null);
   const groupListenersRef = useRef(new Set());
@@ -129,6 +151,7 @@ export function useSocial({ socket, authToken, currentUser }) {
       setFriends([]);
       setIncoming([]);
       setOutgoing([]);
+      setUnreadDmByFriend({});
       setGroups([]);
       setGroupInvites([]);
       setRoomInvite(null);
@@ -145,12 +168,12 @@ export function useSocial({ socket, authToken, currentUser }) {
       try {
         fn(event, payload);
       } catch (err) {
-        console.error('Group listener error:', err);
+        console.error('Social listener error:', err);
       }
     });
   }, []);
 
-  // Pasang listener event socket sosial
+  // Pasang listener event socket sosial & notifikasi browser
   useEffect(() => {
     if (!socket) return undefined;
 
@@ -174,6 +197,71 @@ export function useSocial({ socket, authToken, currentUser }) {
       }
     };
 
+    const onFriendRequest = payload => {
+      const from = payload?.from;
+      if (!from || from.userId === userRef.current?.id) return;
+      sound.playJoinNotification();
+      notify('👋 Permintaan Pertemanan Baru', {
+        body: `${from.name} (@${from.username}) ingin berteman denganmu di JakLudo.`,
+        tag: `jakludo-freq-${from.userId}`,
+        icon: isAvatarUrl(from.avatar) ? from.avatar : undefined,
+        force: true
+      });
+    };
+
+    const onFriendAccepted = payload => {
+      const by = payload?.by;
+      if (!by || by.userId === userRef.current?.id) return;
+      sound.playJoinNotification();
+      notify('🤝 Pertemanan Diterima!', {
+        body: `${by.name} (@${by.username}) menerima permintaan pertemananmu. Yuk sapa lewat chat!`,
+        tag: `jakludo-facc-${by.userId}`,
+        icon: isAvatarUrl(by.avatar) ? by.avatar : undefined,
+        force: true
+      });
+    };
+
+    const onDmMessage = message => {
+      if (!message?.id) return;
+      const myId = userRef.current?.id;
+      const otherId = message.senderId === myId ? message.recipientId : message.senderId;
+
+      setFriends(prev =>
+        prev.map(f =>
+          f.userId === otherId
+            ? {
+                ...f,
+                lastMessage: {
+                  id: message.id,
+                  senderId: message.senderId,
+                  type: message.type,
+                  text: message.text || '',
+                  createdAt: message.createdAt
+                }
+              }
+            : f
+        )
+      );
+
+      if (message.senderId && message.senderId !== myId) {
+        sound.playChatNotification();
+        if (activeDmFriendIdRef.current !== message.senderId) {
+          setUnreadDmByFriend(prev => ({
+            ...prev,
+            [message.senderId]: (prev[message.senderId] || 0) + 1
+          }));
+        }
+        notify(`💬 ${message.sender?.name || 'Teman'} (@${message.sender?.username || 'teman'})`, {
+          body: formatMessageNotifBody(message),
+          tag: `jakludo-dm-${message.senderId}`,
+          icon: isAvatarUrl(message.sender?.avatar) ? message.sender.avatar : undefined,
+          force: true
+        });
+      }
+
+      emitGroupEvent('dm:message', message);
+    };
+
     const onGroupsChanged = payload => {
       if (payload && Array.isArray(payload.groups)) {
         setGroups(payload.groups);
@@ -184,6 +272,18 @@ export function useSocial({ socket, authToken, currentUser }) {
       }
     };
 
+    const onGroupInvite = payload => {
+      const inv = payload?.invite;
+      if (!inv?.group || !inv?.inviter) return;
+      sound.playJoinNotification();
+      notify('📩 Undangan Grup Baru', {
+        body: `${inv.inviter.name} (@${inv.inviter.username}) mengundangmu ke grup "${inv.group.name}".`,
+        tag: `jakludo-ginv-${inv.id}`,
+        icon: isAvatarUrl(inv.inviter.avatar) ? inv.inviter.avatar : undefined,
+        force: true
+      });
+    };
+
     const onGroupMessage = message => {
       if (!message?.groupId) return;
       setGroups(prev =>
@@ -191,6 +291,19 @@ export function useSocial({ socket, authToken, currentUser }) {
       );
       if (message.sender?.userId && message.sender.userId !== userRef.current?.id) {
         sound.playChatNotification();
+        const grp = groupsRef.current.find(g => g.id === message.groupId);
+        const groupTitle = grp?.name ? `Grup ${grp.name}` : 'Chat Grup';
+        notify(
+          message.type === 'system'
+            ? `👥 ${groupTitle}`
+            : `👥 ${groupTitle} · ${message.sender.name}`,
+          {
+            body: formatMessageNotifBody(message),
+            tag: `jakludo-gmsg-${message.groupId}`,
+            icon: isAvatarUrl(message.sender.avatar) ? message.sender.avatar : undefined,
+            force: true
+          }
+        );
       }
       emitGroupEvent('group:message', message);
     };
@@ -223,11 +336,24 @@ export function useSocial({ socket, authToken, currentUser }) {
       roomInviteTimerRef.current = setTimeout(() => {
         setRoomInvite(prev => (prev?.id === invite.id ? null : prev));
       }, 15000);
+
+      notify('🎲 Undangan Bermain JakLudo!', {
+        body: `${payload.from?.name || 'Teman'} mengundangmu masuk ke room ${payload.code}${
+          payload.group?.name ? ` (Match Grup ${payload.group.name})` : ''
+        }.`,
+        tag: `jakludo-rinv-${payload.code}`,
+        icon: isAvatarUrl(payload.from?.avatar) ? payload.from.avatar : undefined,
+        force: true
+      });
     };
 
     socket.on('social:sync', onSocialSync);
     socket.on('friends:changed', onFriendsChanged);
+    socket.on('friend:request', onFriendRequest);
+    socket.on('friend:accepted', onFriendAccepted);
+    socket.on('dm:message', onDmMessage);
     socket.on('groups:changed', onGroupsChanged);
+    socket.on('group:invite', onGroupInvite);
     socket.on('group:message', onGroupMessage);
     socket.on('group:updated', onGroupUpdated);
     socket.on('group:removed', onGroupRemoved);
@@ -237,7 +363,11 @@ export function useSocial({ socket, authToken, currentUser }) {
     return () => {
       socket.off('social:sync', onSocialSync);
       socket.off('friends:changed', onFriendsChanged);
+      socket.off('friend:request', onFriendRequest);
+      socket.off('friend:accepted', onFriendAccepted);
+      socket.off('dm:message', onDmMessage);
       socket.off('groups:changed', onGroupsChanged);
+      socket.off('group:invite', onGroupInvite);
       socket.off('group:message', onGroupMessage);
       socket.off('group:updated', onGroupUpdated);
       socket.off('group:removed', onGroupRemoved);
@@ -246,7 +376,7 @@ export function useSocial({ socket, authToken, currentUser }) {
     };
   }, [socket, loadFriends, loadGroups, emitGroupEvent]);
 
-  // ---------- Aksi Teman ----------
+  // ---------- Aksi Teman & Chat Private ----------
 
   const sendFriendRequest = useCallback(async username => {
     const clean = String(username || '').trim().replace(/^@/, '');
@@ -268,6 +398,82 @@ export function useSocial({ socket, authToken, currentUser }) {
     await apiFetch(`/api/friends/${encodeURIComponent(userId)}`, { method: 'DELETE' });
     await loadFriends();
   }, [apiFetch, loadFriends]);
+
+  const setActiveDmFriend = useCallback(friendId => {
+    const clean = String(friendId || '');
+    activeDmFriendIdRef.current = clean;
+    if (clean) {
+      setUnreadDmByFriend(prev => {
+        if (!prev[clean]) return prev;
+        const next = { ...prev };
+        delete next[clean];
+        return next;
+      });
+    }
+  }, []);
+
+  const getDirectMessages = useCallback(async (friendId, before = '', limit = 30) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (before) params.set('before', before);
+    const data = await apiFetch(
+      `/api/friends/${encodeURIComponent(friendId)}/messages?${params.toString()}`
+    );
+    if (typeof data.mediaEnabled === 'boolean') setMediaEnabled(data.mediaEnabled);
+    return {
+      messages: Array.isArray(data.messages) ? data.messages : [],
+      hasMore: Boolean(data.hasMore)
+    };
+  }, [apiFetch]);
+
+  const sendDirectMessage = useCallback(async (friendId, text) => {
+    const clean = String(text || '').trim();
+    if (!clean) throw new Error('Pesan tidak boleh kosong.');
+    if (clean.length > 1000) throw new Error('Pesan maksimal 1000 karakter.');
+    const data = await apiFetch(`/api/friends/${encodeURIComponent(friendId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ text: clean })
+    });
+    return data.message;
+  }, [apiFetch]);
+
+  const sendDirectMedia = useCallback(async (friendId, { file, kind, durationMs, text }) => {
+    return uploadDirectMedia({
+      friendId,
+      token: getToken(),
+      file,
+      kind,
+      durationMs,
+      text
+    });
+  }, [getToken]);
+
+  const uploadAvatar = useCallback(async file => {
+    const updatedUser = await uploadUserAvatar({
+      token: getToken(),
+      file
+    });
+    if (updatedUser && onUpdateUserRef.current) {
+      onUpdateUserRef.current(updatedUser);
+    }
+    return updatedUser;
+  }, [getToken]);
+
+  const getUserProfile = useCallback(async userIdOrUsername => {
+    const clean = String(userIdOrUsername || '').trim();
+    if (!clean) throw new Error('Pemain tidak ditemukan.');
+    const data = await apiFetch(`/api/users/${encodeURIComponent(clean)}/profile`);
+    return data.profile;
+  }, [apiFetch]);
+
+  const uploadGroupAvatar = useCallback(async (groupId, file) => {
+    const updatedGroup = await uploadGroupAvatarMedia({
+      groupId,
+      token: getToken(),
+      file
+    });
+    await loadGroups();
+    return updatedGroup;
+  }, [getToken, loadGroups]);
 
   // ---------- Aksi Grup ----------
 
@@ -415,6 +621,11 @@ export function useSocial({ socket, authToken, currentUser }) {
     return () => groupListenersRef.current.delete(listener);
   }, []);
 
+  const totalUnreadDm = useMemo(
+    () => Object.values(unreadDmByFriend).reduce((acc, n) => acc + Number(n || 0), 0),
+    [unreadDmByFriend]
+  );
+
   const actions = useMemo(
     () => ({
       getToken,
@@ -423,6 +634,13 @@ export function useSocial({ socket, authToken, currentUser }) {
       sendFriendRequest,
       acceptFriendRequest,
       removeFriend,
+      setActiveDmFriend,
+      getDirectMessages,
+      sendDirectMessage,
+      sendDirectMedia,
+      uploadAvatar,
+      getUserProfile,
+      uploadGroupAvatar,
       createGroup,
       getGroup,
       renameGroup,
@@ -446,6 +664,13 @@ export function useSocial({ socket, authToken, currentUser }) {
       sendFriendRequest,
       acceptFriendRequest,
       removeFriend,
+      setActiveDmFriend,
+      getDirectMessages,
+      sendDirectMessage,
+      sendDirectMedia,
+      uploadAvatar,
+      getUserProfile,
+      uploadGroupAvatar,
       createGroup,
       getGroup,
       renameGroup,
@@ -469,12 +694,14 @@ export function useSocial({ socket, authToken, currentUser }) {
     incoming,
     outgoing,
     friendsLoading,
+    unreadDmByFriend,
+    totalUnreadDm,
     groups,
     groupInvites,
     mediaEnabled,
     groupsLoading,
     roomInvite,
-    friendBadgeCount: incoming.length,
+    friendBadgeCount: incoming.length + totalUnreadDm,
     groupBadgeCount: groupInvites.length,
     subscribeGroupEvents,
     actions

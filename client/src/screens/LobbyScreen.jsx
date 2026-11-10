@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../components/Icon';
+import { isAvatarUrl } from '../social/media';
 import { sound } from '../sound';
 
 function shareInvite(room) {
@@ -35,7 +36,7 @@ async function copyOrShare(room) {
   return 'copied';
 }
 
-function PlayerSlot({ player, index, playerId }) {
+function PlayerSlot({ player, index, playerId, onViewProfile }) {
   if (!player) {
     return (
       <li className="slot slot--empty">
@@ -48,12 +49,30 @@ function PlayerSlot({ player, index, playerId }) {
     );
   }
   const role = player.isBot ? 'Bot komputer' : player.username ? `@${player.username}` : 'Tamu';
+  const canInspect = !player.isBot && !!player.userId && !!onViewProfile;
   return (
     <li className={`slot color-${player.color} ${player.connected === false && !player.isBot ? 'slot--offline' : ''}`}>
-      <span className="avatar" aria-hidden="true">{player.name.slice(0, 1).toUpperCase()}</span>
+      {isAvatarUrl(player.avatar) ? (
+        <img src={player.avatar} alt="" width="36" height="36" className="avatar avatar--img" />
+      ) : (
+        <span className="avatar" aria-hidden="true">{player.name.slice(0, 1).toUpperCase()}</span>
+      )}
       <span className="slot__text">
         <strong className="slot__name">
-          {player.name}
+          {canInspect ? (
+            <button
+              type="button"
+              className="user-link"
+              onClick={() => {
+                sound.playClick();
+                onViewProfile(player.userId);
+              }}
+            >
+              {player.name}
+            </button>
+          ) : (
+            player.name
+          )}
           {player.id === playerId && <span className="badge">Kamu</span>}
           {player.isHost && <span className="badge badge--brand">Host</span>}
           {player.isLudoKing && (
@@ -71,7 +90,7 @@ function PlayerSlot({ player, index, playerId }) {
   );
 }
 
-export default function LobbyScreen({ room, me, playerId, currentUser, error, actions, social, onOpenFriends }) {
+export default function LobbyScreen({ room, me, playerId, currentUser, error, actions, social, onOpenFriends, onViewProfile }) {
   const [copyState, setCopyState] = useState('');
   const [groupMembers, setGroupMembers] = useState([]);
   const [inviteStatus, setInviteStatus] = useState({}); // { [userId]: 'sending' | 'sent' }
@@ -180,7 +199,15 @@ export default function LobbyScreen({ room, me, playerId, currentUser, error, ac
           <span className="badge">{count} / 4</span>
         </div>
         <ul className="slots">
-          {[0, 1, 2, 3].map(i => <PlayerSlot key={i} index={i} player={room.players[i]} playerId={playerId} />)}
+          {[0, 1, 2, 3].map(i => (
+            <PlayerSlot
+              key={i}
+              index={i}
+              player={room.players[i]}
+              playerId={playerId}
+              onViewProfile={onViewProfile}
+            />
+          ))}
         </ul>
         {isHost && (
           <div className="lobby__bots">
@@ -289,16 +316,35 @@ export default function LobbyScreen({ room, me, playerId, currentUser, error, ac
                 return (
                   <li key={u.userId} className="social-row">
                     <div className="social-avatar-wrap">
-                      <span className="social-avatar" aria-hidden="true">
-                        {u.name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}
-                      </span>
+                      {isAvatarUrl(u.avatar) ? (
+                        <img src={u.avatar} alt="" width="38" height="38" className="social-avatar" />
+                      ) : (
+                        <span className="social-avatar" aria-hidden="true">
+                          {u.name?.slice(0, 1).toUpperCase() || <Icon name="pawn" size={16} />}
+                        </span>
+                      )}
                       <span
                         className={`status-dot ${u.online ? 'status-dot--online' : 'status-dot--offline'}`}
                         aria-hidden="true"
                       />
                     </div>
                     <div className="social-row__info">
-                      <strong>{u.name}</strong>
+                      <strong>
+                        {onViewProfile ? (
+                          <button
+                            type="button"
+                            className="user-link"
+                            onClick={() => {
+                              sound.playClick();
+                              onViewProfile(u.userId);
+                            }}
+                          >
+                            {u.name}
+                          </button>
+                        ) : (
+                          u.name
+                        )}
+                      </strong>
                       <span className="muted">
                         @{u.username} ·{' '}
                         <span className={u.online ? 'text-online' : ''}>

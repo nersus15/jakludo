@@ -1,7 +1,12 @@
 const MAX_IMAGE_SIDE = 1600;
+const MAX_AVATAR_SIDE = 512;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 export const MAX_VOICE_DURATION_MS = 120 * 1000;
+
+export function isAvatarUrl(val) {
+  return typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('/api/'));
+}
 
 async function decodeImage(file) {
   if (typeof createImageBitmap === 'function') {
@@ -83,6 +88,56 @@ export async function compressImage(file) {
       file: outFile,
       width,
       height,
+      size: outFile.size,
+      mime: outFile.type
+    };
+  } finally {
+    decoded.cleanup();
+  }
+}
+
+// Kompres & crop persegi di sisi klien untuk foto profil (avatar <= 512x512 WebP)
+export async function compressAvatar(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('Pilih file gambar yang valid untuk foto profil.');
+  }
+
+  const decoded = await decodeImage(file);
+  try {
+    const { source, width: origW, height: origH } = decoded;
+    if (!origW || !origH) throw new Error('Ukuran gambar tidak valid.');
+
+    const cropSide = Math.min(origW, origH);
+    const sx = Math.floor((origW - cropSide) / 2);
+    const sy = Math.floor((origH - cropSide) / 2);
+    const targetSide = Math.min(MAX_AVATAR_SIDE, cropSide);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetSide;
+    canvas.height = targetSide;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Browser tidak mendukung pemrosesan gambar.');
+
+    ctx.drawImage(source, sx, sy, cropSide, cropSide, 0, 0, targetSide, targetSide);
+
+    let blob = await canvasToBlob(canvas, 'image/webp', 0.8);
+    let ext = 'webp';
+    if (!blob || blob.type !== 'image/webp') {
+      blob = await canvasToBlob(canvas, 'image/jpeg', 0.8);
+      ext = 'jpg';
+    }
+    if (!blob) throw new Error('Gagal mengompres foto profil.');
+    if (blob.size > MAX_IMAGE_BYTES) {
+      throw new Error('Ukuran foto profil terlalu besar.');
+    }
+
+    const outFile = new File([blob], `avatar-${Date.now()}.${ext}`, {
+      type: blob.type || `image/${ext}`
+    });
+    return {
+      file: outFile,
+      width: targetSide,
+      height: targetSide,
       size: outFile.size,
       mime: outFile.type
     };
@@ -253,4 +308,65 @@ export async function uploadGroupMedia({ groupId, token, file, kind, durationMs,
     throw new Error(data?.error || 'Gagal mengunggah media.');
   }
   return data.message;
+}
+
+// Unggah foto atau voice note ke chat private POST /api/friends/:userId/media
+export async function uploadDirectMedia({ friendId, token, file, kind, durationMs, text }) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('kind', kind);
+  if (kind === 'audio' && durationMs != null) {
+    form.append('durationMs', String(Math.round(durationMs)));
+  }
+  const cleanText = String(text || '').trim();
+  if (cleanText) {
+    form.append('text', cleanText);
+  }
+
+  const res = await fetch(`/api/friends/${encodeURIComponent(friendId)}/media`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || 'Gagal mengunggah media.');
+  }
+  return data.message;
+}
+
+// Unggah & kompres foto profil (avatar) ke POST /api/auth/avatar
+export async function uploadUserAvatar({ token, file }) {
+  const compressed = await compressAvatar(file);
+  const form = new FormData();
+  form.append('file', compressed.file);
+
+  const res = await fetch('/api/auth/avatar', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || 'Gagal mengunggah foto profil.');
+  }
+  return data.user;
+}
+
+// Unggah & kompres foto profil grup (avatar grup) ke POST /api/groups/:id/avatar (khusus owner/admin)
+export async function uploadGroupAvatarMedia({ groupId, token, file }) {
+  const compressed = await compressAvatar(file);
+  const form = new FormData();
+  form.append('file', compressed.file);
+
+  const res = await fetch(`/api/groups/${encodeURIComponent(groupId)}/avatar`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error || 'Gagal mengunggah foto profil grup.');
+  }
+  return data.group;
 }

@@ -7,8 +7,8 @@ const store = require('../game/store');
 const { createLimiter } = require('../lib/limiter');
 const { registerSocialRoutes } = require('../social/routes');
 
-const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
-const registerLimiter = createLimiter({ windowMs: 60 * 60 * 1000, max: 10 });
+const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 20 });
+const registerLimiter = createLimiter({ windowMs: 60 * 60 * 1000, max: Number(process.env.REGISTER_RATE_LIMIT || 30) });
 
 function bearerToken(req) {
   return String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();

@@ -302,3 +302,144 @@ test('match khusus grup hanya bisa diikuti anggota grup dan hanya masuk ke leade
   assert.equal(grpLb.leaderboard[1].wins, 0);
   assert.equal(grpLb.leaderboard[1].points, 5);
 });
+
+test('chat private antar teman, unggah avatar S3 terkompresi, dan event notifikasi realtime', async () => {
+  const u1 = await register('dm_u1');
+  const u2 = await register('dm_u2');
+  const stranger = await register('dm_stranger');
+
+  const sock1 = await connect();
+  const sock2 = await connect();
+  sock1.emit('social:identify', { token: u1.token });
+  sock2.emit('social:identify', { token: u2.token });
+  await wait(40);
+
+  // 1) Unggah foto profil (avatar) 1000x600 -> otomatis di-crop & dikompres ke 256x256 WebP di MinIO S3
+  const rawAvatar = await sharp({
+    create: { width: 1000, height: 600, channels: 3, background: { r: 20, g: 140, b: 220 } }
+  }).png().toBuffer();
+
+  const avForm = new FormData();
+  avForm.append('file', new Blob([rawAvatar], { type: 'image/png' }), 'profile.png');
+
+  const avRes = await fetch(`${url}/api/auth/avatar`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${u1.token}` },
+    body: avForm
+  }).then(r => r.json());
+
+  assert.equal(avRes.success, true);
+  assert.match(avRes.user.avatar, /^\/api\/users\/user_.*\/avatar\?key=avatars%2F/);
+
+  // Ambil gambar avatar lewat endpoint publik -> harus berupa WebP 256x256
+  const getAvRes = await fetch(`${url}${avRes.user.avatar}`);
+  assert.equal(getAvRes.status, 200);
+  assert.equal(getAvRes.headers.get('content-type'), 'image/webp');
+  const avMeta = await sharp(Buffer.from(await getAvRes.arrayBuffer())).metadata();
+  assert.equal(avMeta.format, 'webp');
+  assert.equal(avMeta.width, 256);
+  assert.equal(avMeta.height, 256);
+
+  // 2) Event notifikasi permintaan pertemanan (friend:request & friend:accepted)
+  const freqEvent = once(sock2, 'friend:request');
+  await apiFetch(u1.token, 'POST', '/api/friends/request', { username: u2.user.username });
+  const freqPayload = await freqEvent;
+  assert.equal(freqPayload.from.userId, u1.user.id);
+
+  const faccEvent = once(sock1, 'friend:accepted');
+  await apiFetch(u2.token, 'POST', `/api/friends/${u1.user.id}/accept`);
+  const faccPayload = await faccEvent;
+  assert.equal(faccPayload.by.userId, u2.user.id);
+
+  // 3) Chat private ke bukan teman harus ditolak
+  const badDm = await apiFetch(u1.token, 'POST', `/api/friends/${stranger.user.id}/messages`, { text: 'Halo' });
+  assert.equal(badDm.status, 403);
+
+  // 4) Chat private antar teman (teks + foto WebP + realtime dm:message)
+  const dmEvent = once(sock2, 'dm:message');
+  const dmTxt = await apiFetch(u1.token, 'POST', `/api/friends/${u2.user.id}/messages`, {
+    text: 'Halo bro, main Ludo yuk!'
+  });
+  assert.equal(dmTxt.success, true);
+  assert.equal(dmTxt.message.text, 'Halo bro, main Ludo yuk!');
+  const receivedDm = await dmEvent;
+  assert.equal(receivedDm.id, dmTxt.message.id);
+  assert.equal(receivedDm.sender.userId, u1.user.id);
+
+  // Kirim foto di chat private
+  const dmImgForm = new FormData();
+  dmImgForm.append('kind', 'image');
+  dmImgForm.append('text', 'Screenshot skor');
+  dmImgForm.append('file', new Blob([rawAvatar], { type: 'image/png' }), 'shot.png');
+
+  const dmImgRes = await fetch(`${url}/api/friends/${u1.user.id}/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${u2.token}` },
+    body: dmImgForm
+  }).then(r => r.json());
+
+  assert.equal(dmImgRes.success, true);
+  assert.equal(dmImgRes.message.type, 'image');
+  assert.equal(dmImgRes.message.media.mime, 'image/webp');
+  assert.match(dmImgRes.message.media.url, /^https:\/\/minio\.local\/jakludo\/dm\//);
+
+  // Riwayat chat private memuat kedua pesan
+  const dmHistory = await apiFetch(u1.token, 'GET', `/api/friends/${u2.user.id}/messages`);
+  assert.equal(dmHistory.success, true);
+  assert.equal(dmHistory.messages.length, 2);
+
+  // 5) Buat grup, undang u2, angkat u2 menjadi Admin, lalu Admin mengganti foto ava grup
+  const grpRes = await apiFetch(u1.token, 'POST', '/api/groups', { name: 'Klub Ludo Nasional' });
+  assert.equal(grpRes.success, true);
+  const groupId = grpRes.group.id;
+
+  const invRes = await apiFetch(u1.token, 'POST', `/api/groups/${groupId}/invites`, {
+    username: u2.user.username
+  });
+  await apiFetch(u2.token, 'POST', `/api/group-invites/${invRes.invite.id}/accept`);
+
+  // Member biasa belum boleh mengganti foto ava grup (403)
+  const memberAvForm = new FormData();
+  memberAvForm.append('file', new Blob([rawAvatar], { type: 'image/png' }), 'grp.png');
+  const forbiddenAv = await fetch(`${url}/api/groups/${groupId}/avatar`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${u2.token}` },
+    body: memberAvForm
+  });
+  assert.equal(forbiddenAv.status, 403);
+
+  // Owner mengangkat u2 menjadi Admin
+  await apiFetch(u1.token, 'PATCH', `/api/groups/${groupId}/members/${u2.user.id}`, { role: 'admin' });
+
+  // Sekarang Admin (u2) mengganti foto ava grup -> dikompres 256x256 WebP di MinIO S3
+  const adminAvForm = new FormData();
+  adminAvForm.append('file', new Blob([rawAvatar], { type: 'image/png' }), 'grp.png');
+  const grpAvRes = await fetch(`${url}/api/groups/${groupId}/avatar`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${u2.token}` },
+    body: adminAvForm
+  }).then(r => r.json());
+
+  assert.equal(grpAvRes.success, true);
+  assert.match(grpAvRes.group.avatar, /^\/api\/groups\/grp_.*\/avatar\?key=group-avatars%2F/);
+
+  const getGrpAv = await fetch(`${url}${grpAvRes.group.avatar}`);
+  assert.equal(getGrpAv.status, 200);
+  assert.equal(getGrpAv.headers.get('content-type'), 'image/webp');
+  const grpAvMeta = await sharp(Buffer.from(await getGrpAv.arrayBuffer())).metadata();
+  assert.equal(grpAvMeta.format, 'webp');
+  assert.equal(grpAvMeta.width, 256);
+  assert.equal(grpAvMeta.height, 256);
+
+  // 6) Lihat profil pemain lain (GET /api/users/:userId/profile)
+  const profRes = await apiFetch(u2.token, 'GET', `/api/users/${u1.user.id}/profile`);
+  assert.equal(profRes.success, true);
+  assert.equal(profRes.profile.userId, u1.user.id);
+  assert.equal(profRes.profile.username, u1.user.username);
+  assert.equal(profRes.profile.friendshipStatus, 'friends');
+  assert.equal(profRes.profile.friendCount, 1);
+  assert.equal(profRes.profile.groupCount, 1);
+  assert.equal(profRes.profile.sharedGroups.length, 1);
+  assert.equal(profRes.profile.sharedGroups[0].id, groupId);
+  assert.equal(profRes.profile.sharedGroups[0].avatar, grpAvRes.group.avatar);
+});

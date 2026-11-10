@@ -535,6 +535,23 @@ function sanitizeUser(u) {
   };
 }
 
+function updateUserAvatar(userId, avatarUrl) {
+  const row = state.usersById.get(userId);
+  if (!row) return null;
+  const cleanAvatar = String(avatarUrl || '🎯').trim();
+  row.avatar = cleanAvatar;
+  const lb = state.leaderboard.get(userId);
+  if (lb) lb.avatar = cleanAvatar;
+  persistLocalFallback();
+
+  execPgTransaction(async client => {
+    await client.query('UPDATE users SET avatar = $1 WHERE id = $2', [cleanAvatar, userId]);
+    await client.query('UPDATE leaderboard SET avatar = $1 WHERE user_id = $2', [cleanAvatar, userId]);
+  });
+
+  return sanitizeUser(findUserById(userId));
+}
+
 // ==========================================
 // SESSION MANAGEMENT (TOKEN)
 // ==========================================
@@ -844,6 +861,7 @@ module.exports = {
   getLeaderboard,
   checkIsLudoKing,
   sanitizeUser,
+  updateUserAvatar,
   getUserItems,
   purchaseItem,
   consumeUserItem,

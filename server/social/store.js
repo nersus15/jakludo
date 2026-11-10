@@ -13,6 +13,7 @@ const PLAY_POINTS = 5;
 
 const state = {
   friendships: new Map(),      // "low:high" -> { userLow, userHigh, requesterId, status, createdAt, updatedAt }
+  directMessages: new Map(),   // "low:high" -> Array<dmRow> (urut lama -> baru)
   groups: new Map(),           // groupId -> { id, name, ownerId, createdAt }
   groupMembers: new Map(),     // groupId -> Map<userId, { groupId, userId, role, joinedAt }>
   groupInvites: new Map(),     // inviteId -> { id, groupId, inviterId, inviteeId, createdAt }
@@ -24,6 +25,8 @@ const state = {
 const onlineSockets = new Map();
 // Cache audio MP3 siap putar di memori (maks 30 pesan terakhir) agar playback cepat & mendukung Range request
 const audioPlayCache = new Map();
+// Cache buffer avatar di memori (maks 100 avatar) agar pemuatan foto profil instan
+const avatarBufferCache = new Map();
 
 function pairKey(a, b) {
   return a < b ? `${a}:${b}` : `${b}:${a}`;
@@ -38,6 +41,7 @@ function persistLocalSocial() {
   try {
     const dump = {
       friendships: Array.from(state.friendships.values()),
+      directMessages: Array.from(state.directMessages.values()).flat(),
       groups: Array.from(state.groups.values()),
       groupMembers: Array.from(state.groupMembers.values()).flatMap(m => Array.from(m.values())),
       groupInvites: Array.from(state.groupInvites.values()),
@@ -56,6 +60,14 @@ function bootstrapLocalSocial() {
     const dump = JSON.parse(fs.readFileSync(LOCAL_SOCIAL_FILE, 'utf8'));
     for (const f of dump.friendships || []) {
       state.friendships.set(pairKey(f.userLow, f.userHigh), f);
+    }
+    for (const dm of dump.directMessages || []) {
+      const pk = dm.pairKey || pairKey(dm.senderId, dm.recipientId);
+      if (!state.directMessages.has(pk)) state.directMessages.set(pk, []);
+      state.directMessages.get(pk).push(dm);
+    }
+    for (const list of state.directMessages.values()) {
+      list.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     }
     for (const g of dump.groups || []) {
       state.groups.set(g.id, g);
@@ -93,14 +105,16 @@ async function hydrateFromPostgres() {
   if (!pool) return;
 
   state.friendships.clear();
+  state.directMessages.clear();
   state.groups.clear();
   state.groupMembers.clear();
   state.groupInvites.clear();
   state.groupMessages.clear();
   state.groupLeaderboard.clear();
 
-  const [friendsRes, groupsRes, membersRes, invitesRes, msgsRes, lbRes] = await Promise.all([
+  const [friendsRes, dmRes, groupsRes, membersRes, invitesRes, msgsRes, lbRes] = await Promise.all([
     pool.query('SELECT * FROM friendships'),
+    pool.query('SELECT * FROM direct_messages ORDER BY created_at ASC, id ASC'),
     pool.query('SELECT * FROM groups'),
     pool.query('SELECT * FROM group_members'),
     pool.query('SELECT * FROM group_invites'),
@@ -118,11 +132,31 @@ async function hydrateFromPostgres() {
       updatedAt: Number(r.updated_at)
     });
   }
+  for (const r of dmRes.rows) {
+    const pk = r.pair_key || pairKey(r.sender_id, r.recipient_id);
+    if (!state.directMessages.has(pk)) state.directMessages.set(pk, []);
+    state.directMessages.get(pk).push({
+      id: r.id,
+      pairKey: pk,
+      senderId: r.sender_id,
+      recipientId: r.recipient_id,
+      type: r.type,
+      text: r.text || '',
+      mediaKey: r.media_key || null,
+      mediaMime: r.media_mime || null,
+      mediaSize: r.media_size ? Number(r.media_size) : null,
+      mediaWidth: r.media_width ? Number(r.media_width) : null,
+      mediaHeight: r.media_height ? Number(r.media_height) : null,
+      mediaDurationMs: r.media_duration_ms ? Number(r.media_duration_ms) : null,
+      createdAt: Number(r.created_at)
+    });
+  }
   for (const r of groupsRes.rows) {
     state.groups.set(r.id, {
       id: r.id,
       name: r.name,
       ownerId: r.owner_id,
+      avatar: r.avatar || null,
       createdAt: Number(r.created_at)
     });
     state.groupMembers.set(r.id, new Map());
@@ -344,7 +378,18 @@ function listFriends(userId) {
     if (!summary) continue;
 
     if (f.status === 'accepted') {
-      friends.push(summary);
+      const dmList = state.directMessages.get(pairKey(userId, otherId)) || [];
+      const lastRaw = dmList.length > 0 ? dmList[dmList.length - 1] : null;
+      const lastMessage = lastRaw
+        ? {
+            id: lastRaw.id,
+            senderId: lastRaw.senderId,
+            type: lastRaw.type,
+            text: lastRaw.text || '',
+            createdAt: new Date(lastRaw.createdAt).toISOString()
+          }
+        : null;
+      friends.push({ ...summary, lastMessage });
     } else if (f.requesterId === userId) {
       outgoing.push({ ...summary, requestedAt: new Date(f.createdAt).toISOString() });
     } else {
@@ -386,6 +431,7 @@ function requestFriend(userId, rawUsername) {
     );
     emitToUser(userId, 'friends:changed');
     emitToUser(target.id, 'friends:changed');
+    emitToUser(target.id, 'friend:accepted', { by: userSummary(userId) });
     return { status: 'accepted', user: userSummary(target.id) };
   }
 
@@ -411,6 +457,7 @@ function requestFriend(userId, rawUsername) {
 
   emitToUser(userId, 'friends:changed');
   emitToUser(target.id, 'friends:changed');
+  emitToUser(target.id, 'friend:request', { from: userSummary(userId) });
   return { status: 'pending', user: userSummary(target.id) };
 }
 
@@ -434,6 +481,7 @@ function acceptFriend(userId, otherUserId) {
 
   emitToUser(userId, 'friends:changed');
   emitToUser(otherUserId, 'friends:changed');
+  emitToUser(otherUserId, 'friend:accepted', { by: userSummary(userId) });
   return { success: true };
 }
 
@@ -474,7 +522,7 @@ function getMemberRole(groupId, userId) {
 
 function getGroupBasic(groupId) {
   const g = state.groups.get(groupId);
-  return g ? { id: g.id, name: g.name } : null;
+  return g ? { id: g.id, name: g.name, avatar: g.avatar || null } : null;
 }
 
 async function formatMessage(msg) {
@@ -556,6 +604,7 @@ async function listUserGroups(userId) {
     summaries.push({
       id: g.id,
       name: g.name,
+      avatar: g.avatar || null,
       role: me.role,
       memberCount: members.size,
       createdAt: new Date(g.createdAt).toISOString(),
@@ -609,6 +658,7 @@ function getGroupDetail(groupId, userId) {
     group: {
       id: g.id,
       name: g.name,
+      avatar: g.avatar || null,
       ownerId: g.ownerId,
       role: myMember.role,
       createdAt: new Date(g.createdAt).toISOString(),
@@ -627,7 +677,7 @@ async function createGroup(userId, { name }) {
 
   const id = 'grp_' + crypto.randomUUID();
   const now = Date.now();
-  const groupRow = { id, name: valid.cleanName, ownerId: userId, createdAt: now };
+  const groupRow = { id, name: valid.cleanName, ownerId: userId, avatar: null, createdAt: now };
   const memberRow = { groupId: id, userId, role: 'owner', joinedAt: now };
 
   state.groups.set(id, groupRow);
@@ -703,7 +753,12 @@ function deleteGroup(groupId, actorId) {
     }
   }
 
-  // Hapus file media di MinIO secara asinkron
+  // Hapus file media & avatar grup di MinIO secara asinkron
+  const grpAvatarKey = extractAvatarKey(g.avatar);
+  if (grpAvatarKey) {
+    avatarBufferCache.delete(grpAvatarKey);
+    storage.deleteMedia(grpAvatarKey);
+  }
   for (const m of msgs) {
     if (m.mediaKey) storage.deleteMedia(m.mediaKey);
   }
@@ -759,6 +814,14 @@ function inviteToGroup(groupId, inviterId, { username }) {
   );
 
   emitToUser(invitee.id, 'groups:changed');
+  emitToUser(invitee.id, 'group:invite', {
+    invite: {
+      id,
+      group: { id: g.id, name: g.name, avatar: g.avatar || null },
+      inviter: userSummary(inviterId),
+      createdAt: new Date(createdAt).toISOString()
+    }
+  });
   emitToGroup(groupId, 'group:updated', { groupId });
 
   return {
@@ -781,7 +844,7 @@ function listUserGroupInvites(userId) {
     if (!g || !inviter) continue;
     invites.push({
       id: inv.id,
-      group: { id: g.id, name: g.name, memberCount: members ? members.size : 1 },
+      group: { id: g.id, name: g.name, avatar: g.avatar || null, memberCount: members ? members.size : 1 },
       inviter,
       createdAt: new Date(inv.createdAt).toISOString()
     });
@@ -1166,6 +1229,536 @@ function getGroupLeaderboard(groupId, userId) {
   };
 }
 
+// ==========================================
+// CHAT PRIVATE ANTAR TEMAN (DIRECT MESSAGES)
+// ==========================================
+
+async function formatDirectMessage(msg) {
+  if (!msg) return null;
+  let mediaObj = null;
+  if (msg.mediaKey) {
+    const url = await storage.signMediaUrl(msg.mediaKey);
+    const otherId = msg.senderId;
+    mediaObj = {
+      url,
+      streamUrl: msg.type === 'audio' ? `/api/dm/${msg.id}/audio` : null,
+      friendStreamUrl: msg.type === 'audio' ? `/api/friends/${otherId}/messages/${msg.id}/audio` : null,
+      mime: msg.mediaMime || 'application/octet-stream',
+      size: msg.mediaSize || 0,
+      width: msg.mediaWidth ?? null,
+      height: msg.mediaHeight ?? null,
+      durationMs: msg.mediaDurationMs ?? null
+    };
+  }
+  return {
+    id: msg.id,
+    pairKey: msg.pairKey,
+    senderId: msg.senderId,
+    recipientId: msg.recipientId,
+    type: msg.type,
+    sender: userSummary(msg.senderId),
+    recipient: userSummary(msg.recipientId),
+    text: msg.text || '',
+    media: mediaObj,
+    createdAt: new Date(msg.createdAt).toISOString()
+  };
+}
+
+function appendRawDirectMessage({
+  senderId,
+  recipientId,
+  type,
+  text = '',
+  mediaKey = null,
+  mediaMime = null,
+  mediaSize = null,
+  mediaWidth = null,
+  mediaHeight = null,
+  mediaDurationMs = null
+}) {
+  const id = 'dm_' + crypto.randomUUID();
+  const createdAt = Date.now();
+  const pk = pairKey(senderId, recipientId);
+  const row = {
+    id,
+    pairKey: pk,
+    senderId,
+    recipientId,
+    type,
+    text: String(text || '').slice(0, 1000),
+    mediaKey,
+    mediaMime,
+    mediaSize,
+    mediaWidth,
+    mediaHeight,
+    mediaDurationMs,
+    createdAt
+  };
+  if (!state.directMessages.has(pk)) state.directMessages.set(pk, []);
+  state.directMessages.get(pk).push(row);
+  persistLocalSocial();
+
+  db.execPg(
+    `INSERT INTO direct_messages
+      (id, pair_key, sender_id, recipient_id, type, text, media_key, media_mime, media_size, media_width, media_height, media_duration_ms, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      id,
+      pk,
+      senderId,
+      recipientId,
+      type,
+      row.text,
+      mediaKey,
+      mediaMime,
+      mediaSize,
+      mediaWidth,
+      mediaHeight,
+      mediaDurationMs,
+      createdAt
+    ]
+  );
+
+  return row;
+}
+
+async function broadcastNewDirectMessage(row) {
+  const formatted = await formatDirectMessage(row);
+  emitToUser(row.senderId, 'dm:message', formatted);
+  emitToUser(row.recipientId, 'dm:message', formatted);
+  emitToUser(row.senderId, 'friends:changed');
+  emitToUser(row.recipientId, 'friends:changed');
+  return formatted;
+}
+
+async function listDirectMessages(userId, friendId, { before, limit = 30 } = {}) {
+  if (!areFriends(userId, friendId)) {
+    return { error: 'Kamu hanya dapat berkirim pesan private dengan teman.', status: 403 };
+  }
+  const pk = pairKey(userId, friendId);
+  const all = state.directMessages.get(pk) || [];
+  const cap = Math.max(1, Math.min(50, Number(limit) || 30));
+  let endIdx = all.length;
+  if (before) {
+    const foundIdx = all.findIndex(m => m.id === before);
+    if (foundIdx !== -1) endIdx = foundIdx;
+  }
+  const startIdx = Math.max(0, endIdx - cap);
+  const slice = all.slice(startIdx, endIdx);
+  const messages = await Promise.all(slice.map(formatDirectMessage));
+
+  return {
+    messages,
+    hasMore: startIdx > 0,
+    mediaEnabled: storage.isMediaEnabled()
+  };
+}
+
+async function sendDirectTextMessage(userId, friendId, { text }) {
+  if (!areFriends(userId, friendId)) {
+    return { error: 'Kamu hanya dapat berkirim pesan private dengan teman.', status: 403 };
+  }
+  const clean = String(text || '').trim();
+  if (!clean) return { error: 'Pesan tidak boleh kosong.' };
+  if (clean.length > 1000) return { error: 'Pesan maksimal 1.000 karakter.' };
+
+  const row = appendRawDirectMessage({
+    senderId: userId,
+    recipientId: friendId,
+    type: 'text',
+    text: clean
+  });
+  const message = await broadcastNewDirectMessage(row);
+  return { message };
+}
+
+async function sendDirectMediaMessage(userId, friendId, { kind, buffer, durationMs, text }) {
+  if (!areFriends(userId, friendId)) {
+    return { error: 'Kamu hanya dapat berkirim pesan private dengan teman.', status: 403 };
+  }
+  if (!storage.isMediaEnabled()) {
+    return { error: 'Penyimpanan media MinIO belum dikonfigurasi di server.', status: 503 };
+  }
+  if (kind !== 'image' && kind !== 'audio') {
+    return { error: 'Jenis media harus berupa image (foto) atau audio (voice note).' };
+  }
+
+  let processed;
+  try {
+    if (kind === 'image') {
+      processed = await media.compressImage(buffer);
+    } else {
+      processed = await media.compressAudio(buffer, durationMs);
+    }
+  } catch (err) {
+    return { error: err.message || 'Gagal memproses file media.' };
+  }
+
+  const pk = pairKey(userId, friendId);
+  let uploaded;
+  try {
+    uploaded = await storage.uploadMedia({
+      pairKey: pk,
+      kind,
+      ext: processed.ext,
+      buffer: processed.buffer,
+      mime: processed.mime
+    });
+  } catch (err) {
+    console.error('[MINIO DM UPLOAD ERROR]', err);
+    return { error: 'Gagal mengunggah file media ke penyimpanan objek.', status: 502 };
+  }
+
+  const cleanCaption = String(text || '').trim().slice(0, 300);
+  const row = appendRawDirectMessage({
+    senderId: userId,
+    recipientId: friendId,
+    type: kind,
+    text: cleanCaption,
+    mediaKey: uploaded.key,
+    mediaMime: processed.mime,
+    mediaSize: uploaded.size,
+    mediaWidth: processed.width ?? null,
+    mediaHeight: processed.height ?? null,
+    mediaDurationMs: processed.durationMs ?? null
+  });
+
+  const message = await broadcastNewDirectMessage(row);
+  return { message };
+}
+
+async function getDirectMessageAudio(messageId, userId) {
+  let found = null;
+  for (const list of state.directMessages.values()) {
+    const m = list.find(item => item.id === messageId && item.type === 'audio');
+    if (m) {
+      found = m;
+      break;
+    }
+  }
+  if (!found || !found.mediaKey) {
+    return { error: 'Voice note tidak ditemukan.', status: 404 };
+  }
+  if (found.senderId !== userId && found.recipientId !== userId) {
+    return { error: 'Kamu tidak memiliki akses ke pesan ini.', status: 403 };
+  }
+
+  if (audioPlayCache.has(messageId)) {
+    return audioPlayCache.get(messageId);
+  }
+
+  let rawBuffer;
+  try {
+    rawBuffer = await storage.getMediaBuffer(found.mediaKey);
+  } catch (err) {
+    console.error('[MINIO GET DM AUDIO ERROR]', err);
+    return { error: 'Gagal mengambil voice note dari penyimpanan objek.', status: 502 };
+  }
+  if (!rawBuffer || rawBuffer.length === 0) {
+    return { error: 'File voice note kosong atau tidak ditemukan di MinIO.', status: 404 };
+  }
+
+  const playable = await media.ensurePlayableAudio(rawBuffer, found.mediaMime);
+  if (audioPlayCache.size >= 30) {
+    const oldestKey = audioPlayCache.keys().next().value;
+    audioPlayCache.delete(oldestKey);
+  }
+  audioPlayCache.set(messageId, playable);
+  return playable;
+}
+
+// ==========================================
+// FOTO PROFIL (AVATAR) USER DI MINIO S3
+// ==========================================
+
+function extractAvatarKey(avatarUrl) {
+  if (!avatarUrl || typeof avatarUrl !== 'string') return null;
+  const match = /[?&]key=([^&]+)/.exec(avatarUrl);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+async function uploadUserAvatar(userId, buffer) {
+  const user = db.getUserById(userId);
+  if (!user) return { error: 'Pengguna tidak ditemukan.', status: 404 };
+  if (!storage.isMediaEnabled()) {
+    return { error: 'Penyimpanan objek MinIO S3 belum dikonfigurasi di server.', status: 503 };
+  }
+
+  let processed;
+  try {
+    processed = await media.compressAvatar(buffer);
+  } catch (err) {
+    return { error: err.message || 'Gagal mengompres foto profil.' };
+  }
+
+  let uploaded;
+  try {
+    uploaded = await storage.uploadMedia({
+      userId,
+      kind: 'avatar',
+      ext: processed.ext,
+      buffer: processed.buffer,
+      mime: processed.mime
+    });
+  } catch (err) {
+    console.error('[MINIO AVATAR UPLOAD ERROR]', err);
+    return { error: 'Gagal mengunggah foto profil ke MinIO S3.', status: 502 };
+  }
+
+  const oldKey = extractAvatarKey(user.avatar);
+  if (oldKey && oldKey !== uploaded.key) {
+    avatarBufferCache.delete(oldKey);
+    storage.deleteMedia(oldKey);
+  }
+
+  if (avatarBufferCache.size >= 100) {
+    const oldest = avatarBufferCache.keys().next().value;
+    avatarBufferCache.delete(oldest);
+  }
+  avatarBufferCache.set(uploaded.key, { buffer: processed.buffer, mime: processed.mime });
+
+  const avatarUrl = `/api/users/${encodeURIComponent(userId)}/avatar?key=${encodeURIComponent(uploaded.key)}`;
+  const updatedUser = db.updateUserAvatar(userId, avatarUrl);
+
+  // Beritahu teman dan grup agar tampilan avatar langsung diperbarui secara realtime
+  notifyAcceptedFriendsPresence(userId);
+  for (const [groupId, members] of state.groupMembers.entries()) {
+    if (members.has(userId)) {
+      emitToGroup(groupId, 'group:updated', { groupId });
+    }
+  }
+
+  return { user: updatedUser, avatarUrl };
+}
+
+async function getUserAvatarBuffer(userId, requestedKey = '') {
+  const user = db.getUserById(userId);
+  if (!user) return { error: 'Pengguna tidak ditemukan.', status: 404 };
+
+  const key = String(requestedKey || extractAvatarKey(user.avatar) || '').trim();
+  const expectedPrefix = `avatars/${String(userId).replace(/[^a-zA-Z0-9_-]/g, '')}/`;
+  if (!key || !key.startsWith(expectedPrefix)) {
+    return { error: 'Foto profil tidak ditemukan.', status: 404 };
+  }
+
+  if (avatarBufferCache.has(key)) {
+    return avatarBufferCache.get(key);
+  }
+
+  let rawBuffer;
+  try {
+    rawBuffer = await storage.getMediaBuffer(key);
+  } catch (err) {
+    console.error('[MINIO GET AVATAR ERROR]', err);
+    return { error: 'Gagal memuat foto profil dari MinIO S3.', status: 502 };
+  }
+  if (!rawBuffer || rawBuffer.length === 0) {
+    return { error: 'Foto profil tidak ditemukan di penyimpanan objek.', status: 404 };
+  }
+
+  const entry = { buffer: rawBuffer, mime: 'image/webp' };
+  if (avatarBufferCache.size >= 100) {
+    const oldest = avatarBufferCache.keys().next().value;
+    avatarBufferCache.delete(oldest);
+  }
+  avatarBufferCache.set(key, entry);
+  return entry;
+}
+
+// ==========================================
+// FOTO PROFIL (AVATAR) GRUP DI MINIO S3
+// ==========================================
+
+async function uploadGroupAvatar(groupId, actorId, buffer) {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+  const role = getMemberRole(groupId, actorId);
+  if (role !== 'owner' && role !== 'admin') {
+    return { error: 'Hanya owner atau admin yang dapat mengubah foto profil grup.', status: 403 };
+  }
+  if (!storage.isMediaEnabled()) {
+    return { error: 'Penyimpanan objek MinIO S3 belum dikonfigurasi di server.', status: 503 };
+  }
+
+  let processed;
+  try {
+    processed = await media.compressAvatar(buffer);
+  } catch (err) {
+    return { error: err.message || 'Gagal mengompres foto profil grup.' };
+  }
+
+  let uploaded;
+  try {
+    uploaded = await storage.uploadMedia({
+      groupId,
+      kind: 'group_avatar',
+      ext: processed.ext,
+      buffer: processed.buffer,
+      mime: processed.mime
+    });
+  } catch (err) {
+    console.error('[MINIO GROUP AVATAR UPLOAD ERROR]', err);
+    return { error: 'Gagal mengunggah foto profil grup ke MinIO S3.', status: 502 };
+  }
+
+  const oldKey = extractAvatarKey(g.avatar);
+  if (oldKey && oldKey !== uploaded.key) {
+    avatarBufferCache.delete(oldKey);
+    storage.deleteMedia(oldKey);
+  }
+
+  if (avatarBufferCache.size >= 100) {
+    const oldest = avatarBufferCache.keys().next().value;
+    avatarBufferCache.delete(oldest);
+  }
+  avatarBufferCache.set(uploaded.key, { buffer: processed.buffer, mime: processed.mime });
+
+  const avatarUrl = `/api/groups/${encodeURIComponent(groupId)}/avatar?key=${encodeURIComponent(uploaded.key)}`;
+  g.avatar = avatarUrl;
+  persistLocalSocial();
+  db.execPg('UPDATE groups SET avatar = $1 WHERE id = $2', [avatarUrl, groupId]);
+
+  const actor = db.getUserById(actorId);
+  const sysMsg = appendRawGroupMessage({
+    groupId,
+    senderId: actorId,
+    type: 'system',
+    text: `🖼️ ${actor?.name || 'Admin'} memperbarui foto profil grup.`
+  });
+  await broadcastNewGroupMessage(sysMsg);
+  emitToGroup(groupId, 'group:updated', { groupId });
+
+  return getGroupDetail(groupId, actorId);
+}
+
+async function getGroupAvatarBuffer(groupId, requestedKey = '') {
+  const g = state.groups.get(groupId);
+  if (!g) return { error: 'Grup tidak ditemukan.', status: 404 };
+
+  const key = String(requestedKey || extractAvatarKey(g.avatar) || '').trim();
+  const expectedPrefix = `group-avatars/${String(groupId).replace(/[^a-zA-Z0-9_-]/g, '')}/`;
+  if (!key || !key.startsWith(expectedPrefix)) {
+    return { error: 'Foto profil grup tidak ditemukan.', status: 404 };
+  }
+
+  if (avatarBufferCache.has(key)) {
+    return avatarBufferCache.get(key);
+  }
+
+  let rawBuffer;
+  try {
+    rawBuffer = await storage.getMediaBuffer(key);
+  } catch (err) {
+    console.error('[MINIO GET GROUP AVATAR ERROR]', err);
+    return { error: 'Gagal memuat foto profil grup dari MinIO S3.', status: 502 };
+  }
+  if (!rawBuffer || rawBuffer.length === 0) {
+    return { error: 'Foto profil grup tidak ditemukan di penyimpanan objek.', status: 404 };
+  }
+
+  const entry = { buffer: rawBuffer, mime: 'image/webp' };
+  if (avatarBufferCache.size >= 100) {
+    const oldest = avatarBufferCache.keys().next().value;
+    avatarBufferCache.delete(oldest);
+  }
+  avatarBufferCache.set(key, entry);
+  return entry;
+}
+
+// ==========================================
+// PROFIL PUBLIK PEMAIN
+// ==========================================
+
+function getUserPublicProfile(targetIdOrUsername, viewerUserId = null) {
+  const clean = String(targetIdOrUsername || '').trim();
+  if (!clean) return { error: 'Pemain tidak ditemukan.', status: 404 };
+
+  let target = db.getUserById(clean);
+  if (!target) {
+    target = db.getUserByUsername(clean.replace(/^@/, ''));
+  }
+  if (!target) return { error: 'Pemain tidak ditemukan.', status: 404 };
+
+  const lbList = db.getLeaderboard();
+  const lbEntry = lbList.find(e => e.userId === target.id);
+  const wins = lbEntry ? lbEntry.wins : 0;
+  const matchesPlayed = lbEntry ? lbEntry.matchesPlayed : 0;
+  const points = lbEntry ? lbEntry.points : target.points ?? 200;
+  const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+  const rank = lbEntry ? lbEntry.rank : null;
+  const isLudoKing = db.checkIsLudoKing(target.id);
+
+  let friendCount = 0;
+  for (const f of state.friendships.values()) {
+    if (f.status === 'accepted' && (f.userLow === target.id || f.userHigh === target.id)) {
+      friendCount++;
+    }
+  }
+
+  let groupCount = 0;
+  const sharedGroups = [];
+  for (const [groupId, members] of state.groupMembers.entries()) {
+    if (!members.has(target.id)) continue;
+    groupCount++;
+    if (viewerUserId && viewerUserId !== target.id && members.has(viewerUserId)) {
+      const g = state.groups.get(groupId);
+      if (g) {
+        sharedGroups.push({ id: g.id, name: g.name, avatar: g.avatar || null });
+      }
+    }
+  }
+
+  let friendshipStatus = 'none';
+  if (viewerUserId) {
+    if (viewerUserId === target.id) {
+      friendshipStatus = 'self';
+    } else {
+      const f = state.friendships.get(pairKey(viewerUserId, target.id));
+      if (f) {
+        if (f.status === 'accepted') friendshipStatus = 'friends';
+        else if (f.requesterId === viewerUserId) friendshipStatus = 'outgoing_pending';
+        else friendshipStatus = 'incoming_pending';
+      }
+    }
+  }
+
+  return {
+    profile: {
+      userId: target.id,
+      username: target.username,
+      name: target.name,
+      avatar: target.avatar || '🎯',
+      online: isUserOnline(target.id),
+      createdAt: target.createdAt || null,
+      isLudoKing,
+      isSelf: viewerUserId === target.id,
+      rank,
+      wins,
+      matchesPlayed,
+      winRate,
+      points,
+      friendCount,
+      groupCount,
+      stats: {
+        rank,
+        wins,
+        matchesPlayed,
+        winRate,
+        points,
+        friendCount,
+        groupCount
+      },
+      friendshipStatus,
+      sharedGroups
+    }
+  };
+}
+
 module.exports = {
   hydrateFromPostgres,
   identifySocket,
@@ -1198,6 +1791,15 @@ module.exports = {
   getGroupMessageAudio,
   postGroupMatchMessage,
   recordGroupMatchResult,
-  getGroupLeaderboard
+  getGroupLeaderboard,
+  listDirectMessages,
+  sendDirectTextMessage,
+  sendDirectMediaMessage,
+  getDirectMessageAudio,
+  uploadUserAvatar,
+  getUserAvatarBuffer,
+  uploadGroupAvatar,
+  getGroupAvatarBuffer,
+  getUserPublicProfile
 };
 

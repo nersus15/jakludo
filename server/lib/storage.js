@@ -94,15 +94,27 @@ async function ensureBucket(client, bucket) {
   }
 }
 
-function makeMediaKey(groupId, kind, ext) {
+function makeMediaKey({ groupId, pairKey, userId, kind, ext }) {
   const cleanExt = String(ext || 'bin').replace(/[^a-z0-9]/gi, '').toLowerCase();
   const datePrefix = new Date().toISOString().slice(0, 10);
   const rand = crypto.randomBytes(10).toString('hex');
+  if (kind === 'avatar' && userId) {
+    const cleanUid = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+    return `avatars/${cleanUid}/${Date.now()}_${rand}.${cleanExt}`;
+  }
+  if (kind === 'group_avatar' && groupId) {
+    const cleanGid = String(groupId).replace(/[^a-zA-Z0-9_-]/g, '');
+    return `group-avatars/${cleanGid}/${Date.now()}_${rand}.${cleanExt}`;
+  }
+  if (pairKey) {
+    const cleanPair = String(pairKey).replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `dm/${cleanPair}/${kind}/${datePrefix}/${Date.now()}_${rand}.${cleanExt}`;
+  }
   return `groups/${groupId}/${kind}/${datePrefix}/${Date.now()}_${rand}.${cleanExt}`;
 }
 
-async function uploadMedia({ groupId, kind, ext, buffer, mime }) {
-  const key = makeMediaKey(groupId, kind, ext);
+async function uploadMedia({ groupId, pairKey, userId, kind, ext, buffer, mime }) {
+  const key = makeMediaKey({ groupId, pairKey, userId, kind, ext });
   if (mockAdapter) {
     await mockAdapter.upload({ key, buffer, mime });
     return { key, size: buffer.length };

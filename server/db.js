@@ -785,25 +785,6 @@ function consumeUserItem({ userId, itemId }) {
   return true;
 }
 
-function addPoints({ userId, amount }) {
-  const user = findUserById(userId);
-  if (!user) return { error: 'Pengguna tidak ditemukan.' };
-  if (!Number.isInteger(amount) || amount <= 0) return { error: 'Jumlah diamond tidak valid.' };
-
-  const entry = ensureLeaderboardEntry(user);
-  entry.points += amount;
-  persistLocalFallback();
-
-  execPgTransaction(async client => {
-    await ensureGlobalLeaderboardRow(client, user);
-    await client.query(
-      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
-      [amount, user.id]
-    );
-  });
-
-  return { success: true, user: sanitizeUser(findUserById(user.id)) };
-}
 
 // ==========================================
 // SNAPSHOT ROOM
@@ -889,7 +870,6 @@ module.exports = {
   getUserItems,
   purchaseItem,
   consumeUserItem,
-  addPoints,
   saveRoom,
   deleteRoom,
   loadRooms,

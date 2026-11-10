@@ -5,6 +5,7 @@ import TurnPanel from '../components/game/TurnPanel';
 import ChatPanel from '../components/game/ChatPanel';
 import Scoreboard from '../components/game/Scoreboard';
 import GameNotices from '../components/game/GameNotices';
+import ShieldPrompt from '../components/game/ShieldPrompt';
 import WinnerDialog from '../components/game/WinnerDialog';
 import { InventoryChips, ActiveItemActions } from '../ItemControls';
 import { sound } from '../sound';
@@ -82,6 +83,7 @@ export default function GameScreen({ game, itemCatalog, sheet, onSheetChange, on
       </Modal>
 
       <WinnerDialog room={room} me={me} actions={actions} />
+      <ShieldPrompt room={room} playerId={playerId} catalog={itemCatalog} onDecide={actions.decideShield} />
     </main>
   );
 }

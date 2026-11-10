@@ -53,7 +53,7 @@ server/
     rules.js          aturan main murni (gerak bidak, safe zone, pilihan bot)
     store.js          state room, broadcast ke klien, snapshot, siklus hidup room
     lobby.js          buat room, join/reconnect, bot, pemain keluar/terputus
-    engine.js         giliran, dadu, langkah bidak, skill, pemakaian item
+    engine.js         giliran, dadu, langkah bidak, pemakaian item, keputusan perisai
     inventory.js      stok item per pemain (milik akun vs gratis dari pertandingan)
   items/
     index.js          registry & kontrak item
@@ -64,9 +64,10 @@ Server mengirim daftar bidak yang boleh jalan (`room.movable`) dan katalog item 
 
 ### Menambah item toko baru
 
-1. Buat file baru di `server/items/`, misalnya `double-dice.js`, yang meng-export definisi item: data toko (`id`, `name`, `icon`, `price`, `description`), `kind` (`active` / `passive`), lalu:
-   - `use(ctx)` untuk item aktif (dipakai lewat tombol, sebelum melempar dadu), opsional `target: 'opponentPawn'` dan `canUse(ctx)`;
-   - `hooks` untuk bereaksi pada event permainan (`capture`, `blackHole`).
+1. Buat file baru di `server/items/`, misalnya `double-dice.js`, yang meng-export definisi item: data toko (`id`, `name`, `icon`, `price`, `description`), `kind` (`active` / `passive` / `reactive`), lalu:
+   - `use(ctx)` untuk item aktif (dipakai lewat tombol, sebelum melempar dadu), opsional `target: 'opponentPawn'`, `canUse(ctx)`, dan `attack: 'forceReturn'` jika serangannya boleh ditahan perisai lawan;
+   - `hooks` untuk item pasif yang bereaksi otomatis pada event permainan (`capture`, `blackHole`);
+   - `protects` + `protect(ctx)` untuk item reaktif: saat event di `protects` (`forceReturn`, `blackHole`) mengenai bidak pemiliknya, pemain mendapat popup untuk memakai item atau tidak (bot dan pemain terputus otomatis memakai, waktu habis juga berarti dipakai).
    Kontrak lengkap dan helper yang tersedia di `ctx` ada di komentar `server/items/index.js`.
 2. Daftarkan di array `ITEMS` pada `server/items/index.js`.
 

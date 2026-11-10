@@ -6,6 +6,10 @@ const REACTIONS = ['🎲', '🔥', '👏', '😂', '😭', '👑'];
 // Status giliran yang dibacakan pembaca layar dan ditampilkan di bawah dadu
 function turnStatus({ room, isTurn, currentTurnPlayer, movablePawns }) {
   const name = currentTurnPlayer?.name || 'pemain';
+  if (room.pendingShield) {
+    const owner = room.players.find(p => p.id === room.pendingShield.playerId);
+    return `Menunggu ${owner?.name || 'pemain'} memutuskan memakai perisai...`;
+  }
   if (room.animatingMove) return isTurn ? 'Bidakmu sedang melangkah...' : `${name} sedang melangkah...`;
   if (room.rolling) return isTurn ? 'Mengocok dadu...' : `${name} mengocok dadu...`;
   if (!isTurn) return `Giliran ${name}`;

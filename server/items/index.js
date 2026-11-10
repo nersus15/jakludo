@@ -37,6 +37,7 @@
 
 const ITEMS = [
   require('./blackhole-shield'),
+  require('./universal-shield'),
   require('./force-return')
 ];
 

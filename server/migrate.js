@@ -45,10 +45,35 @@ function loadDotEnv() {
   }
 }
 
+// Parse URL PostgreSQL secara aman walaupun password mengandung karakter spesial (@, #, !, :, /, %)
+// yang membuat `new URL()` bawaan pg-connection-string gagal dengan ERR_INVALID_URL.
+function parseDatabaseUrl(rawUrl) {
+  const clean = String(rawUrl || '').trim();
+  const match = clean.match(/^postgres(?:ql)?:\/\/([^:]+):(.+)@([^@/:]+)(?::(\d+))?\/([^?#]+)(?:\?(.*))?$/i);
+  if (!match) return null;
+  const [, rawUser, rawPassword, host, portStr, rawDb] = match;
+  const safeDecode = str => {
+    try {
+      return decodeURIComponent(str);
+    } catch {
+      return str;
+    }
+  };
+  return {
+    host,
+    port: Number(portStr || 5432),
+    user: safeDecode(rawUser),
+    password: safeDecode(rawPassword),
+    database: safeDecode(rawDb)
+  };
+}
+
 function getPoolConfig(env = process.env) {
   loadDotEnv();
-  const connectionString = env.DATABASE_URL || '';
-  const hasPgVars = Boolean(connectionString || env.PGHOST || env.PGDATABASE);
+  const connectionString = String(env.DATABASE_URL || '').trim();
+  const host = env.PGHOST || '';
+  const database = env.PGDATABASE || env.POSTGRES_DB || '';
+  const hasPgVars = Boolean(connectionString || host || env.PGUSER || env.POSTGRES_USER);
   if (!hasPgVars) return null;
 
   const sslMode = String(env.PGSSLMODE || '').toLowerCase();
@@ -56,14 +81,31 @@ function getPoolConfig(env = process.env) {
     ? { rejectUnauthorized: sslMode === 'verify-full' }
     : undefined;
 
-  return {
-    ...(connectionString ? { connectionString } : {
-      host: env.PGHOST || '127.0.0.1',
+  // Jika PGHOST diset (mis. di dalam Docker Compose), prioritaskan parameter terpisah
+  // agar password dengan karakter spesial tidak pernah gagal di-parse sebagai URL.
+  let connParams;
+  if (host) {
+    connParams = {
+      host,
       port: Number(env.PGPORT || 5432),
-      user: env.PGUSER || 'jakludo',
-      password: env.PGPASSWORD || '',
-      database: env.PGDATABASE || 'jakludo'
-    }),
+      user: env.PGUSER || env.POSTGRES_USER || 'jakludo',
+      password: env.PGPASSWORD ?? env.POSTGRES_PASSWORD ?? '',
+      database: database || 'jakludo'
+    };
+  } else if (connectionString) {
+    connParams = parseDatabaseUrl(connectionString) || { connectionString };
+  } else {
+    connParams = {
+      host: '127.0.0.1',
+      port: Number(env.PGPORT || env.POSTGRES_PORT || 5432),
+      user: env.PGUSER || env.POSTGRES_USER || 'jakludo',
+      password: env.PGPASSWORD ?? env.POSTGRES_PASSWORD ?? '',
+      database: database || 'jakludo'
+    };
+  }
+
+  return {
+    ...connParams,
     max: Number(env.PGPOOL_MAX || 10),
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
@@ -480,6 +522,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  parseDatabaseUrl,
   getPoolConfig,
   listMigrationFiles,
   runSchemaMigrations,

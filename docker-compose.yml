@@ -47,8 +47,12 @@ services:
       - PORT=5172
       # Isi 1 jika diakses lewat Nginx reverse proxy agar rate limit login memakai IP asli pemain
       - TRUST_PROXY=${TRUST_PROXY:-0}
-      # Otomatis terhubung ke container postgres di jaringan internal Docker (bebas bentrok port host)
-      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-jakludo}:${POSTGRES_PASSWORD:-jakludo_secret}@postgres:5432/${POSTGRES_DB:-jakludo}}
+      # Koneksi ke container postgres menggunakan variabel terpisah (aman untuk karakter spesial apa pun di password)
+      - PGHOST=${PGHOST:-postgres}
+      - PGPORT=${PGPORT:-5432}
+      - PGUSER=${POSTGRES_USER:-jakludo}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-jakludo_secret}
+      - PGDATABASE=${POSTGRES_DB:-jakludo}
       - PGSSLMODE=${PGSSLMODE:-}
       # Otomatis terhubung ke container postgres di jaringan internal Docker (bebas bentrok port host)
       - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-jakludo}:${POSTGRES_PASSWORD:-jakludo_secret}@postgres:5432/${POSTGRES_DB:-jakludo}}

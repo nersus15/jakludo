@@ -16,7 +16,7 @@ async function main() {
     process.exit(1);
   }
 
-  const defaultExt = process.env.DATABASE_URL ? 'sql' : 'json';
+  const defaultExt = 'sql';
   const target = path.resolve(
     process.argv[2] || path.join(DATA_DIR, 'backups', `jakludo-pg-${stamp}.${defaultExt}`)
   );
@@ -27,11 +27,26 @@ async function main() {
     process.exit(1);
   }
 
-  // Jika pg_dump tersedia dan DATABASE_URL diset, gunakan pg_dump langsung
-  if (process.env.DATABASE_URL && target.endsWith('.sql')) {
-    const dump = spawnSync('pg_dump', ['--no-owner', '--no-privileges', '--clean', '--if-exists', '-f', target, process.env.DATABASE_URL], {
-      encoding: 'utf8'
-    });
+  // Gunakan pg_dump dengan parameter terpisah (aman untuk karakter spesial pada password)
+  if (target.endsWith('.sql') && poolConfig.host) {
+    const dump = spawnSync(
+      'pg_dump',
+      [
+        '--no-owner',
+        '--no-privileges',
+        '--clean',
+        '--if-exists',
+        '-h', String(poolConfig.host),
+        '-p', String(poolConfig.port || 5432),
+        '-U', String(poolConfig.user || 'jakludo'),
+        '-d', String(poolConfig.database || 'jakludo'),
+        '-f', target
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PGPASSWORD: String(poolConfig.password || '') }
+      }
+    );
     if (!dump.error && dump.status === 0) {
       console.log(`Backup PostgreSQL (pg_dump) tersimpan: ${target}`);
       return;

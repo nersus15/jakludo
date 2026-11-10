@@ -6,11 +6,45 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const {
+  parseDatabaseUrl,
+  getPoolConfig,
   listMigrationFiles,
   runSchemaMigrations,
   readSqliteDatabase,
   migrateSqliteToPostgres
 } = require('./migrate');
+
+test('getPoolConfig dan parseDatabaseUrl aman terhadap karakter spesial di password (@, #, !, :, /)', () => {
+  const { Pool } = require('pg');
+
+  // Password dengan @, #, !, :, ? di dalam DATABASE_URL
+  const cfgFromUrl = getPoolConfig({
+    DATABASE_URL: 'postgresql://jakludo:P@ss#w0rd!123:456@postgres:5432/jakludo'
+  });
+  assert.equal(cfgFromUrl.host, 'postgres');
+  assert.equal(cfgFromUrl.port, 5432);
+  assert.equal(cfgFromUrl.user, 'jakludo');
+  assert.equal(cfgFromUrl.password, 'P@ss#w0rd!123:456');
+  assert.equal(cfgFromUrl.database, 'jakludo');
+  assert.equal(cfgFromUrl.connectionString, undefined);
+
+  // Pastikan pg.Pool tidak melempar ERR_INVALID_URL
+  const pool = new Pool(cfgFromUrl);
+  pool.end();
+
+  // Variabel PGHOST di Docker Compose diprioritaskan di atas DATABASE_URL
+  const cfgDocker = getPoolConfig({
+    PGHOST: 'postgres',
+    PGPORT: '5432',
+    POSTGRES_USER: 'jakludo',
+    POSTGRES_PASSWORD: 'My#Super@Secret!Password',
+    POSTGRES_DB: 'jakludo',
+    DATABASE_URL: 'postgresql://jakludo:My#Super@Secret!Password@127.0.0.1:5433/jakludo'
+  });
+  assert.equal(cfgDocker.host, 'postgres');
+  assert.equal(cfgDocker.password, 'My#Super@Secret!Password');
+  assert.equal(cfgDocker.connectionString, undefined);
+});
 
 // Mock pg.Pool in-memory untuk menguji alur migrasi & transaksi SQL tanpa bergantung pada daemon Postgres eksternal
 function createMockPgPool() {

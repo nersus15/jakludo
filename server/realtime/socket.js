@@ -69,6 +69,19 @@ function registerSocketHandlers(io) {
       social.detachSocket(socket);
     });
 
+    // Perbarui foto profil/nama pemain di dalam room secara realtime setelah ganti avatar
+    on(socket, 'room:sync_profile', ({ token }) => {
+      const r = currentRoom();
+      if (!r) return;
+      const user = typeof token === 'string' ? db.getUserByToken(token) : null;
+      if (!user) return;
+      const player = r.players.find(p => !p.isBot && p.userId === user.id);
+      if (!player) return;
+      player.avatar = user.avatar || '🎲';
+      player.name = user.name || player.name;
+      store.emitRoom(r);
+    });
+
     // Undang teman atau sesama anggota grup ke dalam room tempat pengirim berada
     on(socket, 'room:invite', ({ userId: targetUserId }, cb) => {
       const reply = payload => { if (typeof cb === 'function') cb(payload); };
@@ -191,6 +204,7 @@ function registerSocketHandlers(io) {
         id: Date.now() + Math.random(),
         senderId: player.id,
         senderName: player.name,
+        senderAvatar: player.avatar || '🎲',
         senderColor: player.color,
         text: cleanText,
         time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })

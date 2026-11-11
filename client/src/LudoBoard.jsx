@@ -7,6 +7,9 @@ import {
   getPawnCoord
 } from './boardConstants';
 import { sound } from './sound';
+import Icon from './components/Icon';
+import PlayerAvatar from './components/PlayerAvatar';
+import { isAvatarUrl } from './social/media';
 
 // Pemetaan sudut layar (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
 // berdasarkan sudut rotasi papan agar badge nama pemain selalu sejajar dengan letak markasnya
@@ -469,8 +472,24 @@ function LudoBoardView({
         key={`hud-${color}`}
         className={`player-hud-card hud-${color} ${isThisPlayerTurn ? 'hud-active-turn' : ''} ${player?.isOut ? 'hud-player-out' : ''}`}
       >
-        <div className={`hud-avatar color-${color}`} aria-hidden="true">
-          {player ? player.name.charAt(0).toUpperCase() : '?'}
+        <div
+          className={`hud-avatar color-${color} ${isAvatarUrl(player?.avatar) ? 'hud-avatar--photo' : ''}`}
+          aria-hidden="true"
+        >
+          <PlayerAvatar
+            avatar={player?.avatar}
+            name={player?.name || ''}
+            size={34}
+            className="hud-avatar__media"
+            imgClassName="hud-avatar__img"
+            fallback={
+              player ? (
+                player.isBot ? <Icon name="bot" size={17} /> : player.name.charAt(0).toUpperCase()
+              ) : (
+                '?'
+              )
+            }
+          />
           {isThisPlayerTurn && <span className="hud-turn-pulse" />}
         </div>
         <div className="hud-info">

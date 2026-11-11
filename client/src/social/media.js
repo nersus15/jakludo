@@ -8,6 +8,96 @@ export function isAvatarUrl(val) {
   return typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('/api/'));
 }
 
+export async function decodeImageFile(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('Pilih file gambar yang valid.');
+  }
+  return decodeImage(file);
+}
+
+export function computeCropBounds({ origW, origH, rotation = 0, zoom = 1, stageSize = 280 }) {
+  const rotW = rotation % 180 === 0 ? origW : origH;
+  const rotH = rotation % 180 === 0 ? origH : origW;
+  const baseScale = Math.max(stageSize / rotW, stageSize / rotH);
+  const scaleStage = baseScale * Math.max(1, zoom);
+  const maxX = Math.max(0, (rotW * scaleStage - stageSize) / 2);
+  const maxY = Math.max(0, (rotH * scaleStage - stageSize) / 2);
+  return { rotW, rotH, baseScale, scaleStage, maxX, maxY };
+}
+
+export function clampCropOffset({ offsetX = 0, offsetY = 0, maxX = 0, maxY = 0 }) {
+  return {
+    offsetX: Math.min(maxX, Math.max(-maxX, offsetX)),
+    offsetY: Math.min(maxY, Math.max(-maxY, offsetY))
+  };
+}
+
+export function drawCroppedAvatar(
+  ctx,
+  { source, origW, origH, rotation = 0, zoom = 1, offsetX = 0, offsetY = 0, stageSize = 280, outputSize = 280 }
+) {
+  const bounds = computeCropBounds({ origW, origH, rotation, zoom, stageSize });
+  const clamped = clampCropOffset({ offsetX, offsetY, maxX: bounds.maxX, maxY: bounds.maxY });
+  const ratio = outputSize / stageSize;
+  const totalScale = bounds.scaleStage * ratio;
+
+  ctx.save();
+  ctx.clearRect(0, 0, outputSize, outputSize);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.translate(outputSize / 2 + clamped.offsetX * ratio, outputSize / 2 + clamped.offsetY * ratio);
+  ctx.rotate((rotation * Math.PI) / 180);
+  ctx.scale(totalScale, totalScale);
+  ctx.drawImage(source, -origW / 2, -origH / 2, origW, origH);
+  ctx.restore();
+}
+
+export async function exportCroppedAvatar(
+  decoded,
+  { rotation = 0, zoom = 1, offsetX = 0, offsetY = 0, stageSize = 280 }
+) {
+  const { source, width: origW, height: origH } = decoded;
+  if (!origW || !origH) throw new Error('Ukuran gambar tidak valid.');
+
+  const { scaleStage } = computeCropBounds({ origW, origH, rotation, zoom, stageSize });
+  const sourceCropPx = Math.round(stageSize / scaleStage);
+  const targetSide = Math.min(MAX_AVATAR_SIDE, Math.max(256, sourceCropPx));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetSide;
+  canvas.height = targetSide;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Browser tidak mendukung pemrosesan gambar.');
+
+  drawCroppedAvatar(ctx, {
+    source,
+    origW,
+    origH,
+    rotation,
+    zoom,
+    offsetX,
+    offsetY,
+    stageSize,
+    outputSize: targetSide
+  });
+
+  let blob = await canvasToBlob(canvas, 'image/webp', 0.84);
+  let ext = 'webp';
+  if (!blob || blob.type !== 'image/webp') {
+    blob = await canvasToBlob(canvas, 'image/jpeg', 0.84);
+    ext = 'jpg';
+  }
+  if (!blob) throw new Error('Gagal memotong foto profil.');
+  if (blob.size > MAX_IMAGE_BYTES) {
+    throw new Error('Ukuran foto profil terlalu besar.');
+  }
+
+  const outFile = new File([blob], `cropped-avatar-${Date.now()}.${ext}`, {
+    type: blob.type || `image/${ext}`
+  });
+  return outFile;
+}
+
 async function decodeImage(file) {
   if (typeof createImageBitmap === 'function') {
     try {
@@ -336,10 +426,10 @@ export async function uploadDirectMedia({ friendId, token, file, kind, durationM
 }
 
 // Unggah & kompres foto profil (avatar) ke POST /api/auth/avatar
-export async function uploadUserAvatar({ token, file }) {
-  const compressed = await compressAvatar(file);
+export async function uploadUserAvatar({ token, file, preCropped = false }) {
+  const preparedFile = preCropped ? file : (await compressAvatar(file)).file;
   const form = new FormData();
-  form.append('file', compressed.file);
+  form.append('file', preparedFile);
 
   const res = await fetch('/api/auth/avatar', {
     method: 'POST',
@@ -354,10 +444,10 @@ export async function uploadUserAvatar({ token, file }) {
 }
 
 // Unggah & kompres foto profil grup (avatar grup) ke POST /api/groups/:id/avatar (khusus owner/admin)
-export async function uploadGroupAvatarMedia({ groupId, token, file }) {
-  const compressed = await compressAvatar(file);
+export async function uploadGroupAvatarMedia({ groupId, token, file, preCropped = false }) {
+  const preparedFile = preCropped ? file : (await compressAvatar(file)).file;
   const form = new FormData();
-  form.append('file', compressed.file);
+  form.append('file', preparedFile);
 
   const res = await fetch(`/api/groups/${encodeURIComponent(groupId)}/avatar`, {
     method: 'POST',

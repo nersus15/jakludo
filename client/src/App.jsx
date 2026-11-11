@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import AppHeader from './components/AppHeader';
 import GameHeader from './components/game/GameHeader';
 import Toasts from './components/Toasts';
@@ -6,6 +6,7 @@ import { ReconnectBar } from './components/NetworkStatus';
 import InstallGuide from './components/InstallGuide';
 import NotificationPrompt from './components/NotificationPrompt';
 import SocialOnboardingTour from './components/SocialOnboardingTour';
+import AvatarCropModal from './components/AvatarCropModal';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
@@ -44,9 +45,18 @@ export default function App() {
   const [modal, setModal] = useState(null); // 'auth' | 'shop' | 'audio' | 'leaderboard' | 'friends' | 'groups' | null
   const [profileUserId, setProfileUserId] = useState('');
   const [initialChatFriendId, setInitialChatFriendId] = useState('');
+  const [cropRequest, setCropRequest] = useState(null);
   const [audio, setAudio] = useState(sound.getState());
   const [sheet, setSheet] = useState(null); // bottom sheet di layar permainan: 'chat' | 'scores'
   const auth = useAuth();
+  const requestAvatarCrop = useCallback(({ file, title, subtitle }) => {
+    if (!file || !String(file.type || '').startsWith('image/')) {
+      return Promise.reject(new Error('Pilih file gambar yang valid.'));
+    }
+    return new Promise(resolve => {
+      setCropRequest({ file, title, subtitle, resolve });
+    });
+  }, []);
   const game = useGameRoom({
     authToken: auth.authToken,
     currentUser: auth.currentUser,
@@ -56,7 +66,8 @@ export default function App() {
     socket: game.socket,
     authToken: auth.authToken,
     currentUser: auth.currentUser,
-    onUpdateUser: auth.setCurrentUser
+    onUpdateUser: auth.setCurrentUser,
+    onCropAvatar: requestAvatarCrop
   });
   const network = useNetworkStatus(game.socket);
   const theme = useTheme();
@@ -252,8 +263,23 @@ export default function App() {
       />
       <AudioSettingsModal isOpen={modal === 'audio'} onClose={close} />
       <InstallGuide platform={pwa.installGuide} onClose={pwa.closeInstallGuide} />
-      <NotificationPrompt enabled={game.screen === 'home' && !modal && !profileUserId && !pwa.installGuide} />
-      <SocialOnboardingTour enabled={game.screen === 'home' && !modal && !profileUserId && !pwa.installGuide} />
+      <NotificationPrompt enabled={game.screen === 'home' && !modal && !profileUserId && !cropRequest && !pwa.installGuide} />
+      <SocialOnboardingTour enabled={game.screen === 'home' && !modal && !profileUserId && !cropRequest && !pwa.installGuide} />
+      <AvatarCropModal
+        file={cropRequest?.file || null}
+        title={cropRequest?.title}
+        subtitle={cropRequest?.subtitle}
+        onCancel={() => {
+          const req = cropRequest;
+          setCropRequest(null);
+          req?.resolve(null);
+        }}
+        onConfirm={croppedFile => {
+          const req = cropRequest;
+          setCropRequest(null);
+          req?.resolve(croppedFile);
+        }}
+      />
     </div>
   );
 }

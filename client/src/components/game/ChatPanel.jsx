@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
+import PlayerAvatar from '../PlayerAvatar';
 
 const QUICK_CHATS = ['Semangat! 🔥', 'GG! 👏', 'Ampun bang! 😂', 'Jangan makan bidakku! 😭', 'Maju terus! 🚀'];
 
@@ -35,6 +36,14 @@ export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }
             return (
               <li key={msg.id} className={`chat__msg color-${msg.senderColor} ${mine ? 'is-mine' : ''}`}>
                 <span className="chat__meta">
+                  {!mine && msg.senderAvatar && (
+                    <PlayerAvatar
+                      avatar={msg.senderAvatar}
+                      name={msg.senderName}
+                      size={20}
+                      className="avatar chat__avatar"
+                    />
+                  )}
                   <strong className="chat__sender">{mine ? 'Kamu' : msg.senderName}</strong>
                   <span className="muted">{msg.time}</span>
                 </span>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../components/Icon';
+import PlayerAvatar from '../components/PlayerAvatar';
 import { isAvatarUrl } from '../social/media';
 import { sound } from '../sound';
 
@@ -52,11 +53,12 @@ function PlayerSlot({ player, index, playerId, onViewProfile }) {
   const canInspect = !player.isBot && !!player.userId && !!onViewProfile;
   return (
     <li className={`slot color-${player.color} ${player.connected === false && !player.isBot ? 'slot--offline' : ''}`}>
-      {isAvatarUrl(player.avatar) ? (
-        <img src={player.avatar} alt="" width="36" height="36" className="avatar avatar--img" />
-      ) : (
-        <span className="avatar" aria-hidden="true">{player.name.slice(0, 1).toUpperCase()}</span>
-      )}
+      <PlayerAvatar
+        avatar={player.avatar}
+        name={player.name}
+        size={40}
+        fallback={player.isBot ? <Icon name="bot" size={18} /> : player.name.slice(0, 1).toUpperCase()}
+      />
       <span className="slot__text">
         <strong className="slot__name">
           {canInspect ? (

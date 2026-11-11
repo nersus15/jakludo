@@ -19,7 +19,7 @@ function formatMessageNotifBody(msg) {
 }
 
 // Hook fitur sosial: teman, chat private, grup, undangan grup, chat grup, avatar S3, dan notifikasi browser
-export function useSocial({ socket, authToken, currentUser, onUpdateUser }) {
+export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCropAvatar }) {
   const [friends, setFriends] = useState([]);
   const [incoming, setIncoming] = useState([]);
   const [outgoing, setOutgoing] = useState([]);
@@ -39,6 +39,8 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser }) {
   userRef.current = currentUser;
   const onUpdateUserRef = useRef(onUpdateUser);
   onUpdateUserRef.current = onUpdateUser;
+  const onCropAvatarRef = useRef(onCropAvatar);
+  onCropAvatarRef.current = onCropAvatar;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
   const activeDmFriendIdRef = useRef('');
@@ -448,15 +450,31 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser }) {
   }, [getToken]);
 
   const uploadAvatar = useCallback(async file => {
+    let targetFile = file;
+    let preCropped = false;
+    if (onCropAvatarRef.current) {
+      targetFile = await onCropAvatarRef.current({
+        file,
+        title: 'Potong foto profil',
+        subtitle: 'Geser, perbesar, atau putar foto sebelum diterapkan sebagai avatar.'
+      });
+      if (!targetFile) return null;
+      preCropped = true;
+    }
+    const token = getToken();
     const updatedUser = await uploadUserAvatar({
-      token: getToken(),
-      file
+      token,
+      file: targetFile,
+      preCropped
     });
     if (updatedUser && onUpdateUserRef.current) {
       onUpdateUserRef.current(updatedUser);
     }
+    if (socket?.connected && token) {
+      socket.emit('room:sync_profile', { token });
+    }
     return updatedUser;
-  }, [getToken]);
+  }, [getToken, socket]);
 
   const getUserProfile = useCallback(async userIdOrUsername => {
     const clean = String(userIdOrUsername || '').trim();
@@ -466,10 +484,22 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser }) {
   }, [apiFetch]);
 
   const uploadGroupAvatar = useCallback(async (groupId, file) => {
+    let targetFile = file;
+    let preCropped = false;
+    if (onCropAvatarRef.current) {
+      targetFile = await onCropAvatarRef.current({
+        file,
+        title: 'Potong foto ava grup',
+        subtitle: 'Geser, perbesar, atau putar foto sebelum diterapkan ke grup.'
+      });
+      if (!targetFile) return null;
+      preCropped = true;
+    }
     const updatedGroup = await uploadGroupAvatarMedia({
       groupId,
       token: getToken(),
-      file
+      file: targetFile,
+      preCropped
     });
     await loadGroups();
     return updatedGroup;

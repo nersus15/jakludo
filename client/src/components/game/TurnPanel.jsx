@@ -1,5 +1,7 @@
 import React from 'react';
 import Dice3D from '../../Dice3D';
+import Icon from '../Icon';
+import PlayerAvatar from '../PlayerAvatar';
 
 const REACTIONS = ['🎲', '🔥', '👏', '😂', '😭', '👑'];
 
@@ -36,8 +38,23 @@ export default function TurnPanel({ room, isTurn, canAct, currentTurnPlayer, mov
         />
         <div className="turn-panel__side">
           <p className={`turn-panel__who color-${currentTurnPlayer?.color}`}>
+            <PlayerAvatar
+              avatar={currentTurnPlayer?.avatar}
+              name={currentTurnPlayer?.name || ''}
+              size={28}
+              className="avatar avatar--sm turn-panel__avatar"
+              fallback={
+                currentTurnPlayer?.isBot ? (
+                  <Icon name="bot" size={14} />
+                ) : (
+                  currentTurnPlayer?.name?.charAt(0).toUpperCase() || '?'
+                )
+              }
+            />
             <span className="dot" style={{ background: 'var(--pc)' }} aria-hidden="true" />
-            {isTurn ? 'Giliranmu' : currentTurnPlayer?.name}
+            <span className="turn-panel__who-name">
+              {isTurn ? 'Giliranmu' : currentTurnPlayer?.name}
+            </span>
           </p>
           <p className="turn-panel__status" aria-live="polite">{status}</p>
           {room.blackHoleShiftIn && (

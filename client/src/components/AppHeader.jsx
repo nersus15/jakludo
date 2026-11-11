@@ -59,7 +59,8 @@ function AccountMenu({
     setUploadingAvatar(true);
     setAvatarFeedback(null);
     try {
-      await onUploadAvatar(file);
+      const updated = await onUploadAvatar(file);
+      if (!updated) return;
       sound.playWin();
       setAvatarFeedback({ type: 'success', text: 'Foto profil diperbarui!' });
     } catch (err) {

@@ -365,6 +365,22 @@ export default function Icon({ name, size = 20, className = '', label }) {
         </svg>
       );
 
+    case 'crop':
+      return (
+        <svg {...common}>
+          <path d="M6.5 3v12.5a2 2 0 0 0 2 2H21" />
+          <path d="M3 6.5h12.5a2 2 0 0 1 2 2V21" />
+        </svg>
+      );
+
+    case 'rotate':
+      return (
+        <svg {...common}>
+          <path d="M20 7.5a8.5 8.5 0 1 0 2 5.5" />
+          <path d="M20 3v4.5h-4.5" />
+        </svg>
+      );
+
     case 'medal-1':
     case 'medal-2':
     case 'medal-3': {

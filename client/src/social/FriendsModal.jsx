@@ -580,7 +580,8 @@ export default function FriendsModal({
     setUploadingAvatar(true);
     setFeedback(null);
     try {
-      await actions.uploadAvatar(file);
+      const updated = await actions.uploadAvatar(file);
+      if (!updated) return;
       sound.playWin();
       setFeedback({
         type: 'success',

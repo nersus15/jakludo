@@ -164,7 +164,12 @@ function rejoinPlayer(socket, room, player, user) {
   player.disconnectedAt = null;
   player.autoPlayCount = 0;
   store.cancelLobbyRemoval(room, player);
-  if (user) inventory.loadOwned(player, user.inventory);
+  if (user) {
+    inventory.loadOwned(player, user.inventory);
+    player.name = user.name || player.name;
+    player.avatar = user.avatar || '🎲';
+    player.isLudoKing = db.checkIsLudoKing(user.id);
+  }
 
   if (room.host === oldSocketId || store.isCreator(room, player)) {
     room.host = socket.id; // Pembuat room selalu mendapatkan kembali peran host

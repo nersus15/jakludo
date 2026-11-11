@@ -1,5 +1,7 @@
 import React from 'react';
 import Modal from '../Modal';
+import Icon from '../Icon';
+import PlayerAvatar from '../PlayerAvatar';
 
 const FINISH = 44;
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -48,7 +50,12 @@ export default function WinnerDialog({ room, me, actions }) {
         {ranking.map(({ player, finished }, idx) => (
           <li key={player.id} className={`final-ranking__row color-${player.color} ${player.id === me?.id ? 'is-me' : ''}`}>
             <span className="final-ranking__pos" aria-label={`Peringkat ${idx + 1}`}>{MEDALS[idx] || idx + 1}</span>
-            <span className="avatar" aria-hidden="true">{player.name.slice(0, 1).toUpperCase()}</span>
+            <PlayerAvatar
+              avatar={player.avatar}
+              name={player.name}
+              size={36}
+              fallback={player.isBot ? <Icon name="bot" size={18} /> : player.name.slice(0, 1).toUpperCase()}
+            />
             <span className="final-ranking__name">
               <strong>{player.name}</strong>
               <span className="score-row__tags">

@@ -137,7 +137,8 @@ export default function PlayerProfileModal({
     setBusy(true);
     setFeedback(null);
     try {
-      await social.actions.uploadAvatar(file);
+      const updated = await social.actions.uploadAvatar(file);
+      if (!updated) return;
       sound.playWin();
       setFeedback({ type: 'success', text: 'Foto profil kamu berhasil diperbarui!' });
       await loadProfile();

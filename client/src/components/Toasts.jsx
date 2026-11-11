@@ -1,5 +1,7 @@
 import React from 'react';
 import Icon from './Icon';
+import PlayerAvatar from './PlayerAvatar';
+import { isAvatarUrl } from '../social/media';
 import { sound } from '../sound';
 
 // Notifikasi singkat yang melayang di atas layar: pemain masuk, undangan room, chat baru, dan reaksi emoji
@@ -64,7 +66,16 @@ export default function Toasts({
 
       {memberNotice && (
         <div className="toast" key={memberNotice.id}>
-          <span className="toast__icon" aria-hidden="true">{memberNotice.avatar}</span>
+          {isAvatarUrl(memberNotice.avatar) ? (
+            <PlayerAvatar
+              avatar={memberNotice.avatar}
+              name={memberNotice.text}
+              size={28}
+              className="avatar avatar--sm"
+            />
+          ) : (
+            <span className="toast__icon" aria-hidden="true">{memberNotice.avatar}</span>
+          )}
           <span>{memberNotice.text}</span>
         </div>
       )}
@@ -79,9 +90,12 @@ export default function Toasts({
               onOpenChat();
             }}
           >
-            <span className="avatar avatar--sm" aria-hidden="true">
-              {chatToast.senderName?.slice(0, 1).toUpperCase() || '?'}
-            </span>
+            <PlayerAvatar
+              avatar={chatToast.senderAvatar}
+              name={chatToast.senderName || '?'}
+              size={30}
+              className="avatar avatar--sm"
+            />
             <span className="toast__text">
               <strong className="toast__sender">{chatToast.senderName}</strong>
               <span>{chatToast.text}</span>

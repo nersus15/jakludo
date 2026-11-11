@@ -443,3 +443,71 @@ test('chat private antar teman, unggah avatar S3 terkompresi, dan event notifika
   assert.equal(profRes.profile.sharedGroups[0].id, groupId);
   assert.equal(profRes.profile.sharedGroups[0].avatar, grpAvRes.group.avatar);
 });
+
+test('avatar profil pemain tersinkron di room game (room:sync_profile, room:chat, dan rejoin)', async () => {
+  const host = await register('roomhost');
+  const guest = await register('roomguest');
+
+  const sockHost = await connect();
+  const sockGuest = await connect();
+
+  sockHost.emit('room:create', { token: host.token, name: host.user.name });
+  const joinedHost = await once(sockHost, 'room:joined');
+  const code = joinedHost.code;
+
+  const updGuestJoin = once(sockHost, 'room:update');
+  sockGuest.emit('room:join', { token: guest.token, code, name: guest.user.name });
+  const joinedGuest = await once(sockGuest, 'room:joined');
+  await updGuestJoin;
+
+  // Unggah avatar baru untuk host saat sudah berada di dalam room
+  const rawAvatar = await sharp({
+    create: { width: 120, height: 120, channels: 4, background: { r: 22, g: 163, b: 74, alpha: 1 } }
+  }).png().toBuffer();
+
+  const avForm = new FormData();
+  avForm.append('file', new Blob([rawAvatar], { type: 'image/png' }), 'room-ava.png');
+
+  const avRes = await fetch(`${url}/api/auth/avatar`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${host.token}` },
+    body: avForm
+  }).then(r => r.json());
+  assert.equal(avRes.success, true);
+
+  // Sync profil ke room -> pemain lain menerima room:update dengan avatar terbaru
+  const guestUpdate = once(sockGuest, 'room:update');
+  sockHost.emit('room:sync_profile', { token: host.token });
+  const syncedRoom = await guestUpdate;
+  const hostPlayer = syncedRoom.players.find(p => p.userId === host.user.id);
+  assert.equal(hostPlayer.avatar, avRes.user.avatar);
+
+  // Chat di dalam room menyertakan senderAvatar terbaru
+  const chatRecv = once(sockGuest, 'room:chat_message');
+  sockHost.emit('room:chat', { text: 'Cek foto profil baru di room!' });
+  const chatMsg = await chatRecv;
+  assert.equal(chatMsg.senderAvatar, avRes.user.avatar);
+
+  // Unggah avatar baru untuk guest lalu rejoin room -> rejoinPlayer menyegarkan avatar dari DB
+  const avForm2 = new FormData();
+  avForm2.append('file', new Blob([rawAvatar], { type: 'image/png' }), 'guest-ava.png');
+  const avRes2 = await fetch(`${url}/api/auth/avatar`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${guest.token}` },
+    body: avForm2
+  }).then(r => r.json());
+  assert.equal(avRes2.success, true);
+
+  const sockGuestReconnect = await connect();
+  const rejoinUpdate = once(sockGuestReconnect, 'room:update');
+  sockGuestReconnect.emit('room:join', {
+    token: guest.token,
+    code,
+    name: guest.user.name,
+    sessionId: joinedGuest.sessionId
+  });
+  await once(sockGuestReconnect, 'room:joined');
+  const rejoinedRoom = await rejoinUpdate;
+  const rejoinedGuest = rejoinedRoom.players.find(p => p.userId === guest.user.id);
+  assert.equal(rejoinedGuest.avatar, avRes2.user.avatar);
+});

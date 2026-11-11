@@ -1,5 +1,6 @@
 import React from 'react';
-import { isAvatarUrl } from '../../social/media';
+import Icon from '../Icon';
+import PlayerAvatar from '../PlayerAvatar';
 
 // Status semua pemain (posisi bidak, koneksi) dan log permainan
 export default function Scoreboard({ room, playerId, currentTurnPlayer }) {
@@ -14,11 +15,12 @@ export default function Scoreboard({ room, playerId, currentTurnPlayer }) {
           const offline = !p.isBot && p.connected === false;
           return (
             <li key={p.id} className={`score-row color-${p.color} ${currentTurnPlayer?.id === p.id ? 'is-current' : ''} ${p.isOut ? 'is-out' : ''}`}>
-              {isAvatarUrl(p.avatar) ? (
-                <img src={p.avatar} alt="" width="36" height="36" className="avatar avatar--img" />
-              ) : (
-                <span className="avatar" aria-hidden="true">{p.name.slice(0, 1).toUpperCase()}</span>
-              )}
+              <PlayerAvatar
+                avatar={p.avatar}
+                name={p.name}
+                size={36}
+                fallback={p.isBot ? <Icon name="bot" size={18} /> : p.name.slice(0, 1).toUpperCase()}
+              />
               <span className="score-row__name">
                 <strong>{p.name}</strong>
                 <span className="score-row__tags">

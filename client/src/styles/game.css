@@ -100,6 +100,20 @@
   gap: var(--space-2);
   font: 600 var(--fs-lg) var(--font-display);
   color: var(--pc-text, var(--text));
+  min-width: 0;
+}
+
+.turn-panel__avatar {
+  width: 28px;
+  height: 28px;
+  font-size: var(--fs-sm);
+  border-color: var(--pc, var(--ink-line));
+}
+
+.turn-panel__who-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .turn-panel__status {
@@ -318,8 +332,16 @@
 
 .chat__meta {
   display: flex;
+  align-items: center;
   gap: var(--space-2);
   font-size: var(--fs-xs);
+}
+
+.chat__avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 0.7rem;
+  border-width: 1.5px;
 }
 
 .chat__sender {

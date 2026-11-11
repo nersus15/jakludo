@@ -728,6 +728,7 @@ function GroupMembersTab({ detail, currentUser, social, onDetailUpdated, onGroup
     setFeedback(null);
     try {
       const updated = await social.actions.uploadGroupAvatar(detail.id, file);
+      if (!updated) return;
       sound.playWin();
       setFeedback({
         type: 'success',

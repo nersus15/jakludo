@@ -77,7 +77,10 @@ function declareWinner(room, winnerPlayer) {
   addHistory(room, `🎉 ${winnerPlayer.name} berhasil memenangkan pertandingan JakLudo!`);
 
   // Poin sama untuk permainan biasa dan grup (leaderboard grup diambil dari leaderboard yang sama)
-  db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking: rankPlayers(room, winnerPlayer.id) });
+  const ranking = rankPlayers(room, winnerPlayer.id);
+  const awards = db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking });
+  // Peringkat resmi + poin yang didapat, ditampilkan di layar hasil
+  room.matchResult = { ranking, awards };
   room.players.forEach(p => {
     p.isLudoKing = db.checkIsLudoKing(p.userId);
   });

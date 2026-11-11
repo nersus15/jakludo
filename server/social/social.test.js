@@ -252,7 +252,7 @@ test('chat grup: kirim teks, kompresi foto (WebP) & voice note ke MinIO dengan p
   assert.ok(chunk.length > 0 && chunk.length <= 64);
 });
 
-test('match khusus grup hanya bisa diikuti anggota grup dan hanya masuk ke leaderboard grup', async () => {
+test('match khusus grup hanya bisa diikuti anggota grup dan skor grup mengikuti tabel leaderboard global per anggota', async () => {
   const p1 = await register('grp_p1');
   const p2 = await register('grp_p2');
   const outsider = await register('outsider');
@@ -262,6 +262,7 @@ test('match khusus grup hanya bisa diikuti anggota grup dan hanya masuk ke leade
   await apiFetch(p2.token, 'POST', `/api/group-invites/${inv.invite.id}/accept`);
 
   const globalBeforeP1 = db.getLeaderboard().find(e => e.userId === p1.user.id).points;
+  const globalBeforeP2 = db.getLeaderboard().find(e => e.userId === p2.user.id).points;
 
   // Buat match khusus grup
   const s1 = await connect();
@@ -288,19 +289,26 @@ test('match khusus grup hanya bisa diikuti anggota grup dan hanya masuk ke leade
   engine.declareWinner(room, room.players[0]);
   await wait(80);
 
-  // Leaderboard global TIDAK bertambah
-  const globalAfterP1 = db.getLeaderboard().find(e => e.userId === p1.user.id).points;
-  assert.equal(globalAfterP1, globalBeforeP1, 'poin global tidak terpengaruh match grup');
+  // Skor P1 (+25 poin, 1 menang) dan P2 (+5 poin, 0 menang) tercatat di leaderboard global sekaligus tampil sama di grup
+  const globalAfter = db.getLeaderboard();
+  const p1Global = globalAfter.find(e => e.userId === p1.user.id);
+  const p2Global = globalAfter.find(e => e.userId === p2.user.id);
+  assert.equal(p1Global.wins, 1);
+  assert.equal(p1Global.points, globalBeforeP1 + 25);
+  assert.equal(p2Global.wins, 0);
+  assert.equal(p2Global.points, globalBeforeP2 + 5);
 
-  // Leaderboard grup mencatat kemenangan P1 (+25 poin, 1 menang) dan partisipasi P2 (+5 poin, 0 menang)
+  // Leaderboard grup hanya berisi anggota grup (outsider tidak ikut), dengan nilai menang/poin sama persis dengan global
   const grpLb = await apiFetch(p1.token, 'GET', `/api/groups/${group.id}/leaderboard`);
   assert.equal(grpLb.success, true);
+  assert.equal(grpLb.leaderboard.length, 2);
+  assert.equal(grpLb.leaderboard.some(e => e.userId === outsider.user.id), false);
   assert.equal(grpLb.leaderboard[0].userId, p1.user.id);
-  assert.equal(grpLb.leaderboard[0].wins, 1);
-  assert.equal(grpLb.leaderboard[0].points, 25);
+  assert.equal(grpLb.leaderboard[0].wins, p1Global.wins);
+  assert.equal(grpLb.leaderboard[0].points, p1Global.points);
   assert.equal(grpLb.leaderboard[1].userId, p2.user.id);
-  assert.equal(grpLb.leaderboard[1].wins, 0);
-  assert.equal(grpLb.leaderboard[1].points, 5);
+  assert.equal(grpLb.leaderboard[1].wins, p2Global.wins);
+  assert.equal(grpLb.leaderboard[1].points, p2Global.points);
 
   // Query ?groupId pada endpoint /api/leaderboard membedakan penampilan leaderboard grup vs global
   const grpByQuery = await apiFetch(p1.token, 'GET', `/api/leaderboard?groupId=${group.id}`);
@@ -310,8 +318,10 @@ test('match khusus grup hanya bisa diikuti anggota grup dan hanya masuk ke leade
 
   const globalByQuery = await apiFetch(p1.token, 'GET', '/api/leaderboard');
   assert.equal(globalByQuery.success, true);
+  assert.ok(globalByQuery.leaderboard.some(e => e.userId === outsider.user.id));
   const p1GlobalRow = globalByQuery.leaderboard.find(e => e.userId === p1.user.id);
-  assert.equal(p1GlobalRow.points, globalBeforeP1);
+  assert.equal(p1GlobalRow.points, p1Global.points);
+  assert.equal(p1GlobalRow.wins, p1Global.wins);
 });
 
 test('chat private antar teman, unggah avatar S3 terkompresi, dan event notifikasi realtime', async () => {

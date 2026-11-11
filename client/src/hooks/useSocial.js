@@ -324,6 +324,10 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
       emitGroupEvent('group:leaderboard', payload);
     };
 
+    const onGlobalLeaderboard = payload => {
+      emitGroupEvent('leaderboard:update', payload);
+    };
+
     const onRoomInvite = payload => {
       if (!payload?.code) return;
       sound.playJoinNotification();
@@ -360,6 +364,7 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
     socket.on('group:updated', onGroupUpdated);
     socket.on('group:removed', onGroupRemoved);
     socket.on('group:leaderboard', onGroupLeaderboard);
+    socket.on('leaderboard:update', onGlobalLeaderboard);
     socket.on('room:invite', onRoomInvite);
 
     return () => {
@@ -374,6 +379,7 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
       socket.off('group:updated', onGroupUpdated);
       socket.off('group:removed', onGroupRemoved);
       socket.off('group:leaderboard', onGroupLeaderboard);
+      socket.off('leaderboard:update', onGlobalLeaderboard);
       socket.off('room:invite', onRoomInvite);
     };
   }, [socket, loadFriends, loadGroups, emitGroupEvent]);

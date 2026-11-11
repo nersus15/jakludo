@@ -1,5 +1,5 @@
 // Penyimpanan & logika fitur sosial: pertemanan, grup, undangan grup, chat (teks, foto, voice note, match),
-// dan leaderboard khusus grup. Terintegrasi dengan PostgreSQL (write-through) dan MinIO S3.
+// dan query leaderboard per anggota grup dari tabel leaderboard tunggal. Terintegrasi dengan PostgreSQL & MinIO S3.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -8,8 +8,6 @@ const storage = require('../lib/storage');
 const media = require('../lib/media');
 
 const LOCAL_SOCIAL_FILE = path.join(db.DATA_DIR, 'jakludo-social.json');
-const WIN_POINTS = 25;
-const PLAY_POINTS = 5;
 
 const state = {
   friendships: new Map(),      // "low:high" -> { userLow, userHigh, requesterId, status, createdAt, updatedAt }
@@ -17,8 +15,7 @@ const state = {
   groups: new Map(),           // groupId -> { id, name, ownerId, createdAt }
   groupMembers: new Map(),     // groupId -> Map<userId, { groupId, userId, role, joinedAt }>
   groupInvites: new Map(),     // inviteId -> { id, groupId, inviterId, inviteeId, createdAt }
-  groupMessages: new Map(),    // groupId -> Array<msgRow> (urut lama -> baru)
-  groupLeaderboard: new Map()  // groupId -> Map<userId, { groupId, userId, wins, matchesPlayed, points }>
+  groupMessages: new Map()     // groupId -> Array<msgRow> (urut lama -> baru)
 };
 
 // Kehadiran online per userId -> Set<socketId>
@@ -45,8 +42,7 @@ function persistLocalSocial() {
       groups: Array.from(state.groups.values()),
       groupMembers: Array.from(state.groupMembers.values()).flatMap(m => Array.from(m.values())),
       groupInvites: Array.from(state.groupInvites.values()),
-      groupMessages: Array.from(state.groupMessages.values()).flat(),
-      groupLeaderboard: Array.from(state.groupLeaderboard.values()).flatMap(m => Array.from(m.values()))
+      groupMessages: Array.from(state.groupMessages.values()).flat()
     };
     fs.writeFileSync(LOCAL_SOCIAL_FILE, JSON.stringify(dump));
   } catch (err) {
@@ -73,7 +69,6 @@ function bootstrapLocalSocial() {
       state.groups.set(g.id, g);
       if (!state.groupMembers.has(g.id)) state.groupMembers.set(g.id, new Map());
       if (!state.groupMessages.has(g.id)) state.groupMessages.set(g.id, []);
-      if (!state.groupLeaderboard.has(g.id)) state.groupLeaderboard.set(g.id, new Map());
     }
     for (const m of dump.groupMembers || []) {
       if (!state.groupMembers.has(m.groupId)) state.groupMembers.set(m.groupId, new Map());
@@ -88,10 +83,6 @@ function bootstrapLocalSocial() {
     }
     for (const list of state.groupMessages.values()) {
       list.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-    }
-    for (const lb of dump.groupLeaderboard || []) {
-      if (!state.groupLeaderboard.has(lb.groupId)) state.groupLeaderboard.set(lb.groupId, new Map());
-      state.groupLeaderboard.get(lb.groupId).set(lb.userId, lb);
     }
   } catch {
     // Abaikan jika gagal dibaca
@@ -110,16 +101,14 @@ async function hydrateFromPostgres() {
   state.groupMembers.clear();
   state.groupInvites.clear();
   state.groupMessages.clear();
-  state.groupLeaderboard.clear();
 
-  const [friendsRes, dmRes, groupsRes, membersRes, invitesRes, msgsRes, lbRes] = await Promise.all([
+  const [friendsRes, dmRes, groupsRes, membersRes, invitesRes, msgsRes] = await Promise.all([
     pool.query('SELECT * FROM friendships'),
     pool.query('SELECT * FROM direct_messages ORDER BY created_at ASC, id ASC'),
     pool.query('SELECT * FROM groups'),
     pool.query('SELECT * FROM group_members'),
     pool.query('SELECT * FROM group_invites'),
-    pool.query('SELECT * FROM group_messages ORDER BY created_at ASC, id ASC'),
-    pool.query('SELECT group_id, user_id, wins, matches_played, points FROM leaderboard WHERE group_id IS NOT NULL')
+    pool.query('SELECT * FROM group_messages ORDER BY created_at ASC, id ASC')
   ]);
 
   for (const r of friendsRes.rows) {
@@ -161,7 +150,6 @@ async function hydrateFromPostgres() {
     });
     state.groupMembers.set(r.id, new Map());
     state.groupMessages.set(r.id, []);
-    state.groupLeaderboard.set(r.id, new Map());
   }
   for (const r of membersRes.rows) {
     if (!state.groupMembers.has(r.group_id)) state.groupMembers.set(r.group_id, new Map());
@@ -197,16 +185,6 @@ async function hydrateFromPostgres() {
       mediaDurationMs: r.media_duration_ms ? Number(r.media_duration_ms) : null,
       matchCode: r.match_code || null,
       createdAt: Number(r.created_at)
-    });
-  }
-  for (const r of lbRes.rows) {
-    if (!state.groupLeaderboard.has(r.group_id)) state.groupLeaderboard.set(r.group_id, new Map());
-    state.groupLeaderboard.get(r.group_id).set(r.user_id, {
-      groupId: r.group_id,
-      userId: r.user_id,
-      wins: Number(r.wins),
-      matchesPlayed: Number(r.matches_played),
-      points: Number(r.points)
     });
   }
 }
@@ -683,7 +661,6 @@ async function createGroup(userId, { name }) {
   state.groups.set(id, groupRow);
   state.groupMembers.set(id, new Map([[userId, memberRow]]));
   state.groupMessages.set(id, []);
-  state.groupLeaderboard.set(id, new Map());
   persistLocalSocial();
 
   await db.execPgTransaction(async client => {
@@ -766,7 +743,6 @@ function deleteGroup(groupId, actorId) {
   state.groups.delete(groupId);
   state.groupMembers.delete(groupId);
   state.groupMessages.delete(groupId);
-  state.groupLeaderboard.delete(groupId);
   persistLocalSocial();
 
   db.execPg('DELETE FROM groups WHERE id = $1', [groupId]);
@@ -1142,63 +1118,12 @@ async function postGroupMatchMessage(groupId, creatorUserId, roomCode) {
 }
 
 // ==========================================
-// LEADERBOARD KHUSUS GRUP
+// LEADERBOARD GRUP (QUERY DARI LEADERBOARD GLOBAL)
 // ==========================================
 
-function recordGroupMatchResult(groupId, { winnerPlayerId, players }) {
-  if (!groupId || !state.groups.has(groupId) || !players || players.length === 0) return;
-  const humans = players.filter(p => !p.isBot);
-  if (humans.length < 2) return;
-
-  if (!state.groupLeaderboard.has(groupId)) state.groupLeaderboard.set(groupId, new Map());
-  const lbMap = state.groupLeaderboard.get(groupId);
-  const updates = [];
-
-  for (const p of humans) {
-    const user = p.userId ? db.getUserById(p.userId) : null;
-    if (!user) continue;
-    let entry = lbMap.get(user.id);
-    if (!entry) {
-      entry = { groupId, userId: user.id, wins: 0, matchesPlayed: 0, points: 0 };
-      lbMap.set(user.id, entry);
-    }
-    const won = p.id === winnerPlayerId;
-    const deltaWins = won ? 1 : 0;
-    const deltaPoints = won ? WIN_POINTS : PLAY_POINTS;
-    entry.matchesPlayed += 1;
-    entry.wins += deltaWins;
-    entry.points += deltaPoints;
-    updates.push({
-      userId: user.id,
-      username: user.username,
-      name: user.name,
-      avatar: user.avatar || '🎯',
-      authType: user.authType || 'password',
-      deltaWins,
-      deltaPoints
-    });
-  }
-
-  if (updates.length > 0) {
-    persistLocalSocial();
-    db.execPgTransaction(async client => {
-      for (const u of updates) {
-        await client.query(
-          `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
-           VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)
-           ON CONFLICT (group_id, user_id) WHERE group_id IS NOT NULL DO UPDATE SET
-             username = EXCLUDED.username,
-             name = EXCLUDED.name,
-             avatar = COALESCE(EXCLUDED.avatar, leaderboard.avatar),
-             wins = leaderboard.wins + EXCLUDED.wins,
-             matches_played = leaderboard.matches_played + 1,
-             points = leaderboard.points + EXCLUDED.points`,
-          [u.userId, groupId, u.username, u.name, u.avatar, u.deltaWins, u.deltaPoints, u.authType]
-        );
-      }
-    });
-    emitToGroup(groupId, 'group:leaderboard', { groupId });
-  }
+function notifyGroupLeaderboardUpdated(groupId) {
+  if (!groupId || !state.groups.has(groupId)) return;
+  emitToGroup(groupId, 'group:leaderboard', { groupId });
 }
 
 async function getGroupLeaderboard(groupId, userId) {
@@ -1218,14 +1143,11 @@ async function getGroupLeaderboard(groupId, userId) {
          COALESCE(u.avatar, l.avatar, '🎯') AS avatar,
          COALESCE(l.wins, 0) AS wins,
          COALESCE(l.matches_played, 0) AS matches_played,
-         COALESCE(l.points, 0) AS points
-       FROM (
-         SELECT user_id FROM group_members WHERE group_id = $1
-         UNION
-         SELECT user_id FROM leaderboard WHERE group_id = $1
-       ) m
-       JOIN users u ON u.id = m.user_id
-       LEFT JOIN leaderboard l ON l.group_id = $1 AND l.user_id = m.user_id`,
+         COALESCE(l.points, 200) AS points
+       FROM group_members gm
+       JOIN users u ON u.id = gm.user_id
+       LEFT JOIN leaderboard l ON l.user_id = gm.user_id
+       WHERE gm.group_id = $1`,
       [groupId]
     );
     for (const r of pgRows) {
@@ -1241,29 +1163,32 @@ async function getGroupLeaderboard(groupId, userId) {
         wins,
         matchesPlayed,
         points,
-        winRate
+        winRate,
+        isLudoKing: db.checkIsLudoKing(r.user_id)
       });
     }
   } else {
-    const lbMap = state.groupLeaderboard.get(groupId) || new Map();
     const membersMap = state.groupMembers.get(groupId) || new Map();
+    const globalById = new Map(db.getLeaderboard().map(e => [e.userId, e]));
 
-    // Sertakan semua anggota grup (meski belum main = 0 menang, 0 poin) + mantan anggota yang pernah punya skor
-    const userIds = new Set([...membersMap.keys(), ...lbMap.keys()]);
-    for (const uid of userIds) {
+    for (const uid of membersMap.keys()) {
       const u = db.getUserById(uid);
       if (!u) continue;
-      const stats = lbMap.get(uid) || { wins: 0, matchesPlayed: 0, points: 0 };
-      const winRate = stats.matchesPlayed > 0 ? Math.round((stats.wins / stats.matchesPlayed) * 100) : 0;
+      const gEntry = globalById.get(uid);
+      const wins = gEntry ? gEntry.wins : 0;
+      const matchesPlayed = gEntry ? gEntry.matchesPlayed : 0;
+      const points = gEntry ? gEntry.points : (u.points ?? 200);
+      const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
       rows.push({
         userId: u.id,
         username: u.username,
         name: u.name,
         avatar: u.avatar || '🎯',
-        wins: stats.wins,
-        matchesPlayed: stats.matchesPlayed,
-        points: stats.points,
-        winRate
+        wins,
+        matchesPlayed,
+        points,
+        winRate,
+        isLudoKing: db.checkIsLudoKing(u.id)
       });
     }
   }
@@ -1841,7 +1766,7 @@ module.exports = {
   sendGroupMediaMessage,
   getGroupMessageAudio,
   postGroupMatchMessage,
-  recordGroupMatchResult,
+  notifyGroupLeaderboardUpdated,
   getGroupLeaderboard,
   listDirectMessages,
   sendDirectTextMessage,

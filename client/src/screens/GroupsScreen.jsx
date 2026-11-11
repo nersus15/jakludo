@@ -1129,7 +1129,7 @@ function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch,
 
   useEffect(() => {
     return social.subscribeGroupEvents((event, payload) => {
-      if (event === 'group:leaderboard' && payload?.groupId === groupId) {
+      if (event === 'leaderboard:update' || (event === 'group:leaderboard' && payload?.groupId === groupId)) {
         loadLeaderboard();
       }
     });
@@ -1140,7 +1140,7 @@ function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch,
   return (
     <div className="social-stack">
       <p className="muted">
-        Peringkat ini khusus hasil <strong>Match Grup</strong> (tidak mengubah poin atau peringkat global).
+        Peringkat anggota grup ini mengikuti <strong>skor global</strong> pemain (hasil Match Grup juga masuk ke peringkat global).
       </p>
 
       {status === 'loading' && list.length === 0 && (

@@ -254,7 +254,7 @@ async function hydrateFromPostgres(activePool) {
     activePool.query('SELECT * FROM users'),
     activePool.query('SELECT user_id, item_id, quantity FROM user_items WHERE quantity > 0'),
     activePool.query('SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE expires_at > $1', [Date.now()]),
-    activePool.query('SELECT * FROM leaderboard WHERE group_id IS NULL'),
+    activePool.query('SELECT * FROM leaderboard'),
     activePool.query('SELECT code, state, updated_at FROM rooms')
   ]);
 
@@ -463,9 +463,9 @@ async function registerUser({ username, password, name }) {
           [id, userValid.cleanUsername, displayName, passwordHash, createdAt]
         );
         await client.query(
-          `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
-           VALUES ($1, NULL, $2, $3, '🎯', 0, 0, $4, 'password')
-           ON CONFLICT (user_id) WHERE group_id IS NULL DO NOTHING`,
+          `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+           VALUES ($1, $2, $3, '🎯', 0, 0, $4, 'password')
+           ON CONFLICT (user_id) DO NOTHING`,
           [id, userValid.cleanUsername, displayName, STARTER_POINTS]
         );
       });
@@ -637,9 +637,9 @@ function ensureLeaderboardEntry(user) {
 
 function ensureGlobalLeaderboardRow(client, user) {
   return client.query(
-    `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
-     VALUES ($1, NULL, $2, $3, $4, 0, 0, $5, $6)
-     ON CONFLICT (user_id) WHERE group_id IS NULL DO NOTHING`,
+    `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+     VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
+     ON CONFLICT (user_id) DO NOTHING`,
     [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
   );
 }
@@ -673,7 +673,7 @@ function recordMatchResult({ winnerPlayerId, players }) {
            SET matches_played = matches_played + 1,
                wins = wins + $1,
                points = points + $2
-           WHERE user_id = $3 AND group_id IS NULL`,
+           WHERE user_id = $3`,
           [deltaWins, deltaPoints, user.id]
         );
       }
@@ -715,8 +715,7 @@ async function queryGlobalLeaderboard() {
   const { rows } = await pool.query(
     `SELECT user_id, username, name, avatar, wins, matches_played, points, auth_type
      FROM leaderboard
-     WHERE group_id IS NULL
-       AND auth_type NOT IN ('bot', 'player', 'seed')`
+     WHERE auth_type NOT IN ('bot', 'player', 'seed')`
   );
   return formatLeaderboardRows(
     rows.map(r => ({
@@ -759,7 +758,7 @@ function purchaseItem({ userId, itemId, price }) {
   execPgTransaction(async client => {
     await ensureGlobalLeaderboardRow(client, user);
     await client.query(
-      'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND group_id IS NULL AND points >= $1',
+      'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
       [price, user.id]
     );
     await client.query(
@@ -798,7 +797,7 @@ function addPoints({ userId, amount }) {
   execPgTransaction(async client => {
     await ensureGlobalLeaderboardRow(client, user);
     await client.query(
-      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2 AND group_id IS NULL',
+      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
       [amount, user.id]
     );
   });

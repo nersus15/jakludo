@@ -6,6 +6,7 @@ const inventory = require('../game/inventory');
 const store = require('../game/store');
 const { createLimiter } = require('../lib/limiter');
 const { registerSocialRoutes } = require('../social/routes');
+const social = require('../social/store');
 
 const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 20 });
 const registerLimiter = createLimiter({ windowMs: 60 * 60 * 1000, max: Number(process.env.REGISTER_RATE_LIMIT || 30) });
@@ -81,11 +82,23 @@ function createApiRouter() {
     res.json({ success: true, rooms: list });
   });
 
-  api.get('/leaderboard', (req, res) => {
-    const leaderboard = db.getLeaderboard();
+  api.get('/leaderboard', asyncRoute(async (req, res) => {
+    const groupId = typeof req.query.groupId === 'string' && req.query.groupId.trim()
+      ? req.query.groupId.trim()
+      : null;
+
+    if (groupId) {
+      const user = requireUser(req, res);
+      if (!user) return;
+      const result = await social.getGroupLeaderboard(groupId, user.id);
+      if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+      return res.json({ success: true, groupId, leaderboard: result.leaderboard, ludoKing: null });
+    }
+
+    const leaderboard = await db.queryGlobalLeaderboard();
     const ludoKing = leaderboard[0] && leaderboard[0].isLudoKing ? leaderboard[0] : null;
     res.json({ success: true, leaderboard, ludoKing });
-  });
+  }));
 
   // Katalog toko dibaca dari registry item (server/items)
   api.get('/shop/items', (req, res) => {

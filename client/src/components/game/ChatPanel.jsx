@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
+import Icon from '../Icon';
 import PlayerAvatar from '../PlayerAvatar';
 
 const QUICK_CHATS = ['Semangat! 🔥', 'GG! 👏', 'Ampun bang! 😂', 'Jangan makan bidakku! 😭', 'Maju terus! 🚀'];
@@ -6,9 +7,13 @@ const QUICK_CHATS = ['Semangat! 🔥', 'GG! 👏', 'Ampun bang! 😂', 'Jangan m
 // Obrolan room: dipakai di panel samping (desktop) dan bottom sheet (HP)
 export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }) {
   const [text, setText] = useState('');
+  const [replyTarget, setReplyTarget] = useState(null);
+  const [highlightedId, setHighlightedId] = useState(null);
   const inputId = useId();
   const listRef = useRef(null);
   const inputRef = useRef(null);
+  const itemRefs = useRef(new Map());
+  const highlightTimerRef = useRef(null);
 
   // Gulir daftar pesan saja (bukan seluruh halaman) ke pesan terbaru
   useEffect(() => {
@@ -20,10 +25,41 @@ export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }
     if (autoFocus) inputRef.current?.focus();
   }, [autoFocus]);
 
+  useEffect(() => () => clearTimeout(highlightTimerRef.current), []);
+
   const submit = e => {
     e.preventDefault();
-    if (onSend(text)) setText('');
+    if (onSend(text, replyTarget)) {
+      setText('');
+      setReplyTarget(null);
+    }
   };
+
+  const sendQuick = q => {
+    if (onSend(q, replyTarget)) setReplyTarget(null);
+  };
+
+  const startReply = msg => {
+    setReplyTarget({
+      id: msg.id,
+      senderId: msg.senderId,
+      senderName: msg.senderName,
+      senderColor: msg.senderColor,
+      text: msg.text
+    });
+    inputRef.current?.focus();
+  };
+
+  const jumpToMessage = targetId => {
+    const node = itemRefs.current.get(String(targetId));
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setHighlightedId(targetId);
+    clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 1400);
+  };
+
+  const replyName = r => (r.senderId === playerId ? 'Kamu' : r.senderName);
 
   return (
     <div className="chat">
@@ -33,8 +69,17 @@ export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }
         ) : (
           chats.map(msg => {
             const mine = msg.senderId === playerId;
+            const isHighlighted = highlightedId !== null && String(highlightedId) === String(msg.id);
             return (
-              <li key={msg.id} className={`chat__msg color-${msg.senderColor} ${mine ? 'is-mine' : ''}`}>
+              <li
+                key={msg.id}
+                ref={el => {
+                  const k = String(msg.id);
+                  if (el) itemRefs.current.set(k, el);
+                  else itemRefs.current.delete(k);
+                }}
+                className={`chat__msg color-${msg.senderColor} ${mine ? 'is-mine' : ''} ${isHighlighted ? 'is-highlighted' : ''}`}
+              >
                 <span className="chat__meta">
                   {!mine && msg.senderAvatar && (
                     <PlayerAvatar
@@ -47,7 +92,31 @@ export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }
                   <strong className="chat__sender">{mine ? 'Kamu' : msg.senderName}</strong>
                   <span className="muted">{msg.time}</span>
                 </span>
-                <span className="chat__bubble">{msg.text}</span>
+                <div className="chat__row">
+                  <div className="chat__bubble">
+                    {msg.replyTo && (
+                      <button
+                        type="button"
+                        className={`chat__quote color-${msg.replyTo.senderColor || msg.senderColor}`}
+                        onClick={() => jumpToMessage(msg.replyTo.id)}
+                        title="Lihat pesan yang dibalas"
+                      >
+                        <strong className="chat__quote-sender">{replyName(msg.replyTo)}</strong>
+                        <span className="chat__quote-text">{msg.replyTo.text}</span>
+                      </button>
+                    )}
+                    <span className="chat__text">{msg.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="chat__reply-btn"
+                    onClick={() => startReply(msg)}
+                    aria-label={`Balas pesan dari ${replyName(msg)}`}
+                    title="Balas pesan ini"
+                  >
+                    <Icon name="reply" size={14} />
+                  </button>
+                </div>
               </li>
             );
           })
@@ -56,9 +125,27 @@ export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }
 
       <div className="chat__quick" role="group" aria-label="Pesan cepat">
         {QUICK_CHATS.map(q => (
-          <button key={q} type="button" className="chip" onClick={() => onSend(q)}>{q}</button>
+          <button key={q} type="button" className="chip" onClick={() => sendQuick(q)}>{q}</button>
         ))}
       </div>
+
+      {replyTarget && (
+        <div className={`chat__reply-bar color-${replyTarget.senderColor}`} role="status">
+          <div className="chat__reply-info">
+            <span className="chat__reply-label">Membalas <strong>{replyName(replyTarget)}</strong></span>
+            <span className="chat__reply-snippet">{replyTarget.text}</span>
+          </div>
+          <button
+            type="button"
+            className="chat__reply-cancel"
+            onClick={() => { setReplyTarget(null); inputRef.current?.focus(); }}
+            aria-label="Batalkan balasan"
+            title="Batalkan balasan"
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      )}
 
       <form className="chat__form" onSubmit={submit}>
         <label htmlFor={inputId} className="sr-only">Tulis pesan</label>
@@ -68,8 +155,15 @@ export default function ChatPanel({ chats, playerId, onSend, autoFocus = false }
           className="input"
           value={text}
           onChange={e => setText(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Escape' && replyTarget) {
+              e.stopPropagation();
+              e.nativeEvent.stopPropagation();
+              setReplyTarget(null);
+            }
+          }}
           maxLength={140}
-          placeholder="Tulis pesan..."
+          placeholder={replyTarget ? `Balas ${replyName(replyTarget)}...` : 'Tulis pesan...'}
           autoComplete="off"
         />
         <button type="submit" className="btn btn--primary" disabled={!text.trim()}>Kirim</button>

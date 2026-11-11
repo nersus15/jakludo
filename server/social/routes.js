@@ -385,13 +385,13 @@ function registerSocialRoutes(api) {
     sendAudioStream(req, res, result);
   }));
 
-  api.get('/groups/:id/leaderboard', (req, res) => {
+  api.get('/groups/:id/leaderboard', asyncRoute(async (req, res) => {
     const user = requireUser(req, res);
     if (!user) return;
-    const result = social.getGroupLeaderboard(req.params.id, user.id);
+    const result = await social.getGroupLeaderboard(req.params.id, user.id);
     if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
     res.json({ success: true, ...result });
-  });
+  }));
 }
 
 module.exports = { registerSocialRoutes };

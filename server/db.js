@@ -254,7 +254,7 @@ async function hydrateFromPostgres(activePool) {
     activePool.query('SELECT * FROM users'),
     activePool.query('SELECT user_id, item_id, quantity FROM user_items WHERE quantity > 0'),
     activePool.query('SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE expires_at > $1', [Date.now()]),
-    activePool.query('SELECT * FROM leaderboard'),
+    activePool.query('SELECT * FROM leaderboard WHERE group_id IS NULL'),
     activePool.query('SELECT code, state, updated_at FROM rooms')
   ]);
 
@@ -463,9 +463,9 @@ async function registerUser({ username, password, name }) {
           [id, userValid.cleanUsername, displayName, passwordHash, createdAt]
         );
         await client.query(
-          `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
-           VALUES ($1, $2, $3, '🎯', 0, 0, $4, 'password')
-           ON CONFLICT (user_id) DO NOTHING`,
+          `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
+           VALUES ($1, NULL, $2, $3, '🎯', 0, 0, $4, 'password')
+           ON CONFLICT (user_id) WHERE group_id IS NULL DO NOTHING`,
           [id, userValid.cleanUsername, displayName, STARTER_POINTS]
         );
       });
@@ -635,6 +635,15 @@ function ensureLeaderboardEntry(user) {
   return state.leaderboard.get(user.id);
 }
 
+function ensureGlobalLeaderboardRow(client, user) {
+  return client.query(
+    `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
+     VALUES ($1, NULL, $2, $3, $4, 0, 0, $5, $6)
+     ON CONFLICT (user_id) WHERE group_id IS NULL DO NOTHING`,
+    [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
+  );
+}
+
 function recordMatchResult({ winnerPlayerId, players }) {
   if (!players || players.length === 0) return;
   const humans = players.filter(p => !p.isBot);
@@ -658,18 +667,13 @@ function recordMatchResult({ winnerPlayerId, players }) {
     persistLocalFallback();
     execPgTransaction(async client => {
       for (const { user, deltaWins, deltaPoints } of updates) {
-        await client.query(
-          `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
-           VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
-           ON CONFLICT (user_id) DO NOTHING`,
-          [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
-        );
+        await ensureGlobalLeaderboardRow(client, user);
         await client.query(
           `UPDATE leaderboard
            SET matches_played = matches_played + 1,
                wins = wins + $1,
                points = points + $2
-           WHERE user_id = $3`,
+           WHERE user_id = $3 AND group_id IS NULL`,
           [deltaWins, deltaPoints, user.id]
         );
       }
@@ -677,25 +681,55 @@ function recordMatchResult({ winnerPlayerId, players }) {
   }
 }
 
-function getRankedEntries() {
-  const excluded = new Set(['bot', 'player', 'seed']);
-  return Array.from(state.leaderboard.values())
-    .filter(e => !excluded.has(e.authType))
+function formatLeaderboardRows(rows) {
+  return rows
+    .slice()
     .sort((a, b) => {
       if (b.wins !== a.wins) return b.wins - a.wins;
       if (b.points !== a.points) return b.points - a.points;
       const wrA = a.matchesPlayed > 0 ? a.wins / a.matchesPlayed : 0;
       const wrB = b.matchesPlayed > 0 ? b.wins / b.matchesPlayed : 0;
       return wrB - wrA;
+    })
+    .map((player, index) => {
+      const rank = index + 1;
+      const winRate = player.matchesPlayed > 0 ? Math.round((player.wins / player.matchesPlayed) * 100) : 0;
+      return { ...player, rank, winRate, isLudoKing: rank === 1 && player.wins > 0 };
     });
 }
 
+function getRankedEntries() {
+  const excluded = new Set(['bot', 'player', 'seed']);
+  return formatLeaderboardRows(
+    Array.from(state.leaderboard.values()).filter(e => !excluded.has(e.authType))
+  );
+}
+
 function getLeaderboard() {
-  return getRankedEntries().map((player, index) => {
-    const rank = index + 1;
-    const winRate = player.matchesPlayed > 0 ? Math.round((player.wins / player.matchesPlayed) * 100) : 0;
-    return { ...player, rank, winRate, isLudoKing: rank === 1 && player.wins > 0 };
-  });
+  return getRankedEntries();
+}
+
+async function queryGlobalLeaderboard() {
+  if (!pool || closed) return getLeaderboard();
+  await flush();
+  const { rows } = await pool.query(
+    `SELECT user_id, username, name, avatar, wins, matches_played, points, auth_type
+     FROM leaderboard
+     WHERE group_id IS NULL
+       AND auth_type NOT IN ('bot', 'player', 'seed')`
+  );
+  return formatLeaderboardRows(
+    rows.map(r => ({
+      userId: r.user_id,
+      username: r.username,
+      name: r.name,
+      avatar: r.avatar,
+      wins: Number(r.wins),
+      matchesPlayed: Number(r.matches_played),
+      points: Number(r.points),
+      authType: r.auth_type
+    }))
+  );
 }
 
 function checkIsLudoKing(userId) {
@@ -723,14 +757,9 @@ function purchaseItem({ userId, itemId, price }) {
   persistLocalFallback();
 
   execPgTransaction(async client => {
+    await ensureGlobalLeaderboardRow(client, user);
     await client.query(
-      `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
-       VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
-    );
-    await client.query(
-      'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
+      'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND group_id IS NULL AND points >= $1',
       [price, user.id]
     );
     await client.query(
@@ -767,14 +796,9 @@ function addPoints({ userId, amount }) {
   persistLocalFallback();
 
   execPgTransaction(async client => {
+    await ensureGlobalLeaderboardRow(client, user);
     await client.query(
-      `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
-       VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [user.id, user.username, user.name, user.avatar || '🎲', STARTER_POINTS, user.authType]
-    );
-    await client.query(
-      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2 AND group_id IS NULL',
       [amount, user.id]
     );
   });
@@ -859,6 +883,7 @@ module.exports = {
   pruneExpiredSessions,
   recordMatchResult,
   getLeaderboard,
+  queryGlobalLeaderboard,
   checkIsLudoKing,
   sanitizeUser,
   updateUserAvatar,

@@ -331,9 +331,9 @@ async function migrateSqliteToPostgres(pool, { sqliteFile, renameAfter = false }
 
     for (const e of data.leaderboard) {
       await client.query(
-        `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (user_id) DO UPDATE SET
+        `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
+         VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (user_id) WHERE group_id IS NULL DO UPDATE SET
            wins = GREATEST(leaderboard.wins, EXCLUDED.wins),
            matches_played = GREATEST(leaderboard.matches_played, EXCLUDED.matches_played),
            points = GREATEST(leaderboard.points, EXCLUDED.points),
@@ -464,9 +464,9 @@ async function migrateLegacyJsonToPostgres(pool, dataDir = DEFAULT_DATA_DIR) {
     for (const e of leaderboard) {
       if (!e.userId || !e.username) continue;
       await client.query(
-        `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (user_id) DO NOTHING`,
+        `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
+         VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (user_id) WHERE group_id IS NULL DO NOTHING`,
         [e.userId, e.username, e.name || e.username, e.avatar || null, Number(e.wins || 0), Number(e.matchesPlayed || 0), Number(e.points || 0), e.authType || 'player']
       );
     }

@@ -119,7 +119,7 @@ async function hydrateFromPostgres() {
     pool.query('SELECT * FROM group_members'),
     pool.query('SELECT * FROM group_invites'),
     pool.query('SELECT * FROM group_messages ORDER BY created_at ASC, id ASC'),
-    pool.query('SELECT * FROM group_leaderboard')
+    pool.query('SELECT group_id, user_id, wins, matches_played, points FROM leaderboard WHERE group_id IS NOT NULL')
   ]);
 
   for (const r of friendsRes.rows) {
@@ -1168,7 +1168,15 @@ function recordGroupMatchResult(groupId, { winnerPlayerId, players }) {
     entry.matchesPlayed += 1;
     entry.wins += deltaWins;
     entry.points += deltaPoints;
-    updates.push({ userId: user.id, deltaWins, deltaPoints });
+    updates.push({
+      userId: user.id,
+      username: user.username,
+      name: user.name,
+      avatar: user.avatar || '🎯',
+      authType: user.authType || 'password',
+      deltaWins,
+      deltaPoints
+    });
   }
 
   if (updates.length > 0) {
@@ -1176,13 +1184,16 @@ function recordGroupMatchResult(groupId, { winnerPlayerId, players }) {
     db.execPgTransaction(async client => {
       for (const u of updates) {
         await client.query(
-          `INSERT INTO group_leaderboard (group_id, user_id, wins, matches_played, points)
-           VALUES ($1, $2, $3, 1, $4)
-           ON CONFLICT (group_id, user_id) DO UPDATE SET
-             wins = group_leaderboard.wins + EXCLUDED.wins,
-             matches_played = group_leaderboard.matches_played + 1,
-             points = group_leaderboard.points + EXCLUDED.points`,
-          [groupId, u.userId, u.deltaWins, u.deltaPoints]
+          `INSERT INTO leaderboard (user_id, group_id, username, name, avatar, wins, matches_played, points, auth_type)
+           VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)
+           ON CONFLICT (group_id, user_id) WHERE group_id IS NOT NULL DO UPDATE SET
+             username = EXCLUDED.username,
+             name = EXCLUDED.name,
+             avatar = COALESCE(EXCLUDED.avatar, leaderboard.avatar),
+             wins = leaderboard.wins + EXCLUDED.wins,
+             matches_played = leaderboard.matches_played + 1,
+             points = leaderboard.points + EXCLUDED.points`,
+          [u.userId, groupId, u.username, u.name, u.avatar, u.deltaWins, u.deltaPoints, u.authType]
         );
       }
     });
@@ -1190,31 +1201,71 @@ function recordGroupMatchResult(groupId, { winnerPlayerId, players }) {
   }
 }
 
-function getGroupLeaderboard(groupId, userId) {
+async function getGroupLeaderboard(groupId, userId) {
   if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
   if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
 
-  const lbMap = state.groupLeaderboard.get(groupId) || new Map();
-  const membersMap = state.groupMembers.get(groupId) || new Map();
-
-  // Sertakan semua anggota grup (meski belum main = 0 menang, 0 poin) + mantan anggota yang pernah punya skor
-  const userIds = new Set([...membersMap.keys(), ...lbMap.keys()]);
+  const pool = db.getPool();
   const rows = [];
-  for (const uid of userIds) {
-    const u = db.getUserById(uid);
-    if (!u) continue;
-    const stats = lbMap.get(uid) || { wins: 0, matchesPlayed: 0, points: 0 };
-    const winRate = stats.matchesPlayed > 0 ? Math.round((stats.wins / stats.matchesPlayed) * 100) : 0;
-    rows.push({
-      userId: u.id,
-      username: u.username,
-      name: u.name,
-      avatar: u.avatar || '🎯',
-      wins: stats.wins,
-      matchesPlayed: stats.matchesPlayed,
-      points: stats.points,
-      winRate
-    });
+
+  if (pool) {
+    await db.flush();
+    const { rows: pgRows } = await pool.query(
+      `SELECT
+         u.id AS user_id,
+         u.username,
+         u.name,
+         COALESCE(u.avatar, l.avatar, '🎯') AS avatar,
+         COALESCE(l.wins, 0) AS wins,
+         COALESCE(l.matches_played, 0) AS matches_played,
+         COALESCE(l.points, 0) AS points
+       FROM (
+         SELECT user_id FROM group_members WHERE group_id = $1
+         UNION
+         SELECT user_id FROM leaderboard WHERE group_id = $1
+       ) m
+       JOIN users u ON u.id = m.user_id
+       LEFT JOIN leaderboard l ON l.group_id = $1 AND l.user_id = m.user_id`,
+      [groupId]
+    );
+    for (const r of pgRows) {
+      const wins = Number(r.wins || 0);
+      const matchesPlayed = Number(r.matches_played || 0);
+      const points = Number(r.points || 0);
+      const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+      rows.push({
+        userId: r.user_id,
+        username: r.username,
+        name: r.name,
+        avatar: r.avatar || '🎯',
+        wins,
+        matchesPlayed,
+        points,
+        winRate
+      });
+    }
+  } else {
+    const lbMap = state.groupLeaderboard.get(groupId) || new Map();
+    const membersMap = state.groupMembers.get(groupId) || new Map();
+
+    // Sertakan semua anggota grup (meski belum main = 0 menang, 0 poin) + mantan anggota yang pernah punya skor
+    const userIds = new Set([...membersMap.keys(), ...lbMap.keys()]);
+    for (const uid of userIds) {
+      const u = db.getUserById(uid);
+      if (!u) continue;
+      const stats = lbMap.get(uid) || { wins: 0, matchesPlayed: 0, points: 0 };
+      const winRate = stats.matchesPlayed > 0 ? Math.round((stats.wins / stats.matchesPlayed) * 100) : 0;
+      rows.push({
+        userId: u.id,
+        username: u.username,
+        name: u.name,
+        avatar: u.avatar || '🎯',
+        wins: stats.wins,
+        matchesPlayed: stats.matchesPlayed,
+        points: stats.points,
+        winRate
+      });
+    }
   }
 
   rows.sort((a, b) =>

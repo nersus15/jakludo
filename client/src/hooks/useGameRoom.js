@@ -338,10 +338,13 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     useItem: itemId => socket.emit('game:use_item', { itemId }),
     decideShield: use => emitWithClick('game:shield_decision', { use }),
     sendReaction: emoji => emitWithClick('game:reaction', { emoji }),
-    sendChat: text => {
+    sendChat: (text, replyTo = null) => {
       const clean = String(text || '').trim();
       if (!clean) return false;
-      emitWithClick('room:chat', { text: clean });
+      const payload = replyTo?.id !== undefined && replyTo?.id !== null
+        ? { text: clean, replyToId: replyTo.id }
+        : { text: clean };
+      emitWithClick('room:chat', payload);
       return true;
     },
     setChatOpen: open => {

@@ -189,7 +189,7 @@ function registerSocketHandlers(io) {
       });
     });
 
-    on(socket, 'room:chat', ({ text }) => {
+    on(socket, 'room:chat', ({ text, replyToId }) => {
       const r = currentRoom();
       const player = r?.players.find(p => p.id === socket.id);
       if (!player) return;
@@ -200,6 +200,20 @@ function registerSocketHandlers(io) {
         return socket.emit('room:error', 'Terlalu cepat mengirim pesan. Tunggu sebentar.');
       }
 
+      let replyTo = null;
+      if (replyToId !== undefined && replyToId !== null && replyToId !== '') {
+        const target = r.chats.find(c => String(c.id) === String(replyToId));
+        if (target) {
+          replyTo = {
+            id: target.id,
+            senderId: target.senderId,
+            senderName: target.senderName,
+            senderColor: target.senderColor,
+            text: String(target.text || '').slice(0, 90)
+          };
+        }
+      }
+
       const chatMsg = {
         id: Date.now() + Math.random(),
         senderId: player.id,
@@ -207,6 +221,7 @@ function registerSocketHandlers(io) {
         senderAvatar: player.avatar || '🎲',
         senderColor: player.color,
         text: cleanText,
+        replyTo,
         time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
       };
       r.chats.push(chatMsg);

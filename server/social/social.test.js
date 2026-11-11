@@ -301,6 +301,17 @@ test('match khusus grup hanya bisa diikuti anggota grup dan hanya masuk ke leade
   assert.equal(grpLb.leaderboard[1].userId, p2.user.id);
   assert.equal(grpLb.leaderboard[1].wins, 0);
   assert.equal(grpLb.leaderboard[1].points, 5);
+
+  // Query ?groupId pada endpoint /api/leaderboard membedakan penampilan leaderboard grup vs global
+  const grpByQuery = await apiFetch(p1.token, 'GET', `/api/leaderboard?groupId=${group.id}`);
+  assert.equal(grpByQuery.success, true);
+  assert.equal(grpByQuery.groupId, group.id);
+  assert.deepEqual(grpByQuery.leaderboard, grpLb.leaderboard);
+
+  const globalByQuery = await apiFetch(p1.token, 'GET', '/api/leaderboard');
+  assert.equal(globalByQuery.success, true);
+  const p1GlobalRow = globalByQuery.leaderboard.find(e => e.userId === p1.user.id);
+  assert.equal(p1GlobalRow.points, globalBeforeP1);
 });
 
 test('chat private antar teman, unggah avatar S3 terkompresi, dan event notifikasi realtime', async () => {
@@ -487,6 +498,14 @@ test('avatar profil pemain tersinkron di room game (room:sync_profile, room:chat
   sockHost.emit('room:chat', { text: 'Cek foto profil baru di room!' });
   const chatMsg = await chatRecv;
   assert.equal(chatMsg.senderAvatar, avRes.user.avatar);
+
+  // Reply bubble chat di dalam room menyertakan kutipan pesan asli (replyTo)
+  const replyRecv = once(sockHost, 'room:chat_message');
+  sockGuest.emit('room:chat', { text: 'Keren fotonya!', replyToId: chatMsg.id });
+  const replyMsg = await replyRecv;
+  assert.equal(replyMsg.replyTo.id, chatMsg.id);
+  assert.equal(replyMsg.replyTo.senderName, chatMsg.senderName);
+  assert.equal(replyMsg.replyTo.text, 'Cek foto profil baru di room!');
 
   // Unggah avatar baru untuk guest lalu rejoin room -> rejoinPlayer menyegarkan avatar dari DB
   const avForm2 = new FormData();

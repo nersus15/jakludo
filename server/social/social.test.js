@@ -289,14 +289,16 @@ test('match khusus grup hanya bisa diikuti anggota grup dan skor grup mengikuti 
   engine.declareWinner(room, room.players[0]);
   await wait(80);
 
-  // Skor P1 (+25 poin, 1 menang) dan P2 (+5 poin, 0 menang) tercatat di leaderboard global sekaligus tampil sama di grup
+  // Poin sama dengan room biasa: P1 peringkat 1 dari 2 pemain (+30) dan P2 peringkat 2 (+5),
+  // masing-masing ditambah bonus harian +5 karena ini pertandingan pertama mereka hari ini
   const globalAfter = db.getLeaderboard();
   const p1Global = globalAfter.find(e => e.userId === p1.user.id);
   const p2Global = globalAfter.find(e => e.userId === p2.user.id);
   assert.equal(p1Global.wins, 1);
-  assert.equal(p1Global.points, globalBeforeP1 + 25);
+  assert.equal(p1Global.points, globalBeforeP1 + 30 + 5);
   assert.equal(p2Global.wins, 0);
-  assert.equal(p2Global.points, globalBeforeP2 + 5);
+  assert.equal(p2Global.points, globalBeforeP2 + 5 + 5);
+  assert.deepEqual(room.matchResult.awards[room.players[0].id], { points: 30, dailyBonus: 5 });
 
   // Leaderboard grup hanya berisi anggota grup (outsider tidak ikut), dengan nilai menang/poin sama persis dengan global
   const grpLb = await apiFetch(p1.token, 'GET', `/api/groups/${group.id}/leaderboard`);

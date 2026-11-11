@@ -1,11 +1,28 @@
 // Notifikasi bawaan browser (Notification API) untuk event permainan yang datang lewat WebSocket.
 // Hanya ditampilkan saat tab JakLudo sedang tidak dilihat pemain (tab lain / aplikasi lain / layar mati).
 
+import { storage } from './storage';
+
 const ICON = '/icons/icon-192.png';
+const NOTIF_DISMISSED_KEY = 'notif_prompt_dismissed';
+export const NOTIF_PROMPT_RESOLVED_EVENT = 'jakludo:notif-resolved';
 
 export const isNotificationSupported = () => typeof window !== 'undefined' && 'Notification' in window;
 
 export const getNotificationPermission = () => (isNotificationSupported() ? Notification.permission : 'unsupported');
+
+export const isNotificationPromptDismissed = () => storage.get(NOTIF_DISMISSED_KEY) === '1';
+
+/** Simpan keputusan user menolak/menutup prompt notifikasi agar tidak dipaksa ulang. */
+export function dismissNotificationPrompt() {
+  storage.set(NOTIF_DISMISSED_KEY, '1');
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(NOTIF_PROMPT_RESOLVED_EVENT));
+  }
+}
+
+export const isNotificationPromptResolved = () =>
+  getNotificationPermission() !== 'default' || isNotificationPromptDismissed();
 
 // Harus dipanggil dari aksi pengguna (klik tombol), browser memblokir permintaan otomatis
 export async function requestNotificationPermission() {

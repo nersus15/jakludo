@@ -433,25 +433,27 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
     };
   }, [apiFetch]);
 
-  const sendDirectMessage = useCallback(async (friendId, text) => {
+  const sendDirectMessage = useCallback(async (friendId, text, replyToId = null) => {
     const clean = String(text || '').trim();
     if (!clean) throw new Error('Pesan tidak boleh kosong.');
     if (clean.length > 1000) throw new Error('Pesan maksimal 1000 karakter.');
+    const payload = replyToId ? { text: clean, replyToId } : { text: clean };
     const data = await apiFetch(`/api/friends/${encodeURIComponent(friendId)}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ text: clean })
+      body: JSON.stringify(payload)
     });
     return data.message;
   }, [apiFetch]);
 
-  const sendDirectMedia = useCallback(async (friendId, { file, kind, durationMs, text }) => {
+  const sendDirectMedia = useCallback(async (friendId, { file, kind, durationMs, text, replyToId = null }) => {
     return uploadDirectMedia({
       friendId,
       token: getToken(),
       file,
       kind,
       durationMs,
-      text
+      text,
+      replyToId
     });
   }, [getToken]);
 
@@ -605,25 +607,27 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
     };
   }, [apiFetch]);
 
-  const sendMessage = useCallback(async (groupId, text) => {
+  const sendMessage = useCallback(async (groupId, text, replyToId = null) => {
     const clean = String(text || '').trim();
     if (!clean) throw new Error('Pesan tidak boleh kosong.');
     if (clean.length > 1000) throw new Error('Pesan maksimal 1000 karakter.');
+    const payload = replyToId ? { text: clean, replyToId } : { text: clean };
     const data = await apiFetch(`/api/groups/${encodeURIComponent(groupId)}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ text: clean })
+      body: JSON.stringify(payload)
     });
     return data.message;
   }, [apiFetch]);
 
-  const sendMedia = useCallback(async (groupId, { file, kind, durationMs, text }) => {
+  const sendMedia = useCallback(async (groupId, { file, kind, durationMs, text, replyToId = null }) => {
     return uploadGroupMedia({
       groupId,
       token: getToken(),
       file,
       kind,
       durationMs,
-      text
+      text,
+      replyToId
     });
   }, [getToken]);
 

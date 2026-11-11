@@ -137,6 +137,7 @@ async function hydrateFromPostgres() {
       mediaWidth: r.media_width ? Number(r.media_width) : null,
       mediaHeight: r.media_height ? Number(r.media_height) : null,
       mediaDurationMs: r.media_duration_ms ? Number(r.media_duration_ms) : null,
+      replyToId: r.reply_to_id || null,
       createdAt: Number(r.created_at)
     });
   }
@@ -184,6 +185,7 @@ async function hydrateFromPostgres() {
       mediaHeight: r.media_height ? Number(r.media_height) : null,
       mediaDurationMs: r.media_duration_ms ? Number(r.media_duration_ms) : null,
       matchCode: r.match_code || null,
+      replyToId: r.reply_to_id || null,
       createdAt: Number(r.created_at)
     });
   }
@@ -503,6 +505,35 @@ function getGroupBasic(groupId) {
   return g ? { id: g.id, name: g.name, avatar: g.avatar || null } : null;
 }
 
+function resolveReplyId(list, replyToId) {
+  if (!replyToId) return null;
+  const cleanId = String(replyToId).trim();
+  if (!cleanId) return null;
+  return (list || []).some(m => m.id === cleanId) ? cleanId : null;
+}
+
+function buildReplySummary(list, replyToId) {
+  if (!replyToId) return null;
+  const target = (list || []).find(m => m.id === replyToId);
+  if (!target) {
+    return { id: replyToId, type: 'text', senderId: null, sender: null, text: '' };
+  }
+  const sender = target.senderId ? userSummary(target.senderId) : null;
+  let snippet = String(target.text || '').trim().slice(0, 120);
+  if (!snippet) {
+    if (target.type === 'image') snippet = '📷 Foto';
+    else if (target.type === 'audio') snippet = '🎤 Voice note';
+    else if (target.type === 'match') snippet = '🎲 Match Grup';
+  }
+  return {
+    id: target.id,
+    type: target.type,
+    senderId: target.senderId || null,
+    sender,
+    text: snippet
+  };
+}
+
 async function formatMessage(msg) {
   if (!msg) return null;
   let mediaObj = null;
@@ -518,6 +549,9 @@ async function formatMessage(msg) {
       durationMs: msg.mediaDurationMs ?? null
     };
   }
+  const replyTo = msg.replyToId
+    ? buildReplySummary(state.groupMessages.get(msg.groupId), msg.replyToId)
+    : null;
   return {
     id: msg.id,
     groupId: msg.groupId,
@@ -526,11 +560,13 @@ async function formatMessage(msg) {
     text: msg.text || '',
     media: mediaObj,
     match: msg.matchCode ? { code: msg.matchCode } : null,
+    replyToId: msg.replyToId || null,
+    replyTo,
     createdAt: new Date(msg.createdAt).toISOString()
   };
 }
 
-function appendRawGroupMessage({ groupId, senderId = null, type, text = '', mediaKey = null, mediaMime = null, mediaSize = null, mediaWidth = null, mediaHeight = null, mediaDurationMs = null, matchCode = null }) {
+function appendRawGroupMessage({ groupId, senderId = null, type, text = '', mediaKey = null, mediaMime = null, mediaSize = null, mediaWidth = null, mediaHeight = null, mediaDurationMs = null, matchCode = null, replyToId = null }) {
   const id = 'msg_' + crypto.randomUUID();
   const createdAt = Date.now();
   const row = {
@@ -546,6 +582,7 @@ function appendRawGroupMessage({ groupId, senderId = null, type, text = '', medi
     mediaHeight,
     mediaDurationMs,
     matchCode,
+    replyToId: replyToId || null,
     createdAt
   };
   if (!state.groupMessages.has(groupId)) state.groupMessages.set(groupId, []);
@@ -554,9 +591,9 @@ function appendRawGroupMessage({ groupId, senderId = null, type, text = '', medi
 
   db.execPg(
     `INSERT INTO group_messages
-      (id, group_id, sender_id, type, text, media_key, media_mime, media_size, media_width, media_height, media_duration_ms, match_code, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-    [id, groupId, senderId, type, row.text, mediaKey, mediaMime, mediaSize, mediaWidth, mediaHeight, mediaDurationMs, matchCode, createdAt]
+      (id, group_id, sender_id, type, text, media_key, media_mime, media_size, media_width, media_height, media_duration_ms, match_code, reply_to_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    [id, groupId, senderId, type, row.text, mediaKey, mediaMime, mediaSize, mediaWidth, mediaHeight, mediaDurationMs, matchCode, row.replyToId, createdAt]
   );
 
   return row;
@@ -1001,7 +1038,7 @@ async function listGroupMessages(groupId, userId, { before, limit = 30 } = {}) {
   };
 }
 
-async function sendGroupTextMessage(groupId, userId, { text }) {
+async function sendGroupTextMessage(groupId, userId, { text, replyToId = null }) {
   if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
   if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
 
@@ -1009,17 +1046,19 @@ async function sendGroupTextMessage(groupId, userId, { text }) {
   if (!clean) return { error: 'Pesan tidak boleh kosong.' };
   if (clean.length > 1000) return { error: 'Pesan maksimal 1.000 karakter.' };
 
+  const validReplyId = resolveReplyId(state.groupMessages.get(groupId), replyToId);
   const row = appendRawGroupMessage({
     groupId,
     senderId: userId,
     type: 'text',
-    text: clean
+    text: clean,
+    replyToId: validReplyId
   });
   const message = await broadcastNewGroupMessage(row);
   return { message };
 }
 
-async function sendGroupMediaMessage(groupId, userId, { kind, buffer, durationMs, text }) {
+async function sendGroupMediaMessage(groupId, userId, { kind, buffer, durationMs, text, replyToId = null }) {
   if (!state.groups.has(groupId)) return { error: 'Grup tidak ditemukan.', status: 404 };
   if (!isGroupMember(groupId, userId)) return { error: 'Kamu bukan anggota grup ini.', status: 403 };
   if (!storage.isMediaEnabled()) {
@@ -1055,6 +1094,7 @@ async function sendGroupMediaMessage(groupId, userId, { kind, buffer, durationMs
   }
 
   const cleanCaption = String(text || '').trim().slice(0, 300);
+  const validReplyId = resolveReplyId(state.groupMessages.get(groupId), replyToId);
   const row = appendRawGroupMessage({
     groupId,
     senderId: userId,
@@ -1065,7 +1105,8 @@ async function sendGroupMediaMessage(groupId, userId, { kind, buffer, durationMs
     mediaSize: uploaded.size,
     mediaWidth: processed.width ?? null,
     mediaHeight: processed.height ?? null,
-    mediaDurationMs: processed.durationMs ?? null
+    mediaDurationMs: processed.durationMs ?? null,
+    replyToId: validReplyId
   });
 
   const message = await broadcastNewGroupMessage(row);
@@ -1226,6 +1267,9 @@ async function formatDirectMessage(msg) {
       durationMs: msg.mediaDurationMs ?? null
     };
   }
+  const replyTo = msg.replyToId
+    ? buildReplySummary(state.directMessages.get(msg.pairKey), msg.replyToId)
+    : null;
   return {
     id: msg.id,
     pairKey: msg.pairKey,
@@ -1236,6 +1280,8 @@ async function formatDirectMessage(msg) {
     recipient: userSummary(msg.recipientId),
     text: msg.text || '',
     media: mediaObj,
+    replyToId: msg.replyToId || null,
+    replyTo,
     createdAt: new Date(msg.createdAt).toISOString()
   };
 }
@@ -1250,7 +1296,8 @@ function appendRawDirectMessage({
   mediaSize = null,
   mediaWidth = null,
   mediaHeight = null,
-  mediaDurationMs = null
+  mediaDurationMs = null,
+  replyToId = null
 }) {
   const id = 'dm_' + crypto.randomUUID();
   const createdAt = Date.now();
@@ -1268,6 +1315,7 @@ function appendRawDirectMessage({
     mediaWidth,
     mediaHeight,
     mediaDurationMs,
+    replyToId: replyToId || null,
     createdAt
   };
   if (!state.directMessages.has(pk)) state.directMessages.set(pk, []);
@@ -1276,8 +1324,8 @@ function appendRawDirectMessage({
 
   db.execPg(
     `INSERT INTO direct_messages
-      (id, pair_key, sender_id, recipient_id, type, text, media_key, media_mime, media_size, media_width, media_height, media_duration_ms, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      (id, pair_key, sender_id, recipient_id, type, text, media_key, media_mime, media_size, media_width, media_height, media_duration_ms, reply_to_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       id,
       pk,
@@ -1291,6 +1339,7 @@ function appendRawDirectMessage({
       mediaWidth,
       mediaHeight,
       mediaDurationMs,
+      row.replyToId,
       createdAt
     ]
   );
@@ -1330,7 +1379,7 @@ async function listDirectMessages(userId, friendId, { before, limit = 30 } = {})
   };
 }
 
-async function sendDirectTextMessage(userId, friendId, { text }) {
+async function sendDirectTextMessage(userId, friendId, { text, replyToId = null }) {
   if (!areFriends(userId, friendId)) {
     return { error: 'Kamu hanya dapat berkirim pesan private dengan teman.', status: 403 };
   }
@@ -1338,17 +1387,20 @@ async function sendDirectTextMessage(userId, friendId, { text }) {
   if (!clean) return { error: 'Pesan tidak boleh kosong.' };
   if (clean.length > 1000) return { error: 'Pesan maksimal 1.000 karakter.' };
 
+  const pk = pairKey(userId, friendId);
+  const validReplyId = resolveReplyId(state.directMessages.get(pk), replyToId);
   const row = appendRawDirectMessage({
     senderId: userId,
     recipientId: friendId,
     type: 'text',
-    text: clean
+    text: clean,
+    replyToId: validReplyId
   });
   const message = await broadcastNewDirectMessage(row);
   return { message };
 }
 
-async function sendDirectMediaMessage(userId, friendId, { kind, buffer, durationMs, text }) {
+async function sendDirectMediaMessage(userId, friendId, { kind, buffer, durationMs, text, replyToId = null }) {
   if (!areFriends(userId, friendId)) {
     return { error: 'Kamu hanya dapat berkirim pesan private dengan teman.', status: 403 };
   }
@@ -1386,6 +1438,7 @@ async function sendDirectMediaMessage(userId, friendId, { kind, buffer, duration
   }
 
   const cleanCaption = String(text || '').trim().slice(0, 300);
+  const validReplyId = resolveReplyId(state.directMessages.get(pk), replyToId);
   const row = appendRawDirectMessage({
     senderId: userId,
     recipientId: friendId,
@@ -1396,7 +1449,8 @@ async function sendDirectMediaMessage(userId, friendId, { kind, buffer, duration
     mediaSize: uploaded.size,
     mediaWidth: processed.width ?? null,
     mediaHeight: processed.height ?? null,
-    mediaDurationMs: processed.durationMs ?? null
+    mediaDurationMs: processed.durationMs ?? null,
+    replyToId: validReplyId
   });
 
   const message = await broadcastNewDirectMessage(row);

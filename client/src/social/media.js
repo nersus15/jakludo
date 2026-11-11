@@ -375,8 +375,7 @@ export async function startVoiceRecording({ onMaxDuration } = {}) {
   };
 }
 
-// Unggah foto atau voice note ke POST /api/groups/:id/media
-export async function uploadGroupMedia({ groupId, token, file, kind, durationMs, text }) {
+async function postSocialMedia({ url, token, file, kind, durationMs, text, replyToId }) {
   const form = new FormData();
   form.append('file', file);
   form.append('kind', kind);
@@ -387,8 +386,11 @@ export async function uploadGroupMedia({ groupId, token, file, kind, durationMs,
   if (cleanText) {
     form.append('text', cleanText);
   }
+  if (replyToId) {
+    form.append('replyToId', String(replyToId));
+  }
 
-  const res = await fetch(`/api/groups/${encodeURIComponent(groupId)}/media`, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form
@@ -400,29 +402,30 @@ export async function uploadGroupMedia({ groupId, token, file, kind, durationMs,
   return data.message;
 }
 
-// Unggah foto atau voice note ke chat private POST /api/friends/:userId/media
-export async function uploadDirectMedia({ friendId, token, file, kind, durationMs, text }) {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('kind', kind);
-  if (kind === 'audio' && durationMs != null) {
-    form.append('durationMs', String(Math.round(durationMs)));
-  }
-  const cleanText = String(text || '').trim();
-  if (cleanText) {
-    form.append('text', cleanText);
-  }
-
-  const res = await fetch(`/api/friends/${encodeURIComponent(friendId)}/media`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form
+// Unggah foto atau voice note ke POST /api/groups/:id/media
+export async function uploadGroupMedia({ groupId, token, file, kind, durationMs, text, replyToId }) {
+  return postSocialMedia({
+    url: `/api/groups/${encodeURIComponent(groupId)}/media`,
+    token,
+    file,
+    kind,
+    durationMs,
+    text,
+    replyToId
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data?.success) {
-    throw new Error(data?.error || 'Gagal mengunggah media.');
-  }
-  return data.message;
+}
+
+// Unggah foto atau voice note ke chat private POST /api/friends/:userId/media
+export async function uploadDirectMedia({ friendId, token, file, kind, durationMs, text, replyToId }) {
+  return postSocialMedia({
+    url: `/api/friends/${encodeURIComponent(friendId)}/media`,
+    token,
+    file,
+    kind,
+    durationMs,
+    text,
+    replyToId
+  });
 }
 
 // Unggah & kompres foto profil (avatar) ke POST /api/auth/avatar

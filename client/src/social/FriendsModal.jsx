@@ -3,6 +3,12 @@ import Modal from '../components/Modal';
 import Icon from '../components/Icon';
 import VoiceNotePlayer, { formatDuration } from './VoiceNotePlayer';
 import {
+  ChatReplyBanner,
+  ChatReplyButton,
+  ChatReplyQuote,
+  useSocialChatReply
+} from './ChatReplyParts';
+import {
   compressImage,
   isAvatarUrl,
   MAX_VOICE_DURATION_MS,
@@ -58,9 +64,18 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
   const recordTimerRef = useRef(null);
 
   const listRef = useRef(null);
+  const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const lastMediaRefetchRef = useRef(0);
   const stickToBottomRef = useRef(true);
+  const {
+    replyTarget,
+    highlightedId,
+    registerItemRef,
+    startReply,
+    clearReply,
+    jumpToMessage
+  } = useSocialChatReply(inputRef);
 
   const friendId = friend.userId;
 
@@ -190,8 +205,11 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
     setSending(true);
     setError('');
     try {
-      const msg = await social.actions.sendDirectMessage(friendId, clean);
+      const msg = await social.actions.sendDirectMessage(friendId, clean, {
+        replyToId: replyTarget?.id || null
+      });
       setText('');
+      clearReply();
       appendMessage(msg);
     } catch (err) {
       setError(err.message);
@@ -213,9 +231,11 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
       const msg = await social.actions.sendDirectMedia(friendId, {
         file: compressed.file,
         kind: 'image',
-        text: caption
+        text: caption,
+        replyToId: replyTarget?.id || null
       });
       if (caption) setText('');
+      clearReply();
       appendMessage(msg);
     } catch (err) {
       setError(err.message);
@@ -243,9 +263,11 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
         file: result.file,
         kind: 'audio',
         durationMs: result.durationMs,
-        text: caption
+        text: caption,
+        replyToId: replyTarget?.id || null
       });
       if (caption) setText('');
+      clearReply();
       appendMessage(msg);
     } catch (err) {
       setError(err.message);
@@ -253,7 +275,7 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
       setUploadingMedia(false);
       setRecordElapsedMs(0);
     }
-  }, [friendId, text, social.actions, appendMessage]);
+  }, [friendId, text, replyTarget, clearReply, social.actions, appendMessage]);
 
   const onStartVoice = async () => {
     if (recording || uploadingMedia) return;
@@ -368,8 +390,14 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
           ) : (
             messages.map(msg => {
               const isMe = currentUser && msg.senderId === currentUser.id;
+              const senderName = isMe ? 'Kamu' : msg.sender?.name || friend.name;
+              const isHighlighted = highlightedId === msg.id;
               return (
-                <div key={msg.id} className={`gmsg ${isMe ? 'gmsg--me' : 'gmsg--other'}`}>
+                <div
+                  key={msg.id}
+                  ref={el => registerItemRef(msg.id, el)}
+                  className={`gmsg ${isMe ? 'gmsg--me' : 'gmsg--other'} ${isHighlighted ? 'gmsg--highlighted' : ''}`}
+                >
                   {!isMe && (
                     <UserAvatar
                       user={msg.sender || friend}
@@ -377,40 +405,56 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
                       size={32}
                     />
                   )}
-                  <div className="gmsg__bubble">
-                    <div className="gmsg__meta">
-                      <strong>{isMe ? 'Kamu' : msg.sender?.name || friend.name}</strong>
-                      <time className="gmsg__time muted">{formatTime(msg.createdAt)}</time>
+                  <div className="gmsg__row">
+                    <div className="gmsg__bubble">
+                      <div className="gmsg__meta">
+                        <strong>{senderName}</strong>
+                        <time className="gmsg__time muted">{formatTime(msg.createdAt)}</time>
+                      </div>
+
+                      <ChatReplyQuote
+                        replyTo={msg.replyTo}
+                        currentUserId={currentUser?.id}
+                        onJump={jumpToMessage}
+                      />
+
+                      {msg.type === 'image' && msg.media?.url && (
+                        <button
+                          type="button"
+                          className="gmsg__image-btn"
+                          onClick={() => setLightboxUrl(msg.media.url)}
+                          aria-label="Perbesar foto"
+                        >
+                          <img
+                            src={msg.media.url}
+                            alt={msg.text || 'Foto di chat private'}
+                            loading="lazy"
+                            width={msg.media.width || undefined}
+                            height={msg.media.height || undefined}
+                            className="gmsg__image"
+                            onError={handleMediaError}
+                          />
+                        </button>
+                      )}
+
+                      {msg.type === 'audio' && (msg.media?.url || msg.media?.streamUrl) && (
+                        <VoiceNotePlayer
+                          msg={msg}
+                          token={social.actions.getToken?.()}
+                          onExpiredUrl={handleMediaError}
+                        />
+                      )}
+
+                      {msg.text && <p className="gmsg__text">{msg.text}</p>}
                     </div>
 
-                    {msg.type === 'image' && msg.media?.url && (
-                      <button
-                        type="button"
-                        className="gmsg__image-btn"
-                        onClick={() => setLightboxUrl(msg.media.url)}
-                        aria-label="Perbesar foto"
-                      >
-                        <img
-                          src={msg.media.url}
-                          alt={msg.text || 'Foto di chat private'}
-                          loading="lazy"
-                          width={msg.media.width || undefined}
-                          height={msg.media.height || undefined}
-                          className="gmsg__image"
-                          onError={handleMediaError}
-                        />
-                      </button>
-                    )}
-
-                    {msg.type === 'audio' && (msg.media?.url || msg.media?.streamUrl) && (
-                      <VoiceNotePlayer
-                        msg={msg}
-                        token={social.actions.getToken?.()}
-                        onExpiredUrl={handleMediaError}
-                      />
-                    )}
-
-                    {msg.text && <p className="gmsg__text">{msg.text}</p>}
+                    <ChatReplyButton
+                      senderName={senderName}
+                      onClick={() => {
+                        sound.playClick();
+                        startReply(msg, friend.name);
+                      }}
+                    />
                   </div>
                 </div>
               );
@@ -429,6 +473,12 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
             <span className="spinner" aria-hidden="true" /> Mengompres & mengunggah media...
           </p>
         )}
+
+        <ChatReplyBanner
+          replyTarget={replyTarget}
+          currentUserId={currentUser?.id}
+          onCancel={clearReply}
+        />
 
         {recording ? (
           <div className="group-chat__recorder" role="region" aria-label="Perekam pesan suara">
@@ -489,6 +539,7 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
               Tulis pesan private
             </label>
             <input
+              ref={inputRef}
               id="dm-chat-input"
               type="text"
               className="input"
@@ -496,6 +547,14 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
               maxLength={1000}
               value={text}
               onChange={e => setText(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Escape' && replyTarget) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
+                  clearReply();
+                }
+              }}
               disabled={sending}
             />
             <button

@@ -177,7 +177,8 @@ function registerSocialRoutes(api) {
         kind: req.body?.kind,
         buffer: req.file.buffer,
         durationMs: req.body?.durationMs,
-        text: req.body?.text
+        text: req.body?.text,
+        replyToId: req.body?.replyToId || null
       });
       if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
       res.json({ success: true, ...result });
@@ -369,7 +370,8 @@ function registerSocialRoutes(api) {
         kind: req.body?.kind,
         buffer: req.file.buffer,
         durationMs: req.body?.durationMs,
-        text: req.body?.text
+        text: req.body?.text,
+        replyToId: req.body?.replyToId || null
       });
       if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
       res.json({ success: true, ...result });

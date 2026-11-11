@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
 import Icon from '../components/Icon';
 import VoiceNotePlayer, { formatDuration } from '../social/VoiceNotePlayer';
+import {
+  ChatReplyBanner,
+  ChatReplyButton,
+  ChatReplyQuote,
+  useSocialChatReply
+} from '../social/ChatReplyParts';
 import { sound } from '../sound';
 import {
   compressImage,
@@ -90,9 +96,19 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
   const recordTimerRef = useRef(null);
 
   const listRef = useRef(null);
+  const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const lastMediaRefetchRef = useRef(0);
   const stickToBottomRef = useRef(true);
+  const {
+    replyTarget,
+    setReplyTarget,
+    highlightedId,
+    registerItemRef,
+    startReply,
+    clearReply,
+    jumpToMessage
+  } = useSocialChatReply(inputRef);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -214,8 +230,9 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
     setSending(true);
     setError('');
     try {
-      const msg = await social.actions.sendMessage(groupId, clean);
+      const msg = await social.actions.sendMessage(groupId, clean, replyTarget?.id || null);
       setText('');
+      setReplyTarget(null);
       appendMessage(msg);
     } catch (err) {
       setError(err.message);
@@ -237,9 +254,11 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
       const msg = await social.actions.sendMedia(groupId, {
         file: compressed.file,
         kind: 'image',
-        text: caption
+        text: caption,
+        replyToId: replyTarget?.id || null
       });
       if (caption) setText('');
+      setReplyTarget(null);
       appendMessage(msg);
     } catch (err) {
       setError(err.message);
@@ -267,9 +286,11 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
         file: result.file,
         kind: 'audio',
         durationMs: result.durationMs,
-        text: caption
+        text: caption,
+        replyToId: replyTarget?.id || null
       });
       if (caption) setText('');
+      setReplyTarget(null);
       appendMessage(msg);
     } catch (err) {
       setError(err.message);
@@ -277,7 +298,7 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
       setUploadingMedia(false);
       setRecordElapsedMs(0);
     }
-  }, [groupId, text, social.actions, appendMessage]);
+  }, [groupId, text, replyTarget, setReplyTarget, social.actions, appendMessage]);
 
   const onStartVoice = async () => {
     if (recording || uploadingMedia) return;
@@ -349,11 +370,16 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
             }
 
             const isMe = currentUser && msg.sender?.userId === currentUser.id;
+            const isHighlighted = highlightedId !== null && String(highlightedId) === String(msg.id);
 
             if (msg.type === 'match') {
               const matchCode = msg.match?.code;
               return (
-                <div key={msg.id} className="gmsg gmsg--match card">
+                <div
+                  key={msg.id}
+                  ref={el => registerItemRef(msg.id, el)}
+                  className={`gmsg gmsg--match card ${isHighlighted ? 'gmsg--highlighted' : ''}`}
+                >
                   <div className="gmsg__match-info">
                     <span className="gmsg__match-icon" aria-hidden="true">
                       <Icon name="dice" size={22} />
@@ -373,73 +399,96 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
                       </p>
                     </div>
                   </div>
-                  {matchCode && (
-                    <button
-                      type="button"
-                      className="btn btn--primary btn--sm"
-                      onClick={() => onJoinMatch(matchCode)}
-                    >
-                      Gabung match
-                    </button>
-                  )}
+                  <div className="gmsg__match-actions">
+                    <ChatReplyButton
+                      senderName={msg.sender?.name || 'Anggota'}
+                      onClick={() => startReply(msg, 'Anggota')}
+                    />
+                    {matchCode && (
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        onClick={() => onJoinMatch(matchCode)}
+                      >
+                        Gabung match
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             }
 
+            const senderLabel = isMe ? 'Kamu' : msg.sender?.name || 'Anggota';
             return (
-              <div key={msg.id} className={`gmsg ${isMe ? 'gmsg--me' : 'gmsg--other'}`}>
+              <div
+                key={msg.id}
+                ref={el => registerItemRef(msg.id, el)}
+                className={`gmsg ${isMe ? 'gmsg--me' : 'gmsg--other'} ${isHighlighted ? 'gmsg--highlighted' : ''}`}
+              >
                 {!isMe && <UserAvatar user={msg.sender} className="social-avatar social-avatar--sm" />}
-                <div className="gmsg__bubble">
-                  <div className="gmsg__meta">
-                    {!isMe && msg.sender?.userId && onViewProfile ? (
+                <div className="gmsg__row">
+                  <div className="gmsg__bubble">
+                    <div className="gmsg__meta">
+                      {!isMe && msg.sender?.userId && onViewProfile ? (
+                        <button
+                          type="button"
+                          className="user-link"
+                          onClick={() => {
+                            sound.playClick();
+                            onViewProfile(msg.sender.userId);
+                          }}
+                        >
+                          <strong>{msg.sender?.name || 'Anggota'}</strong>
+                        </button>
+                      ) : (
+                        <strong>{senderLabel}</strong>
+                      )}
+                      {!isMe && msg.sender?.username && (
+                        <span className="muted">@{msg.sender.username}</span>
+                      )}
+                      <time className="gmsg__time muted">{formatTime(msg.createdAt)}</time>
+                    </div>
+
+                    <ChatReplyQuote
+                      replyTo={msg.replyTo}
+                      currentUserId={currentUser?.id}
+                      onJump={jumpToMessage}
+                    />
+
+                    {msg.type === 'image' && msg.media?.url && (
                       <button
                         type="button"
-                        className="user-link"
-                        onClick={() => {
-                          sound.playClick();
-                          onViewProfile(msg.sender.userId);
-                        }}
+                        className="gmsg__image-btn"
+                        onClick={() => setLightboxUrl(msg.media.url)}
+                        aria-label="Perbesar foto"
                       >
-                        <strong>{msg.sender?.name || 'Anggota'}</strong>
+                        <img
+                          src={msg.media.url}
+                          alt={msg.text || 'Foto di chat grup'}
+                          loading="lazy"
+                          width={msg.media.width || undefined}
+                          height={msg.media.height || undefined}
+                          className="gmsg__image"
+                          onError={handleMediaError}
+                        />
                       </button>
-                    ) : (
-                      <strong>{isMe ? 'Kamu' : msg.sender?.name || 'Anggota'}</strong>
                     )}
-                    {!isMe && msg.sender?.username && (
-                      <span className="muted">@{msg.sender.username}</span>
-                    )}
-                    <time className="gmsg__time muted">{formatTime(msg.createdAt)}</time>
-                  </div>
 
-                  {msg.type === 'image' && msg.media?.url && (
-                    <button
-                      type="button"
-                      className="gmsg__image-btn"
-                      onClick={() => setLightboxUrl(msg.media.url)}
-                      aria-label="Perbesar foto"
-                    >
-                      <img
-                        src={msg.media.url}
-                        alt={msg.text || 'Foto di chat grup'}
-                        loading="lazy"
-                        width={msg.media.width || undefined}
-                        height={msg.media.height || undefined}
-                        className="gmsg__image"
-                        onError={handleMediaError}
+                    {msg.type === 'audio' && (msg.media?.url || msg.media?.streamUrl) && (
+                      <VoiceNotePlayer
+                        groupId={groupId}
+                        msg={msg}
+                        token={social.actions.getToken?.()}
+                        onExpiredUrl={handleMediaError}
                       />
-                    </button>
-                  )}
+                    )}
 
-                  {msg.type === 'audio' && (msg.media?.url || msg.media?.streamUrl) && (
-                    <VoiceNotePlayer
-                      groupId={groupId}
-                      msg={msg}
-                      token={social.actions.getToken?.()}
-                      onExpiredUrl={handleMediaError}
-                    />
-                  )}
-
-                  {msg.text && <p className="gmsg__text">{msg.text}</p>}
+                    {msg.text && <p className="gmsg__text">{msg.text}</p>}
+                  </div>
+                  <ChatReplyButton
+                    senderName={senderLabel}
+                    onClick={() => startReply(msg, 'Anggota')}
+                  />
                 </div>
               </div>
             );
@@ -458,6 +507,12 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
           <span className="spinner" aria-hidden="true" /> Mengompres & mengunggah media...
         </p>
       )}
+
+      <ChatReplyBanner
+        replyTarget={replyTarget}
+        currentUserId={currentUser?.id}
+        onCancel={clearReply}
+      />
 
       {recording ? (
         <div className="group-chat__recorder" role="region" aria-label="Perekam pesan suara">
@@ -519,12 +574,20 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
           </label>
           <input
             id="group-chat-input"
+            ref={inputRef}
             type="text"
             className="input"
-            placeholder="Tulis pesan..."
+            placeholder={replyTarget ? `Balas ${replyTarget.senderName}...` : 'Tulis pesan...'}
             maxLength={1000}
             value={text}
             onChange={e => setText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape' && replyTarget) {
+                e.stopPropagation();
+                e.nativeEvent.stopPropagation();
+                setReplyTarget(null);
+              }
+            }}
             disabled={sending}
           />
           <button

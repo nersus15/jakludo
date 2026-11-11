@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import Icon from './Icon';
-import { getNotificationPermission } from '../notifications';
+import { isNotificationPromptResolved, NOTIF_PROMPT_RESOLVED_EVENT } from '../notifications';
 import { sound } from '../sound';
 import { storage } from '../storage';
 
@@ -70,27 +70,27 @@ function computeCardPosition(rect) {
 
 export default function SocialOnboardingTour({ enabled }) {
   const [done, setDone] = useState(() => storage.get(TOUR_STORAGE_KEY) === '1');
-  const [perm, setPerm] = useState(getNotificationPermission);
+  const [notifResolved, setNotifResolved] = useState(isNotificationPromptResolved);
   const [active, setActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [spotRect, setSpotRect] = useState(null);
 
-  // Pantau status izin notifikasi agar stepper tampil setelah pop up notifikasi selesai
+  // Pantau penyelesaian pop up notifikasi (izinkan, tolak, atau tutup) agar stepper tampil setelahnya
   useEffect(() => {
     if (done) return undefined;
-    const check = () => setPerm(getNotificationPermission());
-    const id = setInterval(check, 500);
-    window.addEventListener('focus', check);
+    const sync = () => setNotifResolved(isNotificationPromptResolved());
+    sync();
+    window.addEventListener('focus', sync);
+    window.addEventListener(NOTIF_PROMPT_RESOLVED_EVENT, sync);
+    document.addEventListener('visibilitychange', sync);
     return () => {
-      clearInterval(id);
-      window.removeEventListener('focus', check);
+      window.removeEventListener('focus', sync);
+      window.removeEventListener(NOTIF_PROMPT_RESOLVED_EVENT, sync);
+      document.removeEventListener('visibilitychange', sync);
     };
   }, [done]);
 
-  const canShow =
-    !done &&
-    enabled &&
-    (perm === 'granted' || perm === 'unsupported');
+  const canShow = !done && enabled && notifResolved;
 
   useEffect(() => {
     if (!canShow) {

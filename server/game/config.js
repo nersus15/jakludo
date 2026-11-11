@@ -17,7 +17,7 @@ module.exports = {
   // Dadu seimbang (penjelasan & angka: bagian "Aturan dadu" di README.md). beta = koreksi defisit,
   // gamma = dorongan untuk angka yang bisa memakan lawan, maxAdd = kenaikan maksimum peluang makan,
   // chainDecay = pengali per makan beruntun. beta 0, gamma 0, chainDecay 1 = dadu random murni.
-  DICE: { beta: 0.3, gamma: 0.4, maxAdd: 0.06, chainDecay: 0.5 },
+  DICE: { beta: 0.3, gamma: 0.1, maxAdd: 0.02, chainDecay: 0.5 },
   // Batas auto-play berturut-turut sebelum pemain dinyatakan OUT
   MAX_AUTO_PLAY: 3,
   MAX_PLAYERS: 4,

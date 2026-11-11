@@ -352,12 +352,19 @@
   background: #ffffff;
 }
 
-/* ---------- Petak tujuan (tombol) ---------- */
+/* ---------- Petak tujuan (penanda) ---------- */
 
+/* Petak tujuan dinaikkan agar cincinnya terlihat, tapi tidak boleh menelan ketukan: area sentuh bidak
+   di petak sebelah (mis. dadu 1) masuk ke petak ini. Bidak di petak ini tetap bisa diketuk. */
 .cell-valid-target {
   z-index: 30;
   background: #fff1e6;
   box-shadow: inset 0 0 0 2px #ff6200;
+  pointer-events: none;
+}
+
+.cell-valid-target .pawn-token {
+  pointer-events: auto;
 }
 
 .target-tile {

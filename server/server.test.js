@@ -493,3 +493,45 @@ test('bonus harian 5 poin hanya sekali per hari (WIB) dan tidak untuk pemain OUT
   const nextDay = db.recordMatchResult({ winnerPlayerId: 'a', players, now: day1 + 7.5 * 3600 * 1000 });
   assert.equal(nextDay.a.dailyBonus, 5);
 });
+
+test('lemparan 6, 6, lalu 1 tidak kena hangus 3x angka 6 dan bidak tetap bisa jalan', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const pa = room.players[0];
+  const crypto = require('crypto');
+  const original = crypto.randomInt;
+  // Angka acak tertinggi -> dadu 6, terendah -> dadu 1
+  const rollAs = face => { crypto.randomInt = max => (face === 6 ? max - 1 : 0); };
+  const roll = async face => {
+    rollAs(face);
+    a.emit('game:roll');
+    await wait(900);
+    clearTimeout(room.turnTimer);
+  };
+  const move = async pawn => {
+    a.emit('game:move', { pawn });
+    await wait(1800);
+    clearTimeout(room.turnTimer);
+  };
+  try {
+    await roll(6);
+    assert.equal(room.dice, 6);
+    await move(0); // keluar markas
+    await roll(6);
+    assert.equal(room.dice, 6);
+    await move(0); // 1 -> 7
+    await roll(1);
+    assert.equal(room.dice, 1, 'angka 1 keluar, bukan giliran hangus');
+    assert.equal(room.turn, 0, 'giliran masih milik pemain yang melempar');
+    assert.equal(room.consecutiveSixes, 0);
+    assert.ok(require('./game/store').publicRoom(room).movable.length > 0, 'ada bidak yang bisa jalan');
+    await move(0); // 7 -> 8
+    assert.equal(room.pawns[pa.id][0], 8, 'bidak benar-benar jalan');
+    assert.equal(room.turn, 1, 'setelah angka 1, giliran pindah');
+  } finally {
+    crypto.randomInt = original;
+  }
+});

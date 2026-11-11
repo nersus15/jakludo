@@ -12,7 +12,8 @@ services:
       postgres -c shared_buffers=64MB -c work_mem=4MB -c maintenance_work_mem=32MB -c max_connections=50
     ports:
       # Dipetakan ke 127.0.0.1:5433 di host agar tidak bentrok dengan port 5432 milik PostgreSQL lain di server
-      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+      # Jika perlu akses Navicat lewat IP Tailscale/LAN, isi POSTGRES_BIND_IP=100.x.x.x di .env
+      - "${POSTGRES_BIND_IP:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - jakludo_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,7 +38,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "5433:5432"
+      - "${PORT:-5172}:5172"
     environment:
       - NODE_ENV=production
       - PORT=5172

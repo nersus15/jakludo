@@ -719,13 +719,15 @@ export default function FriendsModal({
       isOpen={isOpen}
       onClose={onClose}
       size={activeFriend ? 'lg' : 'md'}
+      className={activeFriend ? 'friends-modal--chat' : ''}
       icon="👥"
       title={activeFriend ? `Chat · ${activeFriend.name}` : 'Teman & Chat Private'}
+      // Saat chat terbuka, nama & @username sudah ada di kepala obrolan, jadi subtitle tidak diulang
       subtitle={
         !currentUser
           ? 'Masuk akun untuk menambah teman dan berkirim pesan private.'
           : activeFriend
-          ? `Obrolan private dengan @${activeFriend.username}`
+          ? undefined
           : `${friends.length} teman · ${onlineCount} sedang online`
       }
     >

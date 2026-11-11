@@ -23,8 +23,24 @@ const LOCAL_STATE_FILE = path.join(DATA_DIR, 'jakludo-state.json');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
 const STARTER_POINTS = 200;
-const WIN_POINTS = 25;
-const PLAY_POINTS = 5;
+// Poin per peringkat, menurut jumlah pemain di room (bot ikut dihitung). Peringkat terakhir selalu 5,
+// supaya pemain yang kalah di permainan 2 orang tidak dapat poin hampir sebesar pemenangnya.
+// Bonus harian: sekali per hari (WIB) untuk pemain yang menyelesaikan minimal 1 pertandingan tanpa OUT
+const DAILY_BONUS_POINTS = 5;
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+const todayWib = (now = Date.now()) => new Date(now + WIB_OFFSET_MS).toISOString().slice(0, 10);
+
+const RANK_POINTS = {
+  2: [30, 5],
+  3: [30, 15, 5],
+  4: [30, 20, 15, 5]
+};
+
+// Poin untuk peringkat ke-(rank+1) dari playerCount pemain (dipakai permainan biasa maupun grup)
+function rankPoints(playerCount, rank) {
+  const table = RANK_POINTS[Math.min(Math.max(playerCount, 2), 4)];
+  return table[Math.min(Math.max(rank, 0), table.length - 1)];
+}
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -277,7 +293,8 @@ async function hydrateFromPostgres(activePool) {
       wins: Number(r.wins),
       matchesPlayed: Number(r.matches_played),
       points: Number(r.points),
-      authType: r.auth_type
+      authType: r.auth_type,
+      lastDailyBonus: r.last_daily_bonus || null
     });
   }
   for (const r of roomsRes.rows) {
@@ -644,11 +661,19 @@ function ensureGlobalLeaderboardRow(client, user) {
   );
 }
 
-function recordMatchResult({ winnerPlayerId, players }) {
-  if (!players || players.length === 0) return;
+// Catat hasil pertandingan. Hanya akun terdaftar yang mendapat poin, dan hanya
+// jika lawannya mencakup minimal satu manusia lain (menang lawan bot tidak dihitung).
+// ranking: id pemain dari peringkat 1 ke bawah (lihat rankPlayers). Tanpa ranking, pemenang dianggap
+// peringkat 1 dan sisanya mengikuti urutan players.
+// Return { [playerId]: { points, dailyBonus } } untuk ditampilkan di layar hasil.
+function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() }) {
+  const awards = {};
+  if (!players || players.length === 0) return awards;
   const humans = players.filter(p => !p.isBot);
-  if (humans.length < 2) return;
+  if (humans.length < 2) return awards; // menang melawan bot tidak memberi poin
+  const today = todayWib(now);
 
+  const order = ranking || [winnerPlayerId, ...players.map(p => p.id).filter(id => id !== winnerPlayerId)];
   const updates = [];
   for (const p of humans) {
     const user = p.userId ? findUserById(p.userId) : null;
@@ -656,29 +681,36 @@ function recordMatchResult({ winnerPlayerId, players }) {
     const entry = ensureLeaderboardEntry(user);
     const won = p.id === winnerPlayerId;
     const deltaWins = won ? 1 : 0;
-    const deltaPoints = won ? WIN_POINTS : PLAY_POINTS;
+    const points = rankPoints(players.length, order.indexOf(p.id));
+    // Pemain yang OUT/menyerah tidak dihitung "main" untuk bonus harian
+    const dailyBonus = !p.isOut && entry.lastDailyBonus !== today ? DAILY_BONUS_POINTS : 0;
+    if (dailyBonus) entry.lastDailyBonus = today;
+    const deltaPoints = points + dailyBonus;
     entry.matchesPlayed += 1;
     entry.wins += deltaWins;
     entry.points += deltaPoints;
-    updates.push({ user, deltaWins, deltaPoints });
+    awards[p.id] = { points, dailyBonus };
+    updates.push({ user, deltaWins, deltaPoints, bonusDate: dailyBonus ? today : null });
   }
 
   if (updates.length > 0) {
     persistLocalFallback();
     execPgTransaction(async client => {
-      for (const { user, deltaWins, deltaPoints } of updates) {
+      for (const { user, deltaWins, deltaPoints, bonusDate } of updates) {
         await ensureGlobalLeaderboardRow(client, user);
         await client.query(
           `UPDATE leaderboard
            SET matches_played = matches_played + 1,
                wins = wins + $1,
-               points = points + $2
+               points = points + $2,
+               last_daily_bonus = COALESCE($4, last_daily_bonus)
            WHERE user_id = $3`,
-          [deltaWins, deltaPoints, user.id]
+          [deltaWins, deltaPoints, user.id, bonusDate]
         );
       }
     });
   }
+  return awards;
 }
 
 function formatLeaderboardRows(rows) {
@@ -785,25 +817,6 @@ function consumeUserItem({ userId, itemId }) {
   return true;
 }
 
-function addPoints({ userId, amount }) {
-  const user = findUserById(userId);
-  if (!user) return { error: 'Pengguna tidak ditemukan.' };
-  if (!Number.isInteger(amount) || amount <= 0) return { error: 'Jumlah diamond tidak valid.' };
-
-  const entry = ensureLeaderboardEntry(user);
-  entry.points += amount;
-  persistLocalFallback();
-
-  execPgTransaction(async client => {
-    await ensureGlobalLeaderboardRow(client, user);
-    await client.query(
-      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
-      [amount, user.id]
-    );
-  });
-
-  return { success: true, user: sanitizeUser(findUserById(user.id)) };
-}
 
 // ==========================================
 // SNAPSHOT ROOM
@@ -881,6 +894,7 @@ module.exports = {
   deleteSession,
   pruneExpiredSessions,
   recordMatchResult,
+  rankPoints,
   getLeaderboard,
   queryGlobalLeaderboard,
   checkIsLudoKing,
@@ -889,7 +903,6 @@ module.exports = {
   getUserItems,
   purchaseItem,
   consumeUserItem,
-  addPoints,
   saveRoom,
   deleteRoom,
   loadRooms,

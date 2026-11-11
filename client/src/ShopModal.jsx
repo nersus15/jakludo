@@ -13,42 +13,11 @@ const KIND_LABELS = {
 
 export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, authToken }) {
   const [buying, setBuying] = useState(null);
-  const [injecting, setInjecting] = useState(false);
-  const [customAmount, setCustomAmount] = useState('');
   const [feedback, setFeedback] = useState(null);
   const catalog = useItemCatalogState();
 
   const points = currentUser?.points ?? 0;
   const owned = currentUser?.inventory || {};
-  const isSeliron = currentUser?.username?.toLowerCase() === 'seliron_id';
-
-  const injectDiamonds = async amount => {
-    const num = Number(amount);
-    if (!Number.isInteger(num) || num <= 0) return;
-    setInjecting(true);
-    setFeedback(null);
-    sound.playClick();
-    try {
-      const res = await fetch('/api/shop/inject-diamonds', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken || storage.get('token')}` },
-        body: JSON.stringify({ amount: num })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal inject diamond.');
-      sound.playShopPurchase();
-      setFeedback({
-        type: 'success',
-        message: `✨ Berhasil inject ${num.toLocaleString('id-ID')} Diamond! Saldo sekarang: ${(data.user?.points ?? (points + num)).toLocaleString('id-ID')} poin.`
-      });
-      if (data.user) onUpdateUser?.(data.user);
-      setCustomAmount('');
-    } catch (err) {
-      setFeedback({ type: 'error', message: err.message });
-    } finally {
-      setInjecting(false);
-    }
-  };
 
   const buy = async item => {
     setBuying(item.id);
@@ -79,76 +48,12 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       size="lg"
       icon="shop"
       title="Toko item"
-      subtitle={currentUser ? `Saldo Poin / Diamond: ${points.toLocaleString('id-ID')}` : 'Masuk dulu untuk membeli item.'}
+      subtitle={currentUser ? `Poin kamu: ${points.toLocaleString('id-ID')}` : 'Masuk dulu untuk membeli item.'}
     >
       {feedback && (
         <p className={`alert alert--${feedback.type === 'success' ? 'success' : 'error'} shop__feedback`} role={feedback.type === 'success' ? 'status' : 'alert'}>
           {feedback.message}
         </p>
-      )}
-
-      {isSeliron && (
-        <section className="shop__inject card" aria-labelledby="inject-title">
-          <div className="shop-inject__head">
-            <span className="shop-inject__badge">👑 KHUSUS USERNAME SELIRON_ID</span>
-            <h3 id="inject-title">⚡ Inject Diamond (Poin Toko)</h3>
-            <p className="muted">Tambah saldo Diamond instan untuk membeli semua item toko sepuasnya.</p>
-          </div>
-          <div className="shop-inject__actions">
-            <div className="shop-inject__presets">
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                disabled={injecting}
-                onClick={() => injectDiamonds(500)}
-              >
-                +500 💎
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                disabled={injecting}
-                onClick={() => injectDiamonds(1000)}
-              >
-                +1.000 💎
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                disabled={injecting}
-                onClick={() => injectDiamonds(5000)}
-              >
-                +5.000 💎
-              </button>
-            </div>
-            <form
-              className="shop-inject__custom"
-              onSubmit={e => {
-                e.preventDefault();
-                const amt = parseInt(customAmount, 10);
-                if (amt > 0) injectDiamonds(amt);
-              }}
-            >
-              <input
-                type="number"
-                min="1"
-                max="100000"
-                placeholder="Jumlah kustom..."
-                value={customAmount}
-                onChange={e => setCustomAmount(e.target.value)}
-                disabled={injecting}
-                className="input input--sm"
-              />
-              <button
-                type="submit"
-                className="btn btn--primary btn--sm"
-                disabled={injecting || !customAmount || parseInt(customAmount, 10) <= 0}
-              >
-                {injecting ? 'Injecting...' : '⚡ Inject 💎'}
-              </button>
-            </form>
-          </div>
-        </section>
       )}
 
       {catalog.status === 'loading' && (
@@ -201,11 +106,14 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       <section className="shop__earn" aria-labelledby="earn-title">
         <h3 id="earn-title">Cara dapat poin</h3>
         <ul>
-          <li>Menang pertandingan: <strong>+25 poin</strong></li>
-          <li>Ikut pertandingan sampai selesai: <strong>+5 poin</strong></li>
+          <li>Peringkat 1: <strong>+30 poin</strong></li>
+          <li>Peringkat 2: <strong>+20 poin</strong> (main 4 orang) atau <strong>+15</strong> (main 3 orang)</li>
+          <li>Peringkat 3 (main 4 orang): <strong>+15 poin</strong></li>
+          <li>Peringkat terakhir: <strong>+5 poin</strong></li>
+          <li>Bonus harian: <strong>+5 poin</strong> untuk pertandingan pertama yang kamu selesaikan tiap hari</li>
           <li>Bonus akun baru: <strong>200 poin</strong></li>
         </ul>
-        <p className="muted">Poin hanya dihitung untuk pertandingan bersama minimal satu pemain lain (bukan hanya bot).</p>
+        <p className="muted">Peringkat dihitung dari jumlah bidak yang sudah finish saat ada pemenang. Poin hanya dihitung untuk pertandingan bersama minimal satu pemain lain (bukan hanya bot).</p>
       </section>
     </Modal>
   );

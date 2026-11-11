@@ -12,6 +12,7 @@ const {
   canPawnMove,
   getMovablePawns,
   chooseBestPawn,
+  rankPlayers,
   getBlackHoles,
   relocateBlackHoles,
   isPawnProtected,
@@ -25,7 +26,7 @@ const { addHistory, emitRoom, roomTimeout, clearRoomTimers } = store;
 const eventId = () => Date.now() + Math.random();
 // Sumber acak kriptografis [0, 1) untuk dadu
 const secureRandom = () => crypto.randomInt(2 ** 47) / 2 ** 47;
-const newDiceStats = () => ({ counts: [0, 0, 0, 0, 0, 0], total: 0 });
+const newDiceStats = () => ({ counts: [0, 0, 0, 0, 0, 0], total: 0, captureStreak: 0 });
 
 // ==========================================
 // MULAI & SELESAI
@@ -75,7 +76,11 @@ function declareWinner(room, winnerPlayer) {
   room.message = `🏆 SELAMAT! ${winnerPlayer.name} MENANG!`;
   addHistory(room, `🎉 ${winnerPlayer.name} berhasil memenangkan pertandingan JakLudo!`);
 
-  db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players });
+  // Poin sama untuk permainan biasa dan grup (leaderboard grup diambil dari leaderboard yang sama)
+  const ranking = rankPlayers(room, winnerPlayer.id);
+  const awards = db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking });
+  // Peringkat resmi + poin yang didapat, ditampilkan di layar hasil
+  room.matchResult = { ranking, awards };
   room.players.forEach(p => {
     p.isLudoKing = db.checkIsLudoKing(p.userId);
   });
@@ -145,6 +150,7 @@ function triggerTurn(room) {
 
   if (room.botTimeout) clearTimeout(room.botTimeout);
   if (room.turnTimer) clearTimeout(room.turnTimer);
+  room.turnClock = null;
 
   if (currentPlayer.isOut) {
     advanceTurn(room);
@@ -169,6 +175,9 @@ function triggerTurn(room) {
   room.turnTimer = roomTimeout(room, () => {
     if (room.players[room.turn]?.id === currentPlayer.id) executeAutoPlay(room, currentPlayer);
   }, delay);
+  // Hitung mundur yang terlihat di klien (sisa waktu sebelum langkah dijalankan sistem)
+  room.turnClock = { id: eventId(), playerId: currentPlayer.id, totalMs: delay, endsAt: Date.now() + delay };
+  emitRoom(room);
 }
 
 function scheduleAutoMove(room, player, isAuto) {
@@ -193,7 +202,7 @@ function executeAutoPlay(room, player) {
     player.autoPlayCount = MAX_AUTO_PLAY;
     addHistory(room, `❌ ${player.name} dinyatakan OUT (batas ${MAX_AUTO_PLAY}x auto-play tercapai tanpa respon).`);
     room.message = `❌ ${player.name} dinyatakan OUT!`;
-    if (store.deleteIfAllHumansOut(room)) return;
+    if (store.deleteIfAllHumansOut(room, `${player.name} dinyatakan OUT karena ${MAX_AUTO_PLAY}x tidak jalan. Room ditutup karena tidak ada pemain lain.`)) return;
     advanceTurn(room);
     return;
   }
@@ -220,6 +229,7 @@ function handleRoll(room, playerId, isAuto = false) {
   if (room.dice !== null || room.rolling || room.animatingMove || room.pendingShield) return;
 
   if (room.turnTimer) clearTimeout(room.turnTimer);
+  room.turnClock = null;
   if (!isAuto && !currentPlayer.isBot) currentPlayer.autoPlayCount = 0;
 
   room.rolling = true;
@@ -237,6 +247,9 @@ function handleRoll(room, playerId, isAuto = false) {
     stats.total++;
     room.dice = roll;
     room.consecutiveSixes = roll === 6 ? (room.consecutiveSixes || 0) + 1 : 0;
+
+    // Lemparan tanpa langkah (hangus 3x angka 6 / tidak ada bidak yang bisa jalan) memutus rantai makan
+    if (room.consecutiveSixes >= 3 || getMovablePawns(room, currentPlayer, roll).length === 0) stats.captureStreak = 0;
 
     if (room.consecutiveSixes >= 3) {
       room.message = `${currentPlayer.name} dapat angka 6 tiga kali berturut-turut! Giliran hangus.`;
@@ -289,6 +302,7 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
   if (!canPawnMove(room, player, pawnIdx, room.dice)) return;
 
   if (room.turnTimer) clearTimeout(room.turnTimer);
+  room.turnClock = null;
   if (!isAuto && !player.isBot) player.autoPlayCount = 0;
 
   const pawns = room.pawns[playerId];
@@ -326,6 +340,7 @@ function handleMove(room, playerId, pawnIdx, isAuto = false) {
 // Lanjutan langkah setelah efek petak selesai: menang, finish, bonus giliran, atau giliran berikutnya
 function finishMove(room, player, { pawnIdx, fromVal, toVal, rollVal, captured }) {
   const pawns = room.pawns[player.id];
+  if (player.diceStats) player.diceStats.captureStreak = captured ? (player.diceStats.captureStreak || 0) + 1 : 0;
   if (pawns.every(v => v === FINISH)) {
     declareWinner(room, player);
     return;

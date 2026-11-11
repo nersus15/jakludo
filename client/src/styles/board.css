@@ -21,6 +21,8 @@
 }
 
 .player-hud-card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -30,6 +32,34 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   border: 2px solid var(--border);
+}
+
+/* Sisa waktu giliran: bar tipis di tepi bawah kartu, merah saat sisa 5 detik */
+.hud-timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--brand);
+  transform-origin: left;
+  animation:
+    hud-timer-run var(--timer-duration) linear forwards,
+    hud-timer-urgent 0s linear var(--timer-urgent-delay) forwards;
+}
+
+@keyframes hud-timer-run {
+  from { transform: scaleX(var(--timer-start)); }
+  to { transform: scaleX(0); }
+}
+
+@keyframes hud-timer-urgent {
+  to { background: var(--danger); }
+}
+
+/* Animasi dimatikan: bar akan langsung kosong, jadi sembunyikan (angka detik tetap ada di panel giliran) */
+@media (prefers-reduced-motion: reduce) {
+  .hud-timer { display: none; }
 }
 
 .player-hud-card.hud-active-turn {
@@ -322,12 +352,19 @@
   background: #ffffff;
 }
 
-/* ---------- Petak tujuan (tombol) ---------- */
+/* ---------- Petak tujuan (penanda) ---------- */
 
+/* Petak tujuan dinaikkan agar cincinnya terlihat, tapi tidak boleh menelan ketukan: area sentuh bidak
+   di petak sebelah (mis. dadu 1) masuk ke petak ini. Bidak di petak ini tetap bisa diketuk. */
 .cell-valid-target {
   z-index: 30;
   background: #fff1e6;
   box-shadow: inset 0 0 0 2px #ff6200;
+  pointer-events: none;
+}
+
+.cell-valid-target .pawn-token {
+  pointer-events: auto;
 }
 
 .target-tile {
@@ -335,17 +372,9 @@
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
   z-index: 35;
-}
-
-/* Area sentuh diperluas sampai ±44px tanpa mengubah ukuran petak */
-.target-tile::after {
-  content: '';
-  position: absolute;
-  inset: -8px;
+  /* Penanda saja: ketukan diteruskan ke bidak di bawah/sebelahnya */
+  pointer-events: none;
 }
 
 .target-dot {

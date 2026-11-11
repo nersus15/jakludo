@@ -235,6 +235,29 @@ function chooseBestPawn(room, player, dice) {
 }
 
 // ==========================================
+// PERINGKAT AKHIR
+// ==========================================
+
+// Urutan pemain saat permainan selesai: pemenang dulu, lalu pemain yang masih main di atas
+// pemain yang OUT/menyerah. Sesama itu diurutkan dari jumlah bidak finish, lalu total langkah.
+function rankPlayers(room, winnerId) {
+  const progress = p => {
+    const pawns = room.pawns[p.id] || [];
+    return { finished: pawns.filter(v => v === FINISH).length, steps: pawns.reduce((a, b) => a + b, 0) };
+  };
+  return [...room.players]
+    .sort((a, b) => {
+      if (a.id === winnerId) return -1;
+      if (b.id === winnerId) return 1;
+      if (!!a.isOut !== !!b.isOut) return a.isOut ? 1 : -1;
+      const pa = progress(a);
+      const pb = progress(b);
+      return pb.finished - pa.finished || pb.steps - pa.steps;
+    })
+    .map(p => p.id);
+}
+
+// ==========================================
 // DADU SEIMBANG (lihat riset "Dadu Seimbang JakLudo")
 // ==========================================
 
@@ -261,24 +284,27 @@ function captureFaces(room, player) {
 // Bobot tiap angka untuk lemparan berikutnya:
 // 1. Koreksi defisit (beta): angka yang kurang keluar di permainan ini sedikit lebih mungkin muncul,
 //    sehingga nasib buruk beruntun ditekan tapi peluang jangka panjang tetap 1/6.
-// 2. Dorongan makan (gamma): angka yang bisa memakan lawan dikali (1 + gamma), dengan total
-//    peluangnya naik paling banyak maxAdd (mis. 0.06 = 6 poin persen).
-// stats = { counts: [6 angka], total } milik pemain di permainan ini.
-function diceWeights(room, player, stats, { beta = 0, gamma = 0, maxAdd = 1 } = {}) {
+// 2. Dorongan makan (gamma) yang meluruh: angka yang bisa memakan lawan dikali
+//    (1 + gamma) x chainDecay^streak, streak = berapa kali pemain ini makan berturut-turut.
+//    Dengan gamma 0.4 dan chainDecay 0.5: 1.4 -> 0.7 -> 0.35 -> 0.175, jadi makan pertama
+//    sedikit didorong, makan kedua sudah di bawah normal, dan makan ketiga jarang terjadi.
+//    Kenaikan peluang dibatasi maxAdd (mis. 0.06 = 6 poin persen).
+// stats = { counts: [6 angka], total, captureStreak } milik pemain di permainan ini.
+function diceWeights(room, player, stats, { beta = 0, gamma = 0, maxAdd = 1, chainDecay = 1 } = {}) {
   const expected = stats.total / 6;
-  let weights = stats.counts.map(c => Math.exp(beta * (expected - c)));
-  if (gamma <= 0) return weights;
+  const weights = stats.counts.map(c => Math.exp(beta * (expected - c)));
+  const mult = (1 + gamma) * Math.pow(chainDecay, stats.captureStreak || 0);
+  if (mult === 1) return weights;
 
   const capture = captureFaces(room, player);
   if (capture.size === 0 || capture.size === 6) return weights;
   const sum = weights.reduce((a, b) => a + b, 0);
   const captureWeight = [...capture].reduce((s, f) => s + weights[f - 1], 0);
   const before = captureWeight / sum;
-  const boosted = (captureWeight * (1 + gamma)) / (sum + captureWeight * gamma);
-  const target = Math.min(boosted, before + maxAdd);
+  let target = (captureWeight * mult) / (sum - captureWeight + captureWeight * mult);
+  if (mult > 1) target = Math.min(target, before + maxAdd);
   const k = (target * (sum - captureWeight)) / ((1 - target) * captureWeight);
-  weights = weights.map((w, i) => (capture.has(i + 1) ? w * k : w));
-  return weights;
+  return weights.map((w, i) => (capture.has(i + 1) ? w * k : w));
 }
 
 // random() -> [0, 1)
@@ -312,6 +338,7 @@ module.exports = {
   captureRisk,
   evaluateMove,
   chooseBestPawn,
+  rankPlayers,
   captureFaces,
   diceWeights,
   rollWeighted,

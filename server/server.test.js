@@ -162,7 +162,7 @@ test('menang melawan bot tidak memberi poin; hanya akun terdaftar yang dicatat',
 
   db.recordMatchResult({ winnerPlayerId: 'p1', players: [{ id: 'p1', userId: u1.user.id }, { id: 'p2', userId: u2.user.id }, { id: 'g', name: 'tamu' }] });
   const board = db.getLeaderboard();
-  assert.equal(board.find(e => e.userId === u1.user.id).points, before + 25);
+  assert.equal(board.find(e => e.userId === u1.user.id).points, before + 30 + 5, 'peringkat 1 + bonus harian pertama');
   assert.ok(!board.some(e => e.username === 'tamu'));
 });
 
@@ -173,8 +173,9 @@ test('logout menghapus sesi dan login dibatasi', async () => {
   await fetch(`${url}/api/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${u.token}` } });
   assert.equal((await me()).status, 401);
 
+  // Batas login 20 percobaan per 10 menit (server/http/routes.js), percobaan ke-21 ditolak
   let last;
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; i < 21; i++) {
     last = await fetch(`${url}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -208,6 +209,7 @@ test('memakan bidak lawan di petak Black Hole tetap memberi bonus giliran', asyn
   assert.equal(room.pawns[pb.id][0], 0, 'bidak lawan harus kembali ke markas');
   assert.equal(room.turn, 0, 'pemain yang memakan harus mendapat giliran lagi');
   assert.equal(room.dice, null);
+  assert.equal(pa.diceStats.captureStreak, 1, 'rantai makan tercatat untuk peredam dadu');
 });
 
 test('koneksi putus di lobby tidak langsung menghapus kursi', async () => {
@@ -419,4 +421,117 @@ test('catatan dadu pemain tersimpan di server tapi tidak dikirim ke klien', asyn
   clearTimeout(room.turnTimer);
   assert.equal(room.players[0].diceStats.total, 1);
   assert.equal(pub.players[0].diceStats, undefined);
+});
+
+test('hitung mundur giliran dikirim ke klien dan hilang saat pemain bertindak', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  const withClock = new Promise(resolve => a.on('room:update', r => r.turnClock && resolve(r)));
+  a.emit('game:start');
+  const pub = await withClock;
+  assert.equal(pub.turnClock.playerId, room.players[0].id);
+  assert.equal(pub.turnClock.totalMs, 15000);
+  assert.ok(pub.turnClock.remainingMs > 14000 && pub.turnClock.remainingMs <= 15000);
+  assert.equal(pub.turnClock.endsAt, undefined, 'jam server tidak dikirim, cukup sisa waktunya');
+
+  a.emit('game:roll');
+  await wait(50);
+  assert.equal(room.turnClock, null, 'jam berhenti begitu dadu dilempar');
+  clearTimeout(room.turnTimer);
+});
+
+test('pemain diberi tahu saat room ditutup karena semua pemain manusia OUT', async () => {
+  const { sockets, room } = await createRoomWith(['A']);
+  const a = sockets[0].socket;
+  a.emit('room:add_bot');
+  await wait(50);
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const closed = new Promise(resolve => a.once('room:closed', resolve));
+  room.players[0].autoPlayCount = 3; // sudah 3x tidak jalan
+  require('./game/engine').executeAutoPlay(room, room.players[0]);
+  const msg = await closed;
+  assert.equal(msg.code, room.code);
+  assert.match(msg.reason, /OUT/);
+  assert.equal(rooms.has(room.code), false);
+});
+
+test('poin akhir mengikuti peringkat dan jumlah pemain', async () => {
+  const users = [await register('rank_satu'), await register('rank_dua'), await register('rank_tiga'), await register('rank_empat')];
+  const pts = u => db.getLeaderboard().find(e => e.userId === u.user.id).points;
+  const before = users.map(pts);
+  const players = users.map((u, i) => ({ id: 'r' + i, userId: u.user.id }));
+
+  db.recordMatchResult({ winnerPlayerId: 'r2', players, ranking: ['r2', 'r0', 'r3', 'r1'] });
+  // Termasuk bonus harian +5 karena ini permainan pertama mereka hari ini
+  assert.deepEqual(users.map((u, i) => pts(u) - before[i]), [25, 10, 35, 20]);
+
+  // Dua pemain: yang kalah hanya dapat 5 (bonus harian sudah diambil)
+  const mid = users.map(pts);
+  db.recordMatchResult({ winnerPlayerId: 'r0', players: players.slice(0, 2) });
+  assert.deepEqual([pts(users[0]) - mid[0], pts(users[1]) - mid[1]], [30, 5]);
+});
+
+test('bonus harian 5 poin hanya sekali per hari (WIB) dan tidak untuk pemain OUT', async () => {
+  const a = await register('harian_a');
+  const b = await register('harian_b');
+  const pts = u => db.getLeaderboard().find(e => e.userId === u.user.id).points;
+  const day1 = Date.UTC(2030, 0, 1, 10, 0); // 1 Jan 17.00 WIB
+  const players = [{ id: 'a', userId: a.user.id }, { id: 'b', userId: b.user.id, isOut: true }];
+
+  const before = [pts(a), pts(b)];
+  const awards = db.recordMatchResult({ winnerPlayerId: 'a', players, now: day1 });
+  assert.deepEqual(awards, { a: { points: 30, dailyBonus: 5 }, b: { points: 5, dailyBonus: 0 } });
+  assert.deepEqual([pts(a) - before[0], pts(b) - before[1]], [35, 5]);
+
+  // Masih hari yang sama (23.30 WIB): tidak dapat bonus lagi
+  const again = db.recordMatchResult({ winnerPlayerId: 'a', players, now: day1 + 6.5 * 3600 * 1000 });
+  assert.equal(again.a.dailyBonus, 0);
+
+  // Lewat tengah malam WIB (00.30 WIB = 17.30 UTC hari sebelumnya): dapat bonus lagi
+  const nextDay = db.recordMatchResult({ winnerPlayerId: 'a', players, now: day1 + 7.5 * 3600 * 1000 });
+  assert.equal(nextDay.a.dailyBonus, 5);
+});
+
+test('lemparan 6, 6, lalu 1 tidak kena hangus 3x angka 6 dan bidak tetap bisa jalan', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const pa = room.players[0];
+  const crypto = require('crypto');
+  const original = crypto.randomInt;
+  // Angka acak tertinggi -> dadu 6, terendah -> dadu 1
+  const rollAs = face => { crypto.randomInt = max => (face === 6 ? max - 1 : 0); };
+  const roll = async face => {
+    rollAs(face);
+    a.emit('game:roll');
+    await wait(900);
+    clearTimeout(room.turnTimer);
+  };
+  const move = async pawn => {
+    a.emit('game:move', { pawn });
+    await wait(1800);
+    clearTimeout(room.turnTimer);
+  };
+  try {
+    await roll(6);
+    assert.equal(room.dice, 6);
+    await move(0); // keluar markas
+    await roll(6);
+    assert.equal(room.dice, 6);
+    await move(0); // 1 -> 7
+    await roll(1);
+    assert.equal(room.dice, 1, 'angka 1 keluar, bukan giliran hangus');
+    assert.equal(room.turn, 0, 'giliran masih milik pemain yang melempar');
+    assert.equal(room.consecutiveSixes, 0);
+    assert.ok(require('./game/store').publicRoom(room).movable.length > 0, 'ada bidak yang bisa jalan');
+    await move(0); // 7 -> 8
+    assert.equal(room.pawns[pa.id][0], 8, 'bidak benar-benar jalan');
+    assert.equal(room.turn, 1, 'setelah angka 1, giliran pindah');
+  } finally {
+    crypto.randomInt = original;
+  }
 });

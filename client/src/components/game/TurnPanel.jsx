@@ -1,5 +1,6 @@
 import React from 'react';
 import Dice3D from '../../Dice3D';
+import TurnTimer from './TurnTimer';
 import Icon from '../Icon';
 import PlayerAvatar from '../PlayerAvatar';
 
@@ -57,6 +58,7 @@ export default function TurnPanel({ room, isTurn, canAct, currentTurnPlayer, mov
             </span>
           </p>
           <p className="turn-panel__status" aria-live="polite">{status}</p>
+          <TurnTimer clock={room.turnClock} isMine={isTurn} />
           {room.blackHoleShiftIn && (
             <p className="turn-panel__hint muted">
               🕳️ Black Hole pindah {room.blackHoleShiftIn === 1 ? 'setelah giliran ini' : `${room.blackHoleShiftIn} giliran lagi`}

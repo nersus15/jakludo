@@ -65,6 +65,11 @@ function publicRoom(r) {
     lastBlackHole: r.lastBlackHole || null,
     lastGoal: r.lastGoal || null,
     lastItemEvent: r.lastItemEvent || null,
+    matchResult: r.winner ? r.matchResult || null : null,
+    // Sisa waktu giliran pemain manusia (dihitung saat dikirim agar tidak bergantung jam klien)
+    turnClock: r.turnClock && !r.pendingShield && !r.winner
+      ? { id: r.turnClock.id, playerId: r.turnClock.playerId, totalMs: r.turnClock.totalMs, remainingMs: Math.max(0, r.turnClock.endsAt - Date.now()) }
+      : null,
     // Keputusan perisai yang sedang ditunggu (data lanjutan permainan tidak dikirim ke klien)
     pendingShield: r.pendingShield
       ? { id: r.pendingShield.id, playerId: r.pendingShield.playerId, itemId: r.pendingShield.itemId, event: r.pendingShield.event, pawnIdx: r.pendingShield.pawnIdx, attackerId: r.pendingShield.attackerId, remainingMs: Math.max(0, r.pendingShield.expiresAt - Date.now()) }
@@ -107,6 +112,7 @@ function resetRoomEvents(r) {
   r.pendingShield = null;
   r.lastItemEvent = null;
   r.lastBlackHoleShift = null;
+  r.matchResult = null;
 }
 
 function clearRoomTimers(r) {
@@ -115,6 +121,7 @@ function clearRoomTimers(r) {
     if (r[key]) clearTimeout(r[key]);
     r[key] = null;
   }
+  r.turnClock = null;
 }
 
 // ==========================================
@@ -209,12 +216,17 @@ function restoreRooms({ onResume }) {
 // SIKLUS HIDUP ROOM
 // ==========================================
 
-function deleteRoom(room) {
+// reason: pesan untuk pemain yang masih membuka room ini, agar layarnya tidak membeku
+function deleteRoom(room, reason = 'Room sudah ditutup.') {
   clearRoomTimers(room);
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
   for (const timer of room.lobbyRemovals.values()) clearTimeout(timer);
   rooms.delete(room.code);
   queueRoomSave(room.code);
+  if (io) {
+    io.to(room.code).emit('room:closed', { code: room.code, reason });
+    io.in(room.code).socketsLeave(room.code);
+  }
 }
 
 function isCreator(room, player) {
@@ -226,9 +238,9 @@ function hasConnectedHuman(room) {
 }
 
 // Room yang sedang berjalan hanya dihapus jika semua pemain manusia sudah OUT
-function deleteIfAllHumansOut(room) {
+function deleteIfAllHumansOut(room, reason = 'Room ditutup karena semua pemain sudah keluar atau OUT.') {
   if (room.players.some(p => !p.isBot && !p.isOut)) return false;
-  deleteRoom(room);
+  deleteRoom(room, reason);
   return true;
 }
 
@@ -240,7 +252,7 @@ function scheduleCleanup(room) {
   room.cleanupTimer = setTimeout(() => {
     room.cleanupTimer = null;
     if (rooms.get(room.code) !== room) return;
-    if (room.winner || (!room.started && !hasConnectedHuman(room))) deleteRoom(room);
+    if (room.winner || (!room.started && !hasConnectedHuman(room))) deleteRoom(room, 'Room ditutup karena sudah tidak aktif.');
   }, ROOM_IDLE_TTL_MS);
   room.cleanupTimer.unref();
 }

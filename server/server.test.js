@@ -535,3 +535,38 @@ test('lemparan 6, 6, lalu 1 tidak kena hangus 3x angka 6 dan bidak tetap bisa ja
     crypto.randomInt = original;
   }
 });
+
+test('6 tiga kali berturut-turut: giliran hangus dan bidak tidak jalan', async () => {
+  const { sockets, room } = await createRoomWith(['A', 'B']);
+  const a = sockets[0].socket;
+  a.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  const pa = room.players[0];
+  const crypto = require('crypto');
+  const original = crypto.randomInt;
+  crypto.randomInt = max => max - 1; // selalu dadu 6
+  const roll = async () => {
+    a.emit('game:roll');
+    await wait(900);
+    clearTimeout(room.turnTimer);
+  };
+  try {
+    await roll();
+    a.emit('game:move', { pawn: 0 }); // keluar markas
+    await wait(1800);
+    clearTimeout(room.turnTimer);
+    await roll();
+    a.emit('game:move', { pawn: 0 }); // 1 -> 7
+    await wait(1800);
+    clearTimeout(room.turnTimer);
+    await roll(); // 6 yang ketiga: hangus
+
+    assert.equal(room.turn, 1, 'giliran langsung pindah');
+    assert.equal(room.pawns[pa.id][0], 7, 'bidak tidak jalan');
+    assert.match(room.history[0].text, /3x berturut-turut/);
+  } finally {
+    crypto.randomInt = original;
+    clearTimeout(room.turnTimer);
+  }
+});

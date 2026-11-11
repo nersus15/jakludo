@@ -27,8 +27,11 @@ export default function Dice3D({ value, isRolling, canRoll, onRoll, disabled, pl
     }
   };
 
-  // Langsung tampilkan angka target (value) tanpa fallback ke 1
-  const targetFace = value || 1;
+  // Saat nilai dadu kosong (giliran baru), tetap tampilkan angka terakhir yang keluar, bukan 1,
+  // supaya tidak terlihat seperti baru dapat 1
+  const lastValueRef = useRef(1);
+  if (value) lastValueRef.current = value;
+  const targetFace = value || lastValueRef.current;
   const rotationClass = isRolling ? 'rolling-3d' : `show-${targetFace}`;
 
   const label = isRolling ? 'Dadu sedang dikocok' : canRoll ? 'Lempar dadu' : value ? `Dadu menunjukkan ${value}` : 'Dadu';

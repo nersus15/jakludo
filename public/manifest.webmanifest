@@ -1,14 +1,16 @@
 {
-  "name": "PlayGo · Multiplayer Game Platform",
+  "name": "PlayGo · Platform Game Multiplayer Online Gratis",
   "short_name": "PlayGo",
-  "description": "Platform game multiplayer realtime: mainkan JakLudo dan Monster Quiz Battle bareng teman!",
+  "description": "Platform game multiplayer realtime gratis di browser: mainkan JakLudo (2–4 pemain) dan Monster Quiz Battle (2–3 pemain) bareng teman!",
+  "lang": "id",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0a0d14",
   "theme_color": "#ff6200",
-  "categories": ["games", "entertainment"],
+  "categories": ["games", "entertainment", "education"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -38,9 +40,16 @@
   "shortcuts": [
     {
       "name": "Main JakLudo",
-      "short_name": "Main",
-      "description": "Buat atau masuk ke arena JakLudo",
-      "url": "/",
+      "short_name": "JakLudo",
+      "description": "Buat atau masuk ke arena JakLudo (2–4 Pemain)",
+      "url": "/?game=jakludo",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Main Monster Quiz Battle",
+      "short_name": "Monster Quiz",
+      "description": "Duel kuis RPG pengetahuan & matematika (2–3 Pemain)",
+      "url": "/?game=monster-quiz",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]

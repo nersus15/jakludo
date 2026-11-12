@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Allow: /?game=jakludo
+Allow: /?game=monster-quiz
+Disallow: /api/
+Disallow: /socket.io/
+
+Sitemap: /sitemap.xml
+

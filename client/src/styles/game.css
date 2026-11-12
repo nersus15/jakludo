@@ -345,8 +345,30 @@
   overscroll-behavior: contain;
 }
 
+.modal--sheet .modal__body {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal--sheet .chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-2);
+}
+
 .modal .chat__list {
-  height: min(46dvh, 380px);
+  flex: 1;
+  min-height: 180px;
+  height: clamp(220px, 44dvh, 380px);
+  padding: var(--space-2);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border);
 }
 
 .chat__empty {
@@ -393,6 +415,9 @@
   background: var(--surface-2);
   font-size: var(--fs-sm);
   overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
   transition: background-color 0.25s var(--ease);
 }
 
@@ -410,6 +435,7 @@
   align-items: center;
   gap: var(--space-1);
   max-width: 100%;
+  min-width: 0;
 }
 
 .chat__msg.is-mine .chat__row {
@@ -534,7 +560,9 @@
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding-block: 2px;
+  flex-shrink: 0;
+  white-space: nowrap;
   /* Tetap bisa digeser, tanpa scrollbar abu-abu di bawah chip */
   scrollbar-width: none;
 }
@@ -543,9 +571,31 @@
   display: none;
 }
 
+.chat__quick .chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  padding: 6px 12px;
+}
+
 .chat__form {
   display: flex;
   gap: var(--space-2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chat__form .input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  font-size: var(--fs-sm);
+}
+
+.chat__form .btn {
+  flex-shrink: 0;
+  height: 38px;
+  padding-inline: var(--space-3);
 }
 
 /* ---------- Skor ---------- */

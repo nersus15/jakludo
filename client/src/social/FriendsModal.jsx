@@ -319,14 +319,14 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
       <div className="group-detail__top">
         <button
           type="button"
-          className="btn btn--ghost btn--sm"
+          className="btn btn--secondary btn--sm dm-back-btn"
           onClick={() => {
             sound.playClick();
             onBack();
           }}
         >
           <Icon name="arrow-left" size={16} />
-          <span>Daftar teman</span>
+          <span className="dm-back-label">Daftar teman</span>
         </button>
 
         <div className="dm-header-peer">

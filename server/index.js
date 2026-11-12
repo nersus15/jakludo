@@ -5,6 +5,7 @@
 //   server/items/             definisi item toko (tambah item baru di sini)
 //   server/db.js              database SQLite
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const cors = require('cors');
@@ -54,18 +55,146 @@ app.use((err, req, res, next) => {
 });
 
 const dist = path.join(__dirname, '../dist');
+
+function getPublicOrigin(req) {
+  if (process.env.PUBLIC_URL) {
+    return String(process.env.PUBLIC_URL).replace(/\/+$/, '');
+  }
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http')
+    .split(',')[0]
+    .trim();
+  const host = String(req.headers['x-forwarded-host'] || req.get('host') || 'localhost:5172')
+    .split(',')[0]
+    .trim();
+  return `${proto}://${host}`;
+}
+
+app.get('/robots.txt', (req, res) => {
+  const origin = getPublicOrigin(req);
+  res.type('text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(
+    [
+      'User-agent: *',
+      'Allow: /',
+      'Allow: /?game=jakludo',
+      'Allow: /?game=monster-quiz',
+      'Disallow: /api/',
+      'Disallow: /socket.io/',
+      '',
+      `Sitemap: ${origin}/sitemap.xml`,
+      ''
+    ].join('\n')
+  );
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const origin = getPublicOrigin(req);
+  const today = new Date().toISOString().slice(0, 10);
+  res.type('application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(
+    `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${origin}/</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>${origin}/?game=jakludo</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${origin}/?game=monster-quiz</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+</urlset>`
+  );
+});
+
 // File di /assets punya hash di namanya, jadi aman di-cache selamanya. HTML, sw.js, dan manifest
 // harus selalu dicek ulang agar update langsung sampai; file publik lain (musik, ikon) cukup sehari.
 app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '1y', fallthrough: false }));
 app.use(express.static(dist, {
+  index: false,
   setHeaders(res, filePath) {
     const noCache = /\.(html|webmanifest|json)$/.test(filePath) || filePath.endsWith('sw.js');
     res.setHeader('Cache-Control', noCache ? 'no-cache' : 'public, max-age=86400');
   }
 }));
+
+const GAME_SSR_META = {
+  jakludo: {
+    title: 'Main JakLudo Online (2–4 Pemain) · PlayGo Multiplayer',
+    description:
+      'Mainkan JakLudo di PlayGo! Game Ludo multiplayer realtime 2–4 pemain dengan petak Black Hole, item strategi (Force Return & Perisai), obrolan grup, dan papan peringkat global.',
+    query: '?game=jakludo'
+  },
+  'monster-quiz': {
+    title: 'Monster Quiz Battle (Duel Kuis RPG 2–3 Pemain) · PlayGo Multiplayer',
+    description:
+      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +30 poin setiap menang!',
+    query: '?game=monster-quiz'
+  }
+};
+
 app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
-  res.sendFile(path.join(dist, 'index.html'));
+  const htmlPath = path.join(dist, 'index.html');
+  if (!fs.existsSync(htmlPath)) {
+    return res.status(404).send('Build belum tersedia.');
+  }
+
+  let html = fs.readFileSync(htmlPath, 'utf8');
+  const origin = getPublicOrigin(req);
+  const rawGame = String(req.query?.game || '').toLowerCase();
+  const gameKey =
+    rawGame === 'jakludo' || rawGame === 'ludo'
+      ? 'jakludo'
+      : rawGame === 'monster-quiz' || rawGame === 'quiz'
+      ? 'monster-quiz'
+      : null;
+  const gameMeta = gameKey ? GAME_SSR_META[gameKey] : null;
+  const canonicalUrl = `${origin}/${gameMeta ? gameMeta.query : ''}`;
+
+  if (gameMeta) {
+    html = html
+      .replace(/<title>[\s\S]*?<\/title>/, `<title>${gameMeta.title}</title>`)
+      .replace(
+        /<meta name="description" content="[^"]*" \/>/,
+        `<meta name="description" content="${gameMeta.description}" />`
+      )
+      .replace(
+        /<meta property="og:title" content="[^"]*" \/>/,
+        `<meta property="og:title" content="${gameMeta.title}" />`
+      )
+      .replace(
+        /<meta property="og:description" content="[^"]*" \/>/,
+        `<meta property="og:description" content="${gameMeta.description}" />`
+      )
+      .replace(
+        /<meta name="twitter:title" content="[^"]*" \/>/,
+        `<meta name="twitter:title" content="${gameMeta.title}" />`
+      )
+      .replace(
+        /<meta name="twitter:description" content="[^"]*" \/>/,
+        `<meta name="twitter:description" content="${gameMeta.description}" />`
+      );
+  }
+
+  html = html
+    .replace('<link rel="canonical" href="/" />', `<link rel="canonical" href="${canonicalUrl}" />`)
+    .replace('<meta property="og:url" content="/" />', `<meta property="og:url" content="${canonicalUrl}" />`)
+    .replace('<meta property="og:image" content="/playgo-logo.jpg" />', `<meta property="og:image" content="${origin}/playgo-logo.jpg" />`)
+    .replace('<meta name="twitter:image" content="/playgo-logo.jpg" />', `<meta name="twitter:image" content="${origin}/playgo-logo.jpg" />`);
+
+  res.type('text/html; charset=utf-8').send(html);
 });
 
 // ==========================================

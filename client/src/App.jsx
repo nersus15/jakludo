@@ -24,6 +24,7 @@ import { useTheme } from './hooks/useTheme';
 import { usePwaInstall } from './hooks/usePwaInstall';
 import { useItemCatalog } from './items';
 import { sound } from './sound';
+import { applySeo, getInitialGameModeFromUrl } from './seo';
 
 // Dialog yang jarang dibuka dimuat terpisah agar bundle awal lebih kecil.
 // Diunduh di belakang layar saat browser senggang, jadi tetap langsung muncul saat dibuka.
@@ -46,7 +47,7 @@ function preloadDialogs() {
 
 export default function App() {
   const [modal, setModal] = useState(null); // 'auth' | 'shop' | 'audio' | 'leaderboard' | 'friends' | 'groups' | null
-  const [gameMode, setGameMode] = useState('hub'); // 'hub' | 'ludo' | 'quiz'
+  const [gameMode, setGameMode] = useState(getInitialGameModeFromUrl); // 'hub' | 'ludo' | 'quiz'
   const [profileUserId, setProfileUserId] = useState('');
   const [initialChatFriendId, setInitialChatFriendId] = useState('');
   const [cropRequest, setCropRequest] = useState(null);
@@ -114,6 +115,11 @@ export default function App() {
       setGameMode('quiz');
     }
   }, [quiz.room?.code, game.screen]);
+  useEffect(() => {
+    const activeMode = game.screen === 'room' ? 'ludo' : gameMode;
+    const activeCode = game.room?.code || quiz.room?.code || null;
+    applySeo({ gameMode: activeMode, modal, roomCode: activeCode });
+  }, [gameMode, game.screen, game.room?.code, quiz.room?.code, modal]);
 
   // Status chat terbuka dipakai untuk menghitung pesan belum dibaca
   const changeSheet = name => {
@@ -331,7 +337,7 @@ export default function App() {
         />
       )}
 
-      {!inGame && (
+      {!inGame && !isMobileFeaturePage && (
         <footer className="app-footer">
           <span>© 2026 PlayGo</span>
           <span>Platform game multiplayer realtime bareng teman</span>

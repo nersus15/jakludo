@@ -1,12 +1,40 @@
 <!doctype html>
-<html lang="id">
+<html lang="id" prefix="og: https://ogp.me/ns#">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>PlayGo · Platform Game Multiplayer Realtime</title>
+    <title>PlayGo · Platform Game Multiplayer Online Gratis (JakLudo &amp; Monster Quiz Battle)</title>
+
+    <!-- SEO Primary Meta Tags -->
+    <meta name="description" content="PlayGo adalah platform game multiplayer realtime gratis di browser. Mainkan JakLudo (Ludo online 2–4 pemain) dan Monster Quiz Battle (duel kuis RPG 2–3 pemain) bersama teman &amp; grup!" />
+    <meta name="keywords" content="PlayGo, game multiplayer online, game mabar browser, JakLudo, ludo online indonesia, Monster Quiz Battle, game kuis multiplayer, game edukasi matematika, main bareng teman, game web gratis" />
+    <meta name="author" content="PlayGo" />
+    <meta name="application-name" content="PlayGo" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow" />
+    <link rel="canonical" href="/" />
+
+    <!-- Open Graph / Facebook / WhatsApp / Discord / Telegram -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PlayGo" />
+    <meta property="og:locale" content="id_ID" />
+    <meta property="og:url" content="/" />
+    <meta property="og:title" content="PlayGo · Platform Game Multiplayer Online Gratis (JakLudo &amp; Monster Quiz Battle)" />
+    <meta property="og:description" content="Mainkan JakLudo (2–4 pemain) dan Monster Quiz Battle (duel kuis RPG 2–3 pemain) secara realtime langsung dari browser bersama teman &amp; grup!" />
+    <meta property="og:image" content="/playgo-logo.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="682" />
+    <meta property="og:image:alt" content="PlayGo — Platform Game Multiplayer Online Gratis (JakLudo &amp; Monster Quiz Battle)" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PlayGo · Platform Game Multiplayer Online Gratis (JakLudo &amp; Monster Quiz Battle)" />
+    <meta name="twitter:description" content="Mainkan JakLudo (2–4 pemain) dan Monster Quiz Battle (duel kuis RPG 2–3 pemain) secara realtime langsung dari browser bersama teman &amp; grup!" />
+    <meta name="twitter:image" content="/playgo-logo.jpg" />
+    <meta name="twitter:image:alt" content="PlayGo — Platform Game Multiplayer Online Gratis" />
 
     <!-- PWA & Mobile Web App Meta Tags -->
-    <meta name="description" content="PlayGo: Platform game multiplayer realtime bareng teman. Mainkan JakLudo (2–4 pemain) dan Monster Quiz Battle (1v1 RPG Trivia) langsung dari browser." />
     <meta name="theme-color" content="#f5ecdc" />
     <!-- Pasang tema tersimpan sebelum halaman digambar agar tidak berkedip (default: terang) -->
     <script>
@@ -17,6 +45,93 @@
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
         if (dark) document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1a1512');
       })();
+    </script>
+
+    <!-- Structured Data JSON-LD untuk Rich Snippets Google Search -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "PlayGo",
+            "alternateName": ["PlayGo Multiplayer", "JakLudo", "Monster Quiz Battle"],
+            "url": "/",
+            "inLanguage": "id-ID",
+            "description": "Platform game multiplayer realtime gratis di browser: mainkan JakLudo (2–4 pemain) dan Monster Quiz Battle (2–3 pemain) bersama teman dan grup."
+          },
+          {
+            "@type": "WebApplication",
+            "name": "PlayGo",
+            "applicationCategory": "GameApplication",
+            "genre": ["Multiplayer Game", "Board Game", "Trivia", "Educational Game"],
+            "browserRequirements": "Requires JavaScript and HTML5 WebSocket support",
+            "operatingSystem": "Web, Android, iOS, Windows, macOS, Linux",
+            "inLanguage": "id-ID",
+            "isAccessibleForFree": true,
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "IDR"
+            }
+          },
+          {
+            "@type": "VideoGame",
+            "name": "JakLudo",
+            "url": "/?game=jakludo",
+            "gamePlatform": "Web Browser",
+            "applicationCategory": "Game",
+            "genre": ["Board Game", "Strategy Game", "Party Game"],
+            "playMode": "MultiPlayer",
+            "numberOfPlayers": {
+              "@type": "QuantitativeValue",
+              "minValue": 2,
+              "maxValue": 4
+            },
+            "inLanguage": "id-ID",
+            "isAccessibleForFree": true,
+            "description": "Game Ludo multiplayer realtime 2–4 pemain dengan jebakan Black Hole, item strategi (Force Return & Perisai), dan obrolan grup."
+          },
+          {
+            "@type": "VideoGame",
+            "name": "Monster Quiz Battle",
+            "url": "/?game=monster-quiz",
+            "gamePlatform": "Web Browser",
+            "applicationCategory": "Game",
+            "genre": ["Trivia", "RPG", "Educational Game"],
+            "playMode": "MultiPlayer",
+            "numberOfPlayers": {
+              "@type": "QuantitativeValue",
+              "minValue": 2,
+              "maxValue": 3
+            },
+            "inLanguage": "id-ID",
+            "isAccessibleForFree": true,
+            "description": "Duel kuis RPG multiplayer 2–3 pemain. Jawab cepat soal pengetahuan umum & matematika dalam 15 detik, gunakan Hints Jawaban (50:50), serang monster lawan, dan menangkan +30 Poin PlayGo!"
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Apa itu PlayGo?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "PlayGo adalah platform game multiplayer realtime gratis di browser yang menghadirkan game JakLudo (2–4 pemain) dan Monster Quiz Battle (2–3 pemain), lengkap dengan fitur pertemanan, grup chat, toko item, dan papan peringkat global."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Bagaimana cara bermain Monster Quiz Battle di PlayGo?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Pilih Monster Quiz Battle di halaman utama PlayGo, pilih salah satu dari 6 monster berelemen (100 HP), lalu cari lawan cepat atau buat room kode untuk 2–3 pemain. Jawab soal pengetahuan umum dan matematika dalam 15 detik untuk menyerang monster lawan (-10 HP) dan raih hadiah +30 Poin saat menang."
+                }
+              }
+            ]
+          }
+        ]
+      }
     </script>
 
     <!-- Font: Fredoka (judul & angka, bulat seperti huruf logo) & Nunito (isi), lihat DESIGN.md -->
@@ -41,6 +156,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>PlayGo — Platform Game Multiplayer Online Gratis</h1>
+        <p>Mainkan game multiplayer realtime langsung dari browser bersama teman dan grup tanpa perlu instalasi.</p>
+        <section>
+          <h2>Daftar Game di PlayGo</h2>
+          <ul>
+            <li>
+              <strong><a href="/?game=jakludo">JakLudo (2–4 Pemain)</a></strong>: Balap 4 bidak menuju garis akhir dengan petak Black Hole, item strategi Force Return &amp; Perisai, serta papan peringkat global.
+            </li>
+            <li>
+              <strong><a href="/?game=monster-quiz">Monster Quiz Battle (2–3 Pemain)</a></strong>: Duel RPG trivia pengetahuan umum &amp; matematika selama 15 detik per soal. Pilih monster berelemen, gunakan item Hints Jawaban (50:50), kurangi 100 HP lawan, dan raih +30 Poin PlayGo setiap menang!
+            </li>
+          </ul>
+        </section>
+      </main>
+    </noscript>
     <script type="module" src="/client/src/main.jsx"></script>
     <script>
       // Registrasi Service Worker PWA (nonaktifkan di port dev Vite agar tidak meng-cache modul dev)

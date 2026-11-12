@@ -54,8 +54,25 @@
     padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
+  .modal-backdrop--sheet {
+    padding-bottom: 0 !important;
+    padding-left: 0;
+    padding-right: 0;
+    align-items: flex-end;
+  }
+
   .modal {
     max-height: calc(100dvh - 108px - env(safe-area-inset-bottom));
+  }
+
+  .modal--sheet {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(85dvh, 620px);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: 0;
+    margin: 0;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
   }
 }
 
@@ -127,7 +144,7 @@
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
-  padding: var(--space-4) var(--gutter) var(--space-5);
+  padding: var(--space-3) var(--gutter) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -194,6 +211,84 @@
 .feature-page__body .group-chat__messages,
 .feature-page__body .dm-chat__messages {
   max-height: 56dvh;
+}
+
+@media (max-width: 767px) {
+  .feature-page {
+    padding: var(--space-2) var(--gutter) var(--space-2);
+    gap: var(--space-2);
+  }
+
+  .feature-page__header {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .feature-page__icon {
+    width: 36px;
+    height: 36px;
+    font-size: 1.2rem;
+  }
+
+  .feature-page__title {
+    font-size: var(--fs-md);
+  }
+
+  .feature-page__subtitle {
+    font-size: var(--fs-xs);
+  }
+
+  .feature-page__body {
+    padding: var(--space-3);
+  }
+
+  /* Chat grup & private dalam mode halaman penuh HP:
+     sesuaikan tinggi pas dengan viewport tanpa scroll luar yang berantakan */
+  .feature-page.groups-modal--chat,
+  .feature-page.friends-modal--chat {
+    height: calc(100dvh - 56px - 84px - env(safe-area-inset-bottom));
+    min-height: 0;
+    padding: var(--space-2) var(--gutter) 0;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  /* Sembunyikan header terluar saat berada di dalam obrolan grup / chat private aktif,
+     karena bilah detail (group-detail__bar / group-detail__top) sudah menyediakan
+     navigasi kembali, avatar, judul, dan status yang lengkap dan ringkas */
+  .feature-page.groups-modal--detail .feature-page__header,
+  .feature-page.groups-modal--chat .feature-page__header,
+  .feature-page.friends-modal--chat .feature-page__header {
+    display: none;
+  }
+
+  .feature-page.groups-modal--chat .feature-page__body,
+  .feature-page.friends-modal--chat .feature-page__body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-3);
+    overflow: hidden;
+  }
+
+  .feature-page.groups-modal--chat .group-detail,
+  .feature-page.friends-modal--chat .group-detail,
+  .feature-page.groups-modal--chat .group-chat,
+  .feature-page.friends-modal--chat .group-chat {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .feature-page.groups-modal--chat .group-chat__messages,
+  .feature-page.friends-modal--chat .group-chat__messages {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .feature-page__footer {

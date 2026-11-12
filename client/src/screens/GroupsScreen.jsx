@@ -1450,7 +1450,11 @@ export default function GroupsScreen({
       onClose={onClose}
       asPage={asPage}
       size="lg"
-      className={activeGroupId && activeTab === 'chat' ? 'groups-modal--chat' : ''}
+      className={
+        activeGroupId
+          ? `groups-modal--detail ${activeTab === 'chat' ? 'groups-modal--chat' : ''}`
+          : ''
+      }
       icon="💬"
       title={activeGroupId ? currentGroupName : 'Grup & Chat'}
       subtitle={

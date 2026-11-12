@@ -4,6 +4,7 @@
 // - Statistik & riwayat pertandingan pemain (/api/quiz/stats, /api/quiz/history)
 // - Cek room aktif (/api/quiz/active-room)
 // - Manajemen bank soal (/api/quiz/questions) yang siap dihubungkan ke Admin Panel
+const crypto = require('crypto');
 const db = require('../db');
 const quizStore = require('./store');
 const quizEngine = require('./engine');
@@ -24,16 +25,19 @@ function requireUser(req, res, message = 'Silakan login terlebih dahulu.') {
 function requireQuizAdmin(req, res) {
   const user = requireUser(req, res);
   if (!user) return null;
-  const adminUsers = String(process.env.QUIZ_ADMIN_USERNAMES || 'admin')
+  // Tanpa default: kalau env kosong, tidak ada admin (sebelumnya siapa pun yang mendaftar sebagai "admin")
+  const adminUsers = String(process.env.QUIZ_ADMIN_USERNAMES || '')
     .split(',')
     .map(s => s.trim().toLowerCase())
     .filter(Boolean);
   const adminKey = process.env.QUIZ_ADMIN_KEY ? String(process.env.QUIZ_ADMIN_KEY) : '';
   const headerKey = String(req.headers['x-quiz-admin-key'] || '');
 
-  const isAllowed =
-    adminUsers.includes(String(user.username || '').toLowerCase()) ||
-    (adminKey && headerKey === adminKey);
+  const keyMatches =
+    adminKey.length > 0 &&
+    headerKey.length === adminKey.length &&
+    crypto.timingSafeEqual(Buffer.from(headerKey), Buffer.from(adminKey));
+  const isAllowed = adminUsers.includes(String(user.username || '').toLowerCase()) || keyMatches;
 
   if (!isAllowed) {
     res.status(403).json({ success: false, error: 'Akses ditolak: hanya admin yang dapat mengelola bank soal.' });

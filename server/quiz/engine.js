@@ -882,7 +882,6 @@ function startNextQuestion(room) {
   const nextRoundNo = match.roundNo + 1;
 
   let preferredCategory = 'general';
-  let forceCategory = true;
 
   if (currentMathCount < targetMathCount) {
     // Tentukan ronde untuk mengeluarkan soal matematika (diselingi soal umum):
@@ -894,17 +893,17 @@ function startNextQuestion(room) {
 
     if (isMathRound) {
       preferredCategory = 'math';
-      forceCategory = false;
     }
   }
 
-  const question = quizStore.selectRandomUnusedQuestion(match.usedQuestionIds, preferredCategory, forceCategory);
+  const question = quizStore.selectRandomUnusedQuestion(match.usedQuestionIds, preferredCategory);
 
   if (!question) {
     return finishMatch(room, 'questions_exhausted');
   }
 
   match.usedQuestionIds.add(question.id);
+  quizStore.markQuestionShown(question.id);
   if (question.category === 'math') {
     match.mathCount = (match.mathCount || 0) + 1;
   }

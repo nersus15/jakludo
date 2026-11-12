@@ -18,6 +18,11 @@ const state = {
   rooms: new Map()        // roomId -> { id, code, createdBy, source, status, createdAt, closedAt }
 };
 
+// Status rotasi soal: sudah muncul di siklus ini, berapa kali muncul, dan kapan terakhir muncul
+function emptyRotation() {
+  return { cycleSeen: false, shownCount: 0, lastShownAt: null };
+}
+
 function seedMemoryDefaults() {
   const now = Date.now();
   for (const q of SEED_QUESTIONS) {
@@ -31,6 +36,7 @@ function seedMemoryDefaults() {
         options: [...q.options],
         correctIndex: q.correctIndex,
         active: true,
+        ...emptyRotation(),
         createdAt: now,
         updatedAt: now
       });
@@ -69,6 +75,9 @@ function bootstrapLocalQuiz() {
           options: Array.isArray(q.options) ? q.options : [],
           correctIndex: Number(q.correctIndex) || 0,
           active: q.active !== false,
+          cycleSeen: q.cycleSeen === true,
+          shownCount: Number(q.shownCount) || 0,
+          lastShownAt: Number(q.lastShownAt) || null,
           createdAt: Number(q.createdAt) || Date.now(),
           updatedAt: Number(q.updatedAt) || Date.now()
         });
@@ -205,6 +214,9 @@ async function hydrateFromPostgres() {
       options: Array.isArray(opts) ? opts : [],
       correctIndex: Number(r.correct_index),
       active: Boolean(r.active),
+      cycleSeen: Boolean(r.cycle_seen),
+      shownCount: Number(r.shown_count) || 0,
+      lastShownAt: Number(r.last_shown_at) || null,
       createdAt: Number(r.created_at) || now,
       updatedAt: Number(r.updated_at) || now
     });
@@ -253,6 +265,9 @@ function listQuestions({ category = null, activeOnly = true, includeAnswer = fal
       prompt: q.prompt,
       options: [...q.options],
       active: q.active,
+      cycleSeen: Boolean(q.cycleSeen),
+      shownCount: q.shownCount || 0,
+      lastShownAt: q.lastShownAt || null,
       createdAt: q.createdAt,
       updatedAt: q.updatedAt
     };
@@ -275,6 +290,9 @@ function saveQuestion(input) {
   const existing = state.questions.get(validation.value.id);
   const row = {
     ...validation.value,
+    ...(existing
+      ? { cycleSeen: existing.cycleSeen, shownCount: existing.shownCount, lastShownAt: existing.lastShownAt }
+      : emptyRotation()),
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now
   };
@@ -324,11 +342,29 @@ function setQuestionActive(id, active) {
   return { question: { ...existing, options: [...existing.options] } };
 }
 
+// Rotasi soal lintas pertandingan: soal yang sudah muncul di siklus ini tetap bisa keluar, tapi
+// peluangnya jauh lebih kecil (bobot 1 berbanding 20). Begitu semua soal aktif sekategori sudah
+// pernah muncul, tanda siklus kategori itu di-reset sehingga semua soal kembali berpeluang sama.
+const UNSEEN_WEIGHT = 20;
+const SEEN_WEIGHT = 1;
+
+function pickWeighted(pool) {
+  let total = 0;
+  for (const q of pool) total += q.cycleSeen ? SEEN_WEIGHT : UNSEEN_WEIGHT;
+  let roll = crypto.randomInt(0, total);
+  for (const q of pool) {
+    roll -= q.cycleSeen ? SEEN_WEIGHT : UNSEEN_WEIGHT;
+    if (roll < 0) return q;
+  }
+  return pool[pool.length - 1];
+}
+
 /**
  * Pilih satu soal acak yang belum pernah dipakai di dalam pertandingan ini.
+ * Soal yang sudah muncul di pertandingan lain (siklus ini) peluangnya diperkecil.
  * Menyeimbangkan kategori 'general' dan 'math' secara bergantian apabila memungkinkan.
  */
-function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = null, forceCategory = false) {
+function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = null) {
   const unused = [];
   const unusedPreferred = [];
 
@@ -341,18 +377,39 @@ function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = nul
     }
   }
 
-  // Jika forceCategory aktif dan tersedia soal kategori tersebut, batasi ketat pada kategori pilihan
-  if (forceCategory && preferredCategory && unusedPreferred.length > 0) {
-    const idx = crypto.randomInt(0, unusedPreferred.length);
-    const chosen = unusedPreferred[idx];
-    return { ...chosen, options: [...chosen.options] };
-  }
-
+  // Utamakan kategori pilihan; bila soal kategori itu sudah habis, ambil dari kategori mana pun
   const pool = unusedPreferred.length > 0 ? unusedPreferred : unused;
   if (pool.length === 0) return null;
-  const idx = crypto.randomInt(0, pool.length);
-  const chosen = pool[idx];
+  const chosen = pickWeighted(pool);
   return { ...chosen, options: [...chosen.options] };
+}
+
+// Catat bahwa soal baru saja muncul di sebuah ronde, lalu reset siklus kategori bila semua sudah muncul
+function markQuestionShown(questionId, now = Date.now()) {
+  const q = state.questions.get(questionId);
+  if (!q) return;
+  q.cycleSeen = true;
+  q.shownCount = (q.shownCount || 0) + 1;
+  q.lastShownAt = now;
+  db.execPg(
+    'UPDATE quiz_questions SET cycle_seen = TRUE, shown_count = shown_count + 1, last_shown_at = $2 WHERE id = $1',
+    [q.id, now]
+  );
+
+  let allSeen = true;
+  for (const other of state.questions.values()) {
+    if (other.active && other.category === q.category && !other.cycleSeen) {
+      allSeen = false;
+      break;
+    }
+  }
+  if (allSeen) {
+    for (const other of state.questions.values()) {
+      if (other.category === q.category) other.cycleSeen = false;
+    }
+    db.execPg('UPDATE quiz_questions SET cycle_seen = FALSE WHERE category = $1', [q.category]);
+  }
+  persistLocalQuiz();
 }
 
 // ==========================================
@@ -706,6 +763,7 @@ function getQuizLeaderboard(limit = 50) {
 
 module.exports = {
   hydrateFromPostgres,
+  markQuestionShown,
   listMonsters,
   getMonster,
   listQuestions,

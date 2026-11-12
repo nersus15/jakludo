@@ -587,3 +587,36 @@ test('Aturan poin bersama: minimal 2 pemain asli dan bukan forfeit', () => {
   assert.equal(canAwardPoints([human('a'), human('b')], { endReason: 'forfeit' }), false);
   assert.equal(canAwardPoints([{ id: 'bot', isBot: true }, { id: 'p1' }, { id: 'p2' }]), true, 'format pemain Ludo');
 });
+
+test('Rotasi soal: soal yang sudah muncul jarang keluar lagi dan siklus di-reset setelah semua muncul', () => {
+  const quizStore = require('./store');
+  const general = () => quizStore.listQuestions({ category: 'general' });
+
+  // Tuntaskan siklus yang mungkin sedang berjalan dari test lain: soal terakhir memicu reset
+  for (const q of general().filter(q => !q.cycleSeen)) quizStore.markQuestionShown(q.id);
+  assert.ok(general().every(q => !q.cycleSeen), 'siklus di-reset setelah semua soal muncul');
+
+  // Semua soal umum sudah muncul kecuali 3 soal
+  const all = general();
+  const fresh = all.slice(0, 3).map(q => q.id);
+  for (const q of all.slice(3)) quizStore.markQuestionShown(q.id);
+
+  const N = 400;
+  let freshHits = 0;
+  for (let i = 0; i < N; i++) {
+    if (fresh.includes(quizStore.selectRandomUnusedQuestion(new Set(), 'general').id)) freshHits++;
+  }
+  // Tanpa rotasi peluangnya 3/n (~2%); dengan bobot 20:1 sekitar 33%
+  assert.ok(freshHits / N > 0.2, `soal yang belum muncul harus diutamakan, dapat ${freshHits}/${N}`);
+
+  // Soal yang sudah dipakai di pertandingan yang sama tetap tidak boleh keluar lagi
+  const onlyLeft = all[5].id;
+  const used = new Set(all.map(q => q.id).filter(id => id !== onlyLeft));
+  assert.equal(quizStore.selectRandomUnusedQuestion(used, 'general').id, onlyLeft);
+
+  // Begitu 3 soal sisanya muncul, semua soal kembali berpeluang sama
+  fresh.forEach(id => quizStore.markQuestionShown(id));
+  assert.ok(general().every(q => !q.cycleSeen));
+  assert.ok(general().every(q => q.shownCount >= 1));
+});
+

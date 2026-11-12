@@ -29,7 +29,14 @@
   margin: 0;
   padding: 0;
   display: grid;
+  /* minmax(0, 1fr): tanpa ini kolom grid melebar mengikuti teks nowrap terpanjang (mis. pesan
+     terakhir yang panjang), sehingga ellipsis tidak jalan dan halaman meluber ke samping */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
+}
+
+.social-list > li {
+  min-width: 0;
 }
 
 .social-row {
@@ -166,6 +173,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+
+.group-card__head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .group-card__count {

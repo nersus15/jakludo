@@ -249,8 +249,10 @@ export default function App() {
     leaveQuiz: quiz.actions.leaveRoom
   };
 
+  const showBottomNav = !inGame && !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby');
+
   return (
-    <div className={`app ${inGame ? 'app--game' : ''}`}>
+    <div className={`app ${inGame ? 'app--game' : ''} ${showBottomNav ? 'app--bottom-nav' : ''}`}>
       <a className="skip-link" href="#main">Langsung ke konten</a>
       <ReconnectBar {...network} />
 
@@ -438,7 +440,7 @@ export default function App() {
         </footer>
       )}
 
-      {!inGame && !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby') && (
+      {showBottomNav && (
         <MobileBottomNav
           activeModal={modal}
           friendBadgeCount={social.friendBadgeCount}

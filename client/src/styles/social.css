@@ -771,6 +771,12 @@
   gap: var(--space-2);
 }
 
+/* Durasi rekaman selalu satu baris; label boleh turun ke baris berikutnya di layar sempit */
+.recorder-timer__time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Lightbox Foto ---------- */
 
 .lightbox {
@@ -878,7 +884,7 @@
   align-items: center;
   gap: var(--space-3);
   min-width: min(260px, 70vw);
-  max-width: 320px;
+  max-width: min(320px, 100%);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   border: 2px solid var(--ink-line);
@@ -917,6 +923,7 @@
 
 .vn-player__slider {
   width: 100%;
+  margin: 0;
   accent-color: var(--brand);
   cursor: pointer;
   height: 6px;
@@ -924,10 +931,12 @@
 
 .vn-player__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: 2px var(--space-2);
   font-size: var(--fs-xs);
+  min-width: 0;
 }
 
 .vn-player__time {
@@ -936,6 +945,10 @@
   gap: var(--space-1);
   font-weight: 700;
   color: var(--ink-soft);
+  /* Durasi "1:58 / 2:00" tidak boleh terpecah ke beberapa baris */
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .vn-player__err {
@@ -1118,10 +1131,26 @@
   min-width: 0;
 }
 
-.group-detail__identity strong {
+.group-detail__identity strong,
+.group-detail__identity .muted {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Label tombol match dipendekkan di HP sempit supaya nama grup tetap terbaca */
+.group-detail__match-label--short {
+  display: none;
+}
+
+@media (max-width: 400px) {
+  .group-detail__match-label {
+    display: none;
+  }
+
+  .group-detail__match-label--short {
+    display: inline;
+  }
 }
 
 .group-avatar-bar {

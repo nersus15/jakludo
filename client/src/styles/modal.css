@@ -51,7 +51,7 @@
 
 @media (max-width: 767px) {
   .modal-backdrop {
-    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+    padding-bottom: var(--bottom-nav-space);
   }
 
   .modal-backdrop--sheet {
@@ -62,7 +62,7 @@
   }
 
   .modal {
-    max-height: calc(100dvh - 108px - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - var(--bottom-nav-space) - 16px);
   }
 
   .modal--sheet {
@@ -245,11 +245,26 @@
      sesuaikan tinggi pas dengan viewport tanpa scroll luar yang berantakan */
   .feature-page.groups-modal--chat,
   .feature-page.friends-modal--chat {
-    height: calc(100dvh - 56px - 84px - env(safe-area-inset-bottom));
+    /* Tinggi dikunci supaya yang scroll daftar pesan, bukan halaman. flex: none wajib: dengan flex: 1
+       tinggi halaman ikut panjang isi chat. Cadangan untuk browser tanpa :has() (header ~62px). */
+    flex: none;
+    height: calc(100dvh - 62px - var(--bottom-nav-space));
     min-height: 0;
     padding: var(--space-2) var(--gutter) 0;
     gap: 0;
     overflow: hidden;
+  }
+
+  /* Browser modern: app setinggi layar, halaman chat mengisi sisa di bawah header (tinggi header bebas) */
+  .app:has(> .feature-page.groups-modal--chat),
+  .app:has(> .feature-page.friends-modal--chat) {
+    height: 100dvh;
+  }
+
+  .app:has(> .feature-page.groups-modal--chat) > .feature-page,
+  .app:has(> .feature-page.friends-modal--chat) > .feature-page {
+    flex: 1 1 0;
+    height: auto;
   }
 
   /* Sembunyikan header terluar saat berada di dalam obrolan grup / chat private aktif,

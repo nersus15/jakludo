@@ -5,6 +5,9 @@
 :root {
   color-scheme: light;
 
+  /* Tinggi menu bawah floating di HP (bar 64px + ruang lingkaran aktif 20px + jarak bawah) */
+  --bottom-nav-space: calc(84px + max(12px, env(safe-area-inset-bottom)));
+
   /* Meja & kartu: krem hangat seperti kertas papan Ludo */
   --bg: #f5ecdc;
   --surface: #fffaf1;

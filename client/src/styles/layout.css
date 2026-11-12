@@ -541,8 +541,9 @@ p.state-msg {
     display: none !important;
   }
 
-  .app-footer {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  /* Konten terakhir (daftar teman, footer, dll.) tidak boleh tertutup menu bawah */
+  .app--bottom-nav {
+    padding-bottom: var(--bottom-nav-space);
   }
 }
 

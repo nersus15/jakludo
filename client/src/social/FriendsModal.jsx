@@ -484,8 +484,10 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
           <div className="group-chat__recorder" role="region" aria-label="Perekam pesan suara">
             <span className="recorder-indicator" aria-hidden="true" />
             <span className="recorder-timer">
-              Merekam suara: <strong>{formatDuration(recordElapsedMs)}</strong> /{' '}
-              {formatDuration(MAX_VOICE_DURATION_MS)}
+              <span className="recorder-timer__label">Merekam suara:</span>{' '}
+              <span className="recorder-timer__time">
+                <strong>{formatDuration(recordElapsedMs)}</strong> / {formatDuration(MAX_VOICE_DURATION_MS)}
+              </span>
             </span>
             <div className="recorder-actions">
               <button type="button" className="btn btn--ghost btn--sm" onClick={onCancelVoice}>

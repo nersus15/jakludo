@@ -139,7 +139,7 @@ const GAME_SSR_META = {
   'monster-quiz': {
     title: 'Monster Quiz Battle (Duel Kuis RPG 2–3 Pemain) · PlayGo Multiplayer',
     description:
-      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +30 poin setiap menang!',
+      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +10 poin setiap menang!',
     query: '?game=monster-quiz'
   }
 };

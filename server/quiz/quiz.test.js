@@ -363,9 +363,10 @@ test('Skenario 5, 6, 7, 8, 9, 10, 13, 15, 16: Full realtime match, soal identik,
 
   const finished = await finishedP;
   assert.equal(finished.winnerUserId, u1.user.id);
-  assert.equal(finished.rewardPoints, 30);
-  assert.equal(finished.winnerReward?.points, 30);
-  assert.equal(finished.winnerReward?.totalPoints, u1.user.points + 30);
+  assert.equal(finished.rewardPoints, quizEngine.WIN_REWARD_POINTS);
+  assert.equal(quizEngine.WIN_REWARD_POINTS, 10);
+  assert.equal(finished.winnerReward?.points, 10);
+  assert.equal(finished.winnerReward?.totalPoints, u1.user.points + 10);
   assert.equal(finished.endReason, 'knockout');
   const finalP2 = finished.players.find(p => p.userId === u2.user.id);
   assert.equal(finalP2.currentHp, 0);

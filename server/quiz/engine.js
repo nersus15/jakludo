@@ -11,7 +11,8 @@ const { buildRoundQuestionPayload } = require('./questions');
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 3;
-const WIN_REWARD_POINTS = 30;
+// Hadiah hanya untuk pemenang; syarat lengkapnya di server/lib/rewards.js (ada lawan asli, bukan forfeit)
+const WIN_REWARD_POINTS = 10;
 const DEFAULT_SLOT_MONSTERS = ['emberon', 'aquaris', 'terragon'];
 
 const DEFAULT_TIMINGS = {

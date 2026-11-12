@@ -1693,6 +1693,28 @@ const SEED_QUESTIONS = [
   }
 ];
 
+// Soal yang temanya sama atau saling membocorkan jawaban. Dalam satu pertandingan hanya satu soal
+// dari tiap grup yang boleh muncul (soal lain tetap bisa keluar di pertandingan berikutnya).
+const RELATED_QUESTION_GROUPS = [
+  ['q_gen_013', 'q_gen_050', 'q_gen_103'], // Proklamasi, Presiden & Wakil Presiden pertama
+  ['q_gen_010', 'q_gen_041'], // fotosintesis & klorofil
+  ['q_gen_072', 'q_gen_073'], // lambang unsur kimia
+  ['q_gen_075', 'q_gen_076'], // tulang manusia
+  ['q_gen_003', 'q_gen_069'], // selat antarpulau
+  ['q_gen_002', 'q_gen_036'], // benua & samudra terluas
+  ['q_gen_023', 'q_gen_112'], // alat musik tradisional dari bahan alam
+  ['q_gen_008', 'q_gen_038', 'q_gen_040'] // planet di tata surya
+];
+
+const RELATED_BY_ID = new Map();
+for (const group of RELATED_QUESTION_GROUPS) {
+  for (const id of group) RELATED_BY_ID.set(id, group.filter(other => other !== id));
+}
+
+function relatedQuestionIds(id) {
+  return RELATED_BY_ID.get(id) || [];
+}
+
 function validateQuestionInput(input = {}) {
   const category = String(input.category || '').trim();
   if (category !== 'general' && category !== 'math') {
@@ -1773,6 +1795,8 @@ function buildRoundQuestionPayload(question, roundNo, maxRounds, startedAt, dead
 
 module.exports = {
   SEED_QUESTIONS,
+  RELATED_QUESTION_GROUPS,
+  relatedQuestionIds,
   validateQuestionInput,
   buildRoundQuestionPayload
 };

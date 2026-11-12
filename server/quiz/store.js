@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
 const { MONSTERS, BOT_PROFILES, listMonsters, getMonster } = require('./monsters');
-const { SEED_QUESTIONS, validateQuestionInput } = require('./questions');
+const { SEED_QUESTIONS, validateQuestionInput, relatedQuestionIds } = require('./questions');
 
 const LOCAL_QUIZ_FILE = path.join(db.DATA_DIR, 'jakludo-quiz.json');
 const MAX_LOCAL_HISTORY = 200;
@@ -365,20 +365,28 @@ function pickWeighted(pool) {
  * Menyeimbangkan kategori 'general' dan 'math' secara bergantian apabila memungkinkan.
  */
 function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = null) {
-  const unused = [];
-  const unusedPreferred = [];
+  // Soal yang segrup dengan soal yang sudah keluar di match ini dihindari (lihat RELATED_QUESTION_GROUPS)
+  const related = new Set();
+  for (const id of usedIds) relatedQuestionIds(id).forEach(r => related.add(r));
 
-  for (const q of state.questions.values()) {
-    if (!q.active) continue;
-    if (usedIds.has(q.id)) continue;
-    unused.push(q);
-    if (preferredCategory && q.category === preferredCategory) {
-      unusedPreferred.push(q);
+  const pickFrom = avoidRelated => {
+    const unused = [];
+    const unusedPreferred = [];
+    for (const q of state.questions.values()) {
+      if (!q.active) continue;
+      if (usedIds.has(q.id)) continue;
+      if (avoidRelated && related.has(q.id)) continue;
+      unused.push(q);
+      if (preferredCategory && q.category === preferredCategory) {
+        unusedPreferred.push(q);
+      }
     }
-  }
+    // Utamakan kategori pilihan; bila soal kategori itu sudah habis, ambil dari kategori mana pun
+    return unusedPreferred.length > 0 ? unusedPreferred : unused;
+  };
 
-  // Utamakan kategori pilihan; bila soal kategori itu sudah habis, ambil dari kategori mana pun
-  const pool = unusedPreferred.length > 0 ? unusedPreferred : unused;
+  let pool = pickFrom(true);
+  if (pool.length === 0) pool = pickFrom(false);
   if (pool.length === 0) return null;
   const chosen = pickWeighted(pool);
   return { ...chosen, options: [...chosen.options] };

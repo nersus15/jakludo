@@ -694,3 +694,21 @@ test('Server dimatikan: pemain kuis diberi tahu dan room dihapus', async () => {
   assert.equal(quizEngine.getActiveRoomForUser(u.user.id), null);
 });
 
+test('Soal yang temanya mirip tidak muncul di pertandingan yang sama', () => {
+  const quizStore = require('./store');
+  const { RELATED_QUESTION_GROUPS } = require('./questions');
+  const allIds = quizStore.listQuestions().map(q => q.id);
+  for (const group of RELATED_QUESTION_GROUPS) {
+    const [first, ...others] = group;
+    for (let i = 0; i < 200; i++) {
+      const picked = quizStore.selectRandomUnusedQuestion(new Set([first]), 'general');
+      assert.ok(!others.includes(picked.id), `${picked.id} segrup dengan ${first}`);
+    }
+  }
+  // Bila hanya tersisa soal segrup (semua kategori), soal itu tetap boleh dipakai daripada match berhenti
+  const [a, b] = RELATED_QUESTION_GROUPS[1];
+  const used = new Set(allIds.filter(id => id !== b));
+  assert.equal(used.has(a), true);
+  assert.equal(quizStore.selectRandomUnusedQuestion(used, 'general').id, b);
+});
+

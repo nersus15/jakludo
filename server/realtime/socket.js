@@ -12,6 +12,17 @@ const { EMOJIS, MAX_CHATS } = require('../game/config');
 const chatLimiter = createLimiter({ windowMs: 5000, max: 5 });
 const reactionLimiter = createLimiter({ windowMs: 5000, max: 8 });
 const quizActionLimiter = createLimiter({ windowMs: 3000, max: 12 });
+// Aksi selama bermain (jawab, siap, hint, pilih monster, dll.). Pemain normal hanya 1–3 aksi per ronde
+// 15 detik; batas ini cukup longgar untuk itu tapi memotong spam event dari klien nakal.
+const quizPlayLimiter = createLimiter({ windowMs: 3000, max: 15 });
+const QUIZ_RATE_ERROR = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
+
+// Tolak event bila socket melewati batas; balas callback dengan error yang sama
+function allowQuiz(limiter, socket, cb) {
+  if (limiter(socket.id)) return true;
+  if (cb) cb(QUIZ_RATE_ERROR);
+  return false;
+}
 
 // Payload dari klien tidak bisa dipercaya: selalu objek, dan error di handler
 // tidak boleh menjatuhkan proses (yang akan menghapus semua room).
@@ -286,56 +297,49 @@ function registerSocketHandlers(io) {
     // ==========================================
 
     on(socket, 'quiz:room:create', (payload, cb) => {
-      if (!quizActionLimiter(socket.id)) {
-        const err = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
-        if (cb) cb(err);
-        return;
-      }
+      if (!allowQuiz(quizActionLimiter, socket, cb)) return;
       const res = quizEngine.createRoom(socket, payload, store.rooms);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:room:join', (payload, cb) => {
-      if (!quizActionLimiter(socket.id)) {
-        const err = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
-        if (cb) cb(err);
-        return;
-      }
+      if (!allowQuiz(quizActionLimiter, socket, cb)) return;
       const res = quizEngine.joinRoom(socket, payload);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:matchmaking:join', (payload, cb) => {
-      if (!quizActionLimiter(socket.id)) {
-        const err = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
-        if (cb) cb(err);
-        return;
-      }
+      if (!allowQuiz(quizActionLimiter, socket, cb)) return;
       const res = quizEngine.joinMatchmaking(socket, payload, store.rooms);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:matchmaking:leave', (payload, cb) => {
+      if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const res = quizEngine.leaveMatchmaking(socket, payload);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:monster:select', (payload, cb) => {
+      if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const res = quizEngine.selectMonster(socket, payload);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:player:ready', (payload, cb) => {
+      if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const res = quizEngine.setPlayerReady(socket, payload);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:answer:submit', (payload, cb) => {
+      if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const res = quizEngine.submitAnswer(socket, payload);
       if (cb) cb(res);
     });
 
     on(socket, 'quiz:hint:use', (payload, cb) => {
+      if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const res = quizEngine.useHint(socket, payload);
       if (cb) cb(res);
     });
@@ -346,6 +350,7 @@ function registerSocketHandlers(io) {
     });
 
     on(socket, 'quiz:leaderboard:get', (_, cb) => {
+      if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const lb = quizStore.getQuizLeaderboard();
       socket.emit('quiz:leaderboard:update', lb);
       if (cb) cb({ ok: true, leaderboard: lb });

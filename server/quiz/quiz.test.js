@@ -651,3 +651,15 @@ test('Mode 3 pemain: pemain yang keluar duluan tetap tercatat kalah saat match s
   assert.equal(quizStore.getPlayerStats(u3.user.id).matchesPlayed, 1);
 });
 
+test('Spam event kuis dari satu socket ditolak rate limiter', async () => {
+  const u = await registerUser('spam');
+  const s = await connect();
+  const results = await Promise.all(
+    Array.from({ length: 30 }, () => emitAck(s, 'quiz:answer:submit', { token: u.token, code: 'XXXXX', selectedIndex: 0 }))
+  );
+  const limited = results.filter(r => r?.error === 'Terlalu banyak aksi dalam waktu singkat.').length;
+  assert.equal(limited, 15, 'hanya 15 aksi per 3 detik yang diproses');
+  // Keluar room tetap bisa walau sedang kena batas
+  const leave = await emitAck(s, 'quiz:room:leave', { token: u.token });
+  assert.equal(leave.ok, true);
+});

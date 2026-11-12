@@ -524,3 +524,65 @@ test('Skenario 17: Pertandingan melawan bot berjalan otomatis hingga ronde dieva
   const botUserId = Object.keys(result.answers).find(id => id.startsWith('bot_'));
   assert.ok(botUserId, 'Bot harus tercatat pada hasil ronde');
 });
+
+// ---------- Anti-curang & aturan poin ----------
+
+test('Pemain tidak bisa mengeluarkan lawan dari room lewat userId palsu', async () => {
+  const u1 = await registerUser('host');
+  const u2 = await registerUser('korban');
+  const s1 = await connect();
+  const s2 = await connect();
+  const sAnon = await connect();
+
+  const createAck = await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' });
+  const code = createAck.code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+
+  // Socket tanpa login mencoba mengeluarkan korban
+  await emitAck(sAnon, 'quiz:room:leave', { code, userId: u2.user.id });
+  // Lawan yang login mencoba mengeluarkan korban: yang keluar hanya dirinya sendiri
+  await emitAck(s1, 'quiz:room:leave', { token: u1.token, code, userId: u2.user.id });
+
+  const room = quizEngine.quizRooms.get(code);
+  assert.ok(room, 'room tetap ada karena korban masih di dalam');
+  assert.deepEqual(room.players.map(p => p.userId), [u2.user.id]);
+});
+
+test('Menang karena lawan keluar (forfeit) di 1 vs 1 tidak memberi poin', async () => {
+  quizEngine.setTimings({ countdownMs: 30, questionDurationMs: 2000, roundTransitionMs: 40, maxRounds: 3 });
+  const u1 = await registerUser('bertahan');
+  const u2 = await registerUser('kabur');
+  const s1 = await connect();
+  const s2 = await connect();
+
+  const createAck = await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' });
+  const code = createAck.code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+  const startedP = once(s1, 'question.started');
+  await emitAck(s1, 'quiz:player:ready', { token: u1.token, code, ready: true });
+  await emitAck(s2, 'quiz:player:ready', { token: u2.token, code, ready: true });
+  await startedP;
+
+  const pointsBefore = db.getUserById(u1.user.id) && db.sanitizeUser(db.getUserById(u1.user.id)).points;
+  const finishedP = once(s1, 'game.finished');
+  await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
+  const finished = await finishedP;
+
+  assert.equal(finished.endReason, 'forfeit');
+  assert.equal(finished.winnerUserId, u1.user.id);
+  assert.equal(finished.rewardPoints, 0);
+  assert.equal(finished.winnerReward, null);
+  assert.equal(db.sanitizeUser(db.getUserById(u1.user.id)).points, pointsBefore);
+});
+
+test('Aturan poin bersama: minimal 2 pemain asli dan bukan forfeit', () => {
+  const { canAwardPoints } = require('../lib/rewards');
+  const human = id => ({ userId: id });
+  const bot = id => ({ userId: `bot_${id}`, isBot: true });
+  assert.equal(canAwardPoints([human('a'), bot('x')]), false, 'hanya melawan bot');
+  assert.equal(canAwardPoints([human('a'), bot('x'), bot('y')]), false);
+  assert.equal(canAwardPoints([human('a'), human('b')]), true);
+  assert.equal(canAwardPoints([human('a'), human('b'), bot('x')]), true, 'bot boleh ikut selama ada lawan asli');
+  assert.equal(canAwardPoints([human('a'), human('b')], { endReason: 'forfeit' }), false);
+  assert.equal(canAwardPoints([{ id: 'bot', isBot: true }, { id: 'p1' }, { id: 'p2' }]), true, 'format pemain Ludo');
+});

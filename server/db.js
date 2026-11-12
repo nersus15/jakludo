@@ -14,6 +14,7 @@ const {
   migrateLegacyJsonToPostgres,
   readSqliteDatabase
 } = require('./migrate');
+const { canAwardPoints } = require('./lib/rewards');
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -700,9 +701,10 @@ function ensureGlobalLeaderboardRow(client, user) {
 // Return { [playerId]: { points, dailyBonus } } untuk ditampilkan di layar hasil.
 function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() }) {
   const awards = {};
-  if (!players || players.length === 0) return awards;
+  // Aturan bersama semua game: minimal 2 pemain asli (menang hanya melawan bot tidak dapat poin),
+  // lihat server/lib/rewards.js
+  if (!canAwardPoints(players)) return awards;
   const humans = players.filter(p => !p.isBot);
-  if (humans.length < 2) return awards; // menang melawan bot tidak memberi poin
   const today = todayWib(now);
 
   const order = ranking || [winnerPlayerId, ...players.map(p => p.id).filter(id => id !== winnerPlayerId)];

@@ -1,6 +1,7 @@
 // Authoritative Multiplayer Engine untuk Monster Quiz Battle.
 // Mengelola siklus hidup room, matchmaking, pemilihan monster, timer sinkron server (15 detik),
 // evaluasi jawaban dan serangan (-10 HP), pencegahan event ganda, serta grace period disconnect 30 detik.
+const { canAwardPoints } = require('../lib/rewards');
 const crypto = require('crypto');
 const db = require('../db');
 const quizStore = require('./store');
@@ -1439,9 +1440,10 @@ function finishMatch(room, endReason = 'knockout', forcedWinnerUserId = null) {
     }
   }
 
-  const isBotWinner = winnerUserId && winnerUserId.startsWith('bot_');
-  const reward = winnerUserId && !isBotWinner ? db.awardUserPoints(winnerUserId, WIN_REWARD_POINTS) : null;
-  const rewardPoints = winnerUserId && !isBotWinner ? WIN_REWARD_POINTS : 0;
+  // Tidak ada poin jika lawannya hanya bot atau menang karena lawan keluar/terputus (anti-farming)
+  const eligible = winnerUserId && canAwardPoints(room.players, { endReason });
+  const reward = eligible ? db.awardUserPoints(winnerUserId, WIN_REWARD_POINTS) : null;
+  const rewardPoints = eligible ? WIN_REWARD_POINTS : 0;
 
   room.phase = 'finished';
   room.match.status = 'finished';
@@ -1530,8 +1532,10 @@ function closeAndDeleteRoom(room) {
 }
 
 function leaveRoom(socket, payload = {}) {
+  // Identitas hanya dari login/socket sendiri: userId dari payload diabaikan supaya pemain tidak bisa
+  // "mengeluarkan" lawan dari room.
   const user = authenticateSocketUser(socket, payload);
-  const userId = payload.userId || user?.id || socket?.data?.userId;
+  const userId = user?.id || socket?.data?.userId;
   const code = String(payload.code || socket?.data?.quizRoom || (userId ? userRoomMap.get(userId) : '') || '').toUpperCase();
 
   if (socket) {
@@ -1601,6 +1605,8 @@ function handleDisconnect(socket) {
 
   const player = room.players.find(p => p.socketId === socket.id || (userId && p.userId === userId));
   if (!player || !player.connected) return;
+  // Disconnect dari socket lama yang datang setelah pemain tersambung lagi lewat socket baru: abaikan
+  if (player.socketId && player.socketId !== socket.id) return;
 
   player.connected = false;
   const now = Date.now();

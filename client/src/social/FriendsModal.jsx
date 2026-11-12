@@ -626,6 +626,8 @@ export default function FriendsModal({
     if (isOpen) {
       setFeedback(null);
       setConfirmRemoveId('');
+      // Muat ulang daftar teman & permintaan saat dibuka, jaga-jaga event socket sempat terlewat
+      if (currentUser) actions.reloadFriends?.();
       if (initialChatFriendId) {
         setActiveFriendId(initialChatFriendId);
       }

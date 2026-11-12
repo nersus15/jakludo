@@ -268,86 +268,6 @@
   color: var(--brand-text);
 }
 
-.playgo-hero {
-  padding: var(--space-4);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
-  align-items: center;
-  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
-}
-
-@media (min-width: 768px) {
-  .playgo-hero {
-    padding: var(--space-5);
-  }
-}
-
-@media (min-width: 960px) {
-  .playgo-hero:has(.playgo-auth-box) {
-    grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
-    gap: var(--space-5);
-  }
-}
-
-.playgo-hero__main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
-  align-items: center;
-}
-
-@media (min-width: 640px) {
-  .playgo-hero__main {
-    grid-template-columns: 200px minmax(0, 1fr);
-    gap: var(--space-5);
-  }
-}
-
-.playgo-hero__logo-wrap {
-  margin: 0 auto;
-  width: min(100%, 220px);
-  padding: 8px;
-  border-radius: var(--radius-lg);
-  background: #ffffff;
-  border: 2px solid var(--ink-line);
-  box-shadow: var(--lift-1);
-}
-
-.playgo-hero__logo {
-  width: 100%;
-  height: auto;
-  border-radius: calc(var(--radius-lg) - 6px);
-  display: block;
-}
-
-.playgo-hero__copy {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.playgo-hero__title {
-  font-family: var(--font-display);
-  font-size: clamp(1.75rem, 4.5vw, 2.65rem);
-  line-height: 1.1;
-  margin: 2px 0;
-}
-
-.playgo-hero__lead {
-  color: var(--text-2);
-  max-width: 64ch;
-  font-size: var(--fs-md);
-  margin: 0;
-}
-
-.playgo-hero__badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-
 .playgo-auth-box {
   padding: var(--space-4);
   border-radius: var(--radius-md);
@@ -437,14 +357,6 @@
 
 .playgo-game-card__pawns {
   margin: 0;
-}
-
-.playgo-game-card__monsters {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  width: 100%;
 }
 
 .playgo-game-card__body {

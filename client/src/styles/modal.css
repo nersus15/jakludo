@@ -208,8 +208,7 @@
   min-width: 0;
 }
 
-.feature-page__body .group-chat__messages,
-.feature-page__body .dm-chat__messages {
+.feature-page__body .group-chat__messages {
   max-height: 56dvh;
 }
 

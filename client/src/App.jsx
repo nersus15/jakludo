@@ -25,6 +25,7 @@ import { usePwaInstall } from './hooks/usePwaInstall';
 import { useItemCatalog } from './items';
 import { sound } from './sound';
 import { applySeo, gameModeUrl, getInitialGameModeFromUrl } from './seo';
+import { runBackHandler } from './backHandlers';
 
 // Dialog yang jarang dibuka dimuat terpisah agar bundle awal lebih kecil.
 // Diunduh di belakang layar saat browser senggang, jadi tetap langsung muncul saat dibuka.
@@ -177,6 +178,11 @@ export default function App() {
         window.history.pushState({ playgo: true, mode: cur.mode, modal: cur.modal, back: st }, '', url);
       if (r.profileOpen) {
         r.closeProfile();
+        restore(r.currentUrl);
+        return;
+      }
+      // Layar bertingkat di dalam halaman (chat teman, detail grup) kembali ke daftarnya dulu
+      if (runBackHandler()) {
         restore(r.currentUrl);
         return;
       }

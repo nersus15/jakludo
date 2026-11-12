@@ -9,6 +9,7 @@ import {
   useSocialChatReply
 } from '../social/ChatReplyParts';
 import { sound } from '../sound';
+import { useBackHandler } from '../backHandlers';
 import {
   compressImage,
   isAvatarUrl,
@@ -1356,6 +1357,7 @@ export default function GroupsScreen({
     setGroupDetail(null);
     setFeedback(typeof notice === 'string' && notice ? { type: 'success', text: notice } : null);
   };
+  useBackHandler(isOpen && !!activeGroupId, () => backToList());
 
   const handleCreateGroup = async e => {
     e.preventDefault();

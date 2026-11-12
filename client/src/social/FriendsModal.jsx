@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
+import { useBackHandler } from '../backHandlers';
 import Icon from '../components/Icon';
 import VoiceNotePlayer, { formatDuration } from './VoiceNotePlayer';
 import {
@@ -615,6 +616,7 @@ export default function FriendsModal({
   const [confirmRemoveId, setConfirmRemoveId] = useState('');
   const [activeFriendId, setActiveFriendId] = useState(initialChatFriendId || '');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  useBackHandler(isOpen && !!activeFriendId, () => setActiveFriendId(''));
 
   const avatarInputRef = useRef(null);
 

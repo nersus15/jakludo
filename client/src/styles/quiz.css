@@ -881,7 +881,7 @@
   .mq-vs-emblem {
     width: 32px;
     height: 32px;
-    font-size: 11px;
+    font-size: 12px;
     border-width: 2px;
   }
 
@@ -896,13 +896,17 @@
     min-height: 82px;
   }
 
+  /* Kartu sempit: identitas memakai lebar penuh, status turun ke baris sendiri.
+     Font minimal 11px supaya tetap terbaca di HP. */
   .mq-fighter__header {
+    flex-direction: column;
+    align-items: flex-start;
     gap: 4px;
-    flex-wrap: nowrap;
   }
 
   .mq-fighter__identity {
     gap: 5px;
+    width: 100%;
   }
 
   .mq-fighter__identity .avatar {
@@ -914,7 +918,7 @@
   }
 
   .mq-fighter__player {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 800;
   }
 
@@ -924,20 +928,20 @@
   }
 
   .mq-fighter__monster-name {
-    font-size: 9.5px;
+    font-size: 11px;
   }
 
   .mq-element-tag {
-    font-size: 8px;
-    padding: 1px 4px;
-    line-height: 1.2;
+    font-size: 11px;
+    padding: 0 5px;
+    line-height: 1.3;
     border-width: 1px;
   }
 
   .mq-fighter__badge {
-    font-size: 9px;
-    padding: 1px 5px;
-    line-height: 1.25;
+    font-size: 11px;
+    padding: 1px 6px;
+    line-height: 1.3;
     border-radius: var(--radius-pill);
   }
 
@@ -945,22 +949,25 @@
     gap: 2px;
   }
 
-  .mq-hp__top {
-    font-size: 10px;
+  .mq-hp__top,
+  .mq-hp__label,
+  .mq-hp__val {
+    font-size: 12px;
   }
 
   .mq-hp__label {
     gap: 3px;
-    font-size: 10px;
+  }
+
+  /* Ikon hati dan angka sudah cukup jelas; label "Darah" dan "/ 100" disembunyikan di HP */
+  .mq-hp__label > span,
+  .mq-hp__max {
+    display: none;
   }
 
   .mq-hp__label svg {
-    width: 11px;
-    height: 11px;
-  }
-
-  .mq-hp__val {
-    font-size: 10px;
+    width: 12px;
+    height: 12px;
   }
 
   .mq-hp__track {
@@ -986,7 +993,7 @@
   }
 
   .mq-arena--three .mq-fighter__card {
-    padding: 5px;
+    padding: 5px 6px;
     min-height: 76px;
   }
 
@@ -994,33 +1001,20 @@
     width: 20px;
     height: 20px;
     min-width: 20px;
-    font-size: 0.65rem;
+    font-size: 0.7rem;
   }
 
   .mq-arena--three .mq-fighter__player {
-    font-size: 9.5px;
+    font-size: 11px;
   }
 
-  .mq-arena--three .mq-fighter__monster-name {
-    font-size: 8.5px;
-  }
-
+  /* Tiga kolom terlalu sempit untuk chip elemen; elemen sudah terlihat dari monsternya */
   .mq-arena--three .mq-element-tag {
-    font-size: 7.5px;
-    padding: 0 3px;
+    display: none;
   }
 
   .mq-arena--three .mq-fighter__badge {
-    font-size: 8px;
-    padding: 1px 3px;
-  }
-
-  .mq-arena--three .mq-hp__top {
-    font-size: 9px;
-  }
-
-  .mq-arena--three .mq-hp__label {
-    font-size: 9px;
+    padding: 1px 5px;
   }
 
   .mq-arena--three .mq-hp__track {

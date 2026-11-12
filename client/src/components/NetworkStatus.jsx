@@ -29,7 +29,7 @@ export function ReconnectBar({ isConnected, isReconnecting }) {
     <div className="reconnect-bar" role="status">
       <span className="spinner" aria-hidden="true" />
       <span>
-        <strong>Koneksi terputus.</strong> Menyambungkan ulang ke server JakLudo...
+        <strong>Koneksi terputus.</strong> Menyambungkan ulang ke server PlayGo...
       </span>
     </div>
   );

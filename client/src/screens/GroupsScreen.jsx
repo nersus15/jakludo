@@ -1469,7 +1469,7 @@ export default function GroupsScreen({
     >
       {!currentUser ? (
         <div className="state-msg">
-          <p>Masuk atau daftar akun JakLudo dulu untuk bergabung ke grup dan chat bersama teman.</p>
+          <p>Masuk atau daftar akun PlayGo dulu untuk bergabung ke grup dan chat bersama teman.</p>
           <button
             type="button"
             className="btn btn--primary"

@@ -254,7 +254,7 @@ export default function HomeScreen({
                 <div>
                   <strong>Monster Quiz Battle · Pertandingan aktif</strong>
                   <p className="muted">
-                    Room <span className="code-text">{activeQuizRoom.code}</span> · Mode 1 vs 1 RPG Trivia
+                    Room <span className="code-text">{activeQuizRoom.code}</span> · Duel kuis 2–3 pemain
                   </p>
                 </div>
               </div>
@@ -271,11 +271,11 @@ export default function HomeScreen({
         <div className="playgo-catalog__head">
           <div>
             <span className="playgo-eyebrow">KOLEKSI GAME PLAYGO</span>
-            <h2 className="playgo-catalog__title">
+            <h1 className="playgo-catalog__title">
               {user ? 'Pilih Game untuk Dimainkan' : 'Daftar Game di PlayGo'}
-            </h2>
+            </h1>
           </div>
-          <span className="muted">Klik salah satu game untuk masuk ke ruang permainan</span>
+          <span className="muted">Pilih salah satu game untuk mulai bermain</span>
         </div>
 
         <div className="playgo-games-grid">
@@ -298,7 +298,7 @@ export default function HomeScreen({
               <div className="playgo-game-card__tags">
                 <span className="badge badge--brand">Board Game</span>
                 <span className="badge">2–4 Pemain</span>
-                <span className="badge badge--success">Part of PlayGo</span>
+                <span className="badge badge--success">Game PlayGo</span>
               </div>
 
               <h3 className="playgo-game-card__name">JakLudo</h3>
@@ -344,7 +344,7 @@ export default function HomeScreen({
               <div className="playgo-game-card__tags">
                 <span className="badge badge--brand">RPG Trivia</span>
                 <span className="badge">2–3 Pemain (Maks 3 Orang)</span>
-                <span className="badge badge--success">Part of PlayGo</span>
+                <span className="badge badge--success">Game PlayGo</span>
               </div>
 
               <h3 className="playgo-game-card__name">Monster Quiz Battle</h3>

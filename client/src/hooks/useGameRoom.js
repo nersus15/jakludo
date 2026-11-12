@@ -266,7 +266,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
 
   const requireLogin = () => {
     if (currentUser) return true;
-    showError('Masuk atau daftar akun JakLudo dulu untuk bermain.');
+    showError('Masuk atau daftar akun PlayGo dulu untuk bermain.');
     onNeedLogin?.();
     return false;
   };

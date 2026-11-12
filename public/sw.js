@@ -1,10 +1,11 @@
-const CACHE_NAME = 'jakludo-pwa-v5';
+const CACHE_NAME = 'jakludo-pwa-v6';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/apple-touch-icon.png',
+  '/playgo-logo.jpg',
   '/jakludo-logo.jpg',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

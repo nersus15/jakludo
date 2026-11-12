@@ -735,7 +735,7 @@ export default function FriendsModal({
     >
       {!currentUser ? (
         <div className="state-msg">
-          <p>Masuk atau daftar akun JakLudo dulu untuk memakai fitur pertemanan dan chat private.</p>
+          <p>Masuk atau daftar akun PlayGo dulu untuk memakai fitur pertemanan dan chat private.</p>
           <button
             type="button"
             className="btn btn--primary"

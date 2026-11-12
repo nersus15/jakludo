@@ -15,30 +15,76 @@ function hpTone(hp) {
 }
 
 function formatPlayerRoundStatus(player, phase, roundResult) {
-  if (!player) return { label: 'Menunggu lawan...', tone: 'muted' };
-  if (!player.connected) return { label: 'Terputus (30d)...', tone: 'danger' };
+  if (!player) return { label: 'Menunggu lawan...', shortLabel: 'Menunggu', tone: 'muted' };
+  if (!player.connected) return { label: 'Terputus (30d)...', shortLabel: 'Offline', tone: 'danger' };
 
   if (phase === 'round_result' && roundResult?.answers?.[player.userId]) {
     const ans = roundResult.answers[player.userId];
-    if (ans.timedOut) return { label: 'Waktu Habis', tone: 'danger' };
-    if (ans.isCorrect) return { label: 'Benar!', tone: 'success' };
-    return { label: 'Salah', tone: 'danger' };
+    if (ans.timedOut) return { label: 'Waktu Habis', shortLabel: 'Waktu Habis', tone: 'danger' };
+    if (ans.isCorrect) return { label: 'Benar!', shortLabel: 'Benar!', tone: 'success' };
+    return { label: 'Salah', shortLabel: 'Salah', tone: 'danger' };
   }
 
   if (phase === 'question') {
     if (player.answeredCurrentRound) {
-      return { label: 'Sudah Menjawab', tone: 'info' };
+      return { label: 'Sudah Menjawab', shortLabel: 'Terjawab', tone: 'info' };
     }
-    return { label: 'Menjawab...', tone: 'warning' };
+    return { label: 'Menjawab...', shortLabel: 'Menjawab', tone: 'warning' };
   }
 
   if (phase === 'lobby') {
     return player.ready
-      ? { label: 'Siap Bertarung', tone: 'success' }
-      : { label: 'Memilih Monster', tone: 'muted' };
+      ? { label: 'Siap Bertarung', shortLabel: 'Siap', tone: 'success' }
+      : { label: 'Memilih Monster', shortLabel: 'Memilih', tone: 'muted' };
   }
 
-  return { label: 'Siaga', tone: 'muted' };
+  return { label: 'Siaga', shortLabel: 'Siaga', tone: 'muted' };
+}
+
+function FighterLifeCard({ player, monster, status, isCurrentUser, hp }) {
+  const currentHp = hp ?? 100;
+  return (
+    <div className="mq-fighter__card">
+      <div className="mq-fighter__header">
+        <div className="mq-fighter__identity">
+          {player && <PlayerAvatar player={player} size={28} />}
+          <div className="mq-fighter__meta">
+            <strong className="mq-fighter__player" title={player?.name}>
+              {player?.name || 'Pemain'} {isCurrentUser ? '(Kamu)' : ''}
+            </strong>
+            <div className="mq-fighter__monster-row">
+              <span className="mq-fighter__monster-name">{monster.name}</span>
+              <span className={`mq-element-tag mq-element-tag--${monster.element}`}>
+                {monster.elementLabel}
+              </span>
+            </div>
+          </div>
+        </div>
+        <span className={`badge badge--${status.tone} mq-fighter__badge`}>
+          <span className="mq-badge-full">{status.label}</span>
+          <span className="mq-badge-short">{status.shortLabel || status.label}</span>
+        </span>
+      </div>
+
+      <div className="mq-hp" role="progressbar" aria-valuenow={currentHp} aria-valuemin={0} aria-valuemax={100}>
+        <div className="mq-hp__top">
+          <span className="mq-hp__label">
+            <Icon name="heart" size={13} />
+            <span>Darah</span>
+          </span>
+          <strong className="mq-hp__val">
+            {currentHp} <span className="mq-hp__max">/ 100</span>
+          </strong>
+        </div>
+        <div className="mq-hp__track">
+          <div
+            className={`mq-hp__fill mq-hp__fill--${hpTone(currentHp)}`}
+            style={{ width: `${Math.max(0, Math.min(100, currentHp))}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function buildRoundBannerText(roundResult, players = []) {
@@ -681,38 +727,13 @@ export default function MonsterQuizScreen({
       >
         {/* Petarung Kiri (Pemain 1 - Slot 0) */}
         <div className={`mq-fighter mq-fighter--left ${slotAnim[0] === 'hurt' ? 'mq-fighter--shake' : ''}`}>
-          <div className="mq-fighter__card">
-            <div className="mq-fighter__header">
-              <div className="mq-fighter__identity">
-                {p0 && <PlayerAvatar player={p0} size={32} />}
-                <div>
-                  <strong className="mq-fighter__player">
-                    {p0?.name || 'Pemain 1'} {p0?.userId === currentUser?.id ? '(Kamu)' : ''}
-                  </strong>
-                  <div className="mq-fighter__monster-row">
-                    <span className="mq-fighter__monster-name">{monster0.name}</span>
-                    <span className={`mq-element-tag mq-element-tag--${monster0.element}`}>
-                      {monster0.elementLabel}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <span className={`badge badge--${status0.tone}`}>{status0.label}</span>
-            </div>
-
-            <div className="mq-hp" role="progressbar" aria-valuenow={p0?.hp ?? 100} aria-valuemin={0} aria-valuemax={100}>
-              <div className="mq-hp__top">
-                <span>HP</span>
-                <strong>{p0?.hp ?? 100} / 100</strong>
-              </div>
-              <div className="mq-hp__track">
-                <div
-                  className={`mq-hp__fill mq-hp__fill--${hpTone(p0?.hp ?? 100)}`}
-                  style={{ width: `${Math.max(0, Math.min(100, p0?.hp ?? 100))}%` }}
-                />
-              </div>
-            </div>
-          </div>
+          <FighterLifeCard
+            player={p0}
+            monster={monster0}
+            status={status0}
+            isCurrentUser={p0?.userId === currentUser?.id}
+            hp={p0?.hp}
+          />
 
           <div className="mq-fighter__stage">
             {isSlotDamaged(0) && (
@@ -729,45 +750,22 @@ export default function MonsterQuizScreen({
           </div>
         </div>
 
-        {/* Ornamen Tengah Arena */}
-        <div className="mq-arena__center" aria-hidden="true">
-          <div className="mq-vs-emblem">VS</div>
-        </div>
+        {/* Ornamen Tengah Arena (hanya ditampilkan di mode 1 lawan 1) */}
+        {!p2 && (
+          <div className="mq-arena__center" aria-hidden="true">
+            <div className="mq-vs-emblem">VS</div>
+          </div>
+        )}
 
         {/* Petarung Kanan (Pemain 2 - Slot 1) */}
         <div className={`mq-fighter mq-fighter--right ${slotAnim[1] === 'hurt' ? 'mq-fighter--shake' : ''}`}>
-          <div className="mq-fighter__card">
-            <div className="mq-fighter__header">
-              <div className="mq-fighter__identity">
-                {p1 && <PlayerAvatar player={p1} size={32} />}
-                <div>
-                  <strong className="mq-fighter__player">
-                    {p1?.name || 'Pemain 2'} {p1?.userId === currentUser?.id ? '(Kamu)' : ''}
-                  </strong>
-                  <div className="mq-fighter__monster-row">
-                    <span className="mq-fighter__monster-name">{monster1.name}</span>
-                    <span className={`mq-element-tag mq-element-tag--${monster1.element}`}>
-                      {monster1.elementLabel}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <span className={`badge badge--${status1.tone}`}>{status1.label}</span>
-            </div>
-
-            <div className="mq-hp" role="progressbar" aria-valuenow={p1?.hp ?? 100} aria-valuemin={0} aria-valuemax={100}>
-              <div className="mq-hp__top">
-                <span>HP</span>
-                <strong>{p1?.hp ?? 100} / 100</strong>
-              </div>
-              <div className="mq-hp__track">
-                <div
-                  className={`mq-hp__fill mq-hp__fill--${hpTone(p1?.hp ?? 100)}`}
-                  style={{ width: `${Math.max(0, Math.min(100, p1?.hp ?? 100))}%` }}
-                />
-              </div>
-            </div>
-          </div>
+          <FighterLifeCard
+            player={p1}
+            monster={monster1}
+            status={status1}
+            isCurrentUser={p1?.userId === currentUser?.id}
+            hp={p1?.hp}
+          />
 
           <div className="mq-fighter__stage">
             {isSlotDamaged(1) && (
@@ -787,38 +785,13 @@ export default function MonsterQuizScreen({
         {/* Petarung Ketiga (Pemain 3 - Slot 2, bila room berisi 3 orang) */}
         {p2 && monster2 && status2 && (
           <div className={`mq-fighter mq-fighter--third ${slotAnim[2] === 'hurt' ? 'mq-fighter--shake' : ''}`}>
-            <div className="mq-fighter__card">
-              <div className="mq-fighter__header">
-                <div className="mq-fighter__identity">
-                  <PlayerAvatar player={p2} size={32} />
-                  <div>
-                    <strong className="mq-fighter__player">
-                      {p2.name} {p2.userId === currentUser?.id ? '(Kamu)' : ''}
-                    </strong>
-                    <div className="mq-fighter__monster-row">
-                      <span className="mq-fighter__monster-name">{monster2.name}</span>
-                      <span className={`mq-element-tag mq-element-tag--${monster2.element}`}>
-                        {monster2.elementLabel}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <span className={`badge badge--${status2.tone}`}>{status2.label}</span>
-              </div>
-
-              <div className="mq-hp" role="progressbar" aria-valuenow={p2.hp ?? 100} aria-valuemin={0} aria-valuemax={100}>
-                <div className="mq-hp__top">
-                  <span>HP</span>
-                  <strong>{p2.hp ?? 100} / 100</strong>
-                </div>
-                <div className="mq-hp__track">
-                  <div
-                    className={`mq-hp__fill mq-hp__fill--${hpTone(p2.hp ?? 100)}`}
-                    style={{ width: `${Math.max(0, Math.min(100, p2.hp ?? 100))}%` }}
-                  />
-                </div>
-              </div>
-            </div>
+            <FighterLifeCard
+              player={p2}
+              monster={monster2}
+              status={status2}
+              isCurrentUser={p2?.userId === currentUser?.id}
+              hp={p2?.hp}
+            />
 
             <div className="mq-fighter__stage">
               {isSlotDamaged(2) && (

@@ -636,21 +636,16 @@
 }
 
 .mq-arena--three {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.mq-arena--three .mq-arena__center {
+  display: none;
 }
 
 .mq-arena--three .mq-fighter--third {
-  grid-column: 1 / -1;
-}
-
-@media (min-width: 860px) {
-  .mq-arena--three {
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .mq-arena--three .mq-fighter--third {
-    grid-column: auto;
-  }
+  grid-column: auto;
 }
 
 .mq-arena__center {
@@ -666,6 +661,7 @@
   justify-content: space-between;
   gap: var(--space-2);
   min-width: 0;
+  height: 100%;
 }
 
 @media (min-width: 768px) {
@@ -680,9 +676,12 @@
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   box-shadow: var(--lift-1);
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   gap: var(--space-2);
   min-width: 0;
+  width: 100%;
 }
 
 @media (min-width: 768px) {
@@ -693,10 +692,10 @@
 
 .mq-fighter__header {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+  min-width: 0;
 }
 
 .mq-fighter__identity {
@@ -704,12 +703,17 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  flex: 1 1 120px;
+  flex: 1;
 }
 
-.mq-fighter__identity > div {
+.mq-fighter__identity .avatar {
+  flex-shrink: 0;
+}
+
+.mq-fighter__meta {
   min-width: 0;
   flex: 1;
+  line-height: 1.2;
 }
 
 .mq-fighter__player {
@@ -723,8 +727,8 @@
 .mq-fighter__monster-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
   margin-top: 2px;
 }
 
@@ -732,6 +736,10 @@
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--fs-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 @media (min-width: 640px) {
@@ -740,18 +748,63 @@
   }
 }
 
-/* HP Bar */
+.mq-fighter__badge {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.mq-badge-full {
+  display: inline;
+}
+
+.mq-badge-short {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .mq-badge-full {
+    display: none;
+  }
+
+  .mq-badge-short {
+    display: inline;
+  }
+}
+
+/* HP / Darah Bar */
 .mq-hp {
   display: grid;
   gap: 4px;
+  margin-top: auto;
 }
 
 .mq-hp__top {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   font-size: var(--fs-xs);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.mq-hp__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.mq-hp__val {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.mq-hp__max {
+  color: var(--text-3);
+  font-weight: 600;
+  font-size: 0.9em;
 }
 
 .mq-hp__track {
@@ -760,6 +813,8 @@
   background: var(--surface-3);
   border: 2px solid var(--ink-line);
   overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 @media (min-width: 640px) {
@@ -774,9 +829,26 @@
   transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
 }
 
-.mq-hp__fill--high { background: var(--p-green); }
-.mq-hp__fill--mid { background: var(--p-yellow); }
-.mq-hp__fill--low { background: var(--p-red); }
+.mq-hp__fill--high {
+  background: linear-gradient(180deg, #4ade80, #16a34a);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.35);
+}
+
+.mq-hp__fill--mid {
+  background: linear-gradient(180deg, #fde047, #ca8a04);
+  box-shadow: 0 0 6px rgba(234, 179, 8, 0.35);
+}
+
+.mq-hp__fill--low {
+  background: linear-gradient(180deg, #f87171, #dc2626);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.45);
+  animation: mq-pulse-low 1.2s infinite ease-in-out;
+}
+
+@keyframes mq-pulse-low {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
 
 .mq-fighter__stage {
   position: relative;
@@ -797,6 +869,169 @@
 .mq-arena .mq-sprite {
   width: clamp(92px, 23vw, 156px);
   height: clamp(92px, 23vw, 156px);
+}
+
+/* Penyesuaian khusus tampilan mobile untuk Arena & Kartu Darah Pemain */
+@media (max-width: 767px) {
+  .mq-arena {
+    padding: var(--space-2);
+    gap: 6px;
+  }
+
+  .mq-vs-emblem {
+    width: 32px;
+    height: 32px;
+    font-size: 11px;
+    border-width: 2px;
+  }
+
+  .mq-fighter {
+    gap: var(--space-1);
+  }
+
+  .mq-fighter__card {
+    padding: 6px 8px;
+    gap: 4px;
+    border-radius: var(--radius-sm);
+    min-height: 82px;
+  }
+
+  .mq-fighter__header {
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+
+  .mq-fighter__identity {
+    gap: 5px;
+  }
+
+  .mq-fighter__identity .avatar {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    font-size: 0.75rem;
+    border-width: 1.5px;
+  }
+
+  .mq-fighter__player {
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .mq-fighter__monster-row {
+    gap: 4px;
+    margin-top: 1px;
+  }
+
+  .mq-fighter__monster-name {
+    font-size: 9.5px;
+  }
+
+  .mq-element-tag {
+    font-size: 8px;
+    padding: 1px 4px;
+    line-height: 1.2;
+    border-width: 1px;
+  }
+
+  .mq-fighter__badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    line-height: 1.25;
+    border-radius: var(--radius-pill);
+  }
+
+  .mq-hp {
+    gap: 2px;
+  }
+
+  .mq-hp__top {
+    font-size: 10px;
+  }
+
+  .mq-hp__label {
+    gap: 3px;
+    font-size: 10px;
+  }
+
+  .mq-hp__label svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .mq-hp__val {
+    font-size: 10px;
+  }
+
+  .mq-hp__track {
+    height: 8px;
+    border-width: 1.5px;
+  }
+
+  .mq-fighter__stage {
+    min-height: 84px;
+    padding: 2px 0;
+  }
+
+  .mq-arena .mq-sprite {
+    width: clamp(74px, 18vw, 110px);
+    height: clamp(74px, 18vw, 110px);
+  }
+
+  /* Arena 3 pemain di HP: tata letak 3 kolom sejajar proporsional */
+  .mq-arena--three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .mq-arena--three .mq-fighter__card {
+    padding: 5px;
+    min-height: 76px;
+  }
+
+  .mq-arena--three .mq-fighter__identity .avatar {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    font-size: 0.65rem;
+  }
+
+  .mq-arena--three .mq-fighter__player {
+    font-size: 9.5px;
+  }
+
+  .mq-arena--three .mq-fighter__monster-name {
+    font-size: 8.5px;
+  }
+
+  .mq-arena--three .mq-element-tag {
+    font-size: 7.5px;
+    padding: 0 3px;
+  }
+
+  .mq-arena--three .mq-fighter__badge {
+    font-size: 8px;
+    padding: 1px 3px;
+  }
+
+  .mq-arena--three .mq-hp__top {
+    font-size: 9px;
+  }
+
+  .mq-arena--three .mq-hp__label {
+    font-size: 9px;
+  }
+
+  .mq-arena--three .mq-hp__track {
+    height: 7px;
+  }
+
+  .mq-arena--three .mq-arena .mq-sprite,
+  .mq-arena--three .mq-sprite {
+    width: clamp(60px, 15vw, 90px);
+    height: clamp(60px, 15vw, 90px);
+  }
 }
 
 /* Floating -10 HP Damage Number */

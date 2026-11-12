@@ -6,21 +6,24 @@ import { isAvatarUrl } from '../social/media';
 export default function PlayerAvatar({
   avatar,
   name = '',
+  player = null,
   size = 36,
   className = 'avatar',
   imgClassName = 'avatar--img',
   fallback = null
 }) {
+  const actualAvatar = avatar ?? player?.avatar;
+  const actualName = name || player?.name || '';
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setFailed(false);
-  }, [avatar]);
+  }, [actualAvatar]);
 
-  if (isAvatarUrl(avatar) && !failed) {
+  if (isAvatarUrl(actualAvatar) && !failed) {
     return (
       <img
-        src={avatar}
+        src={actualAvatar}
         alt=""
         width={size}
         height={size}
@@ -32,7 +35,7 @@ export default function PlayerAvatar({
 
   return (
     <span className={className} aria-hidden="true">
-      {fallback ?? (name ? name.slice(0, 1).toUpperCase() : <Icon name="pawn" size={Math.round(size * 0.45)} />)}
+      {fallback ?? (actualName ? actualName.slice(0, 1).toUpperCase() : <Icon name="pawn" size={Math.round(size * 0.45)} />)}
     </span>
   );
 }

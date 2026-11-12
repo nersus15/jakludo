@@ -36,6 +36,7 @@ const EMOJI_TO_ICON = {
   '🔄': 'extra-turn',
   '💥': 'force-return',
   '💡': 'bulb',
+  '❤️': 'heart',
   '✏️': 'edit',
   '🚪': 'logout'
 };
@@ -225,6 +226,16 @@ export default function Icon({ name, size = 20, className = '', label }) {
         <svg {...common}>
           <rect x="9" y="3" width="6" height="11" rx="3" fill="var(--brand-soft)" />
           <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+        </svg>
+      );
+
+    case 'heart':
+      return (
+        <svg {...common}>
+          <path
+            d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"
+            fill="var(--danger-soft)"
+          />
         </svg>
       );
 

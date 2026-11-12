@@ -20,6 +20,7 @@ const EMOJI_TO_ICON = {
   '🎙️': 'mic',
   '📲': 'install',
   '🛡️': 'shield',
+  '🔰': 'shield-universal',
   '⚡': 'bolt',
   '🕳️': 'vortex',
   '📊': 'chart',
@@ -267,6 +268,18 @@ export default function Icon({ name, size = 20, className = '', label }) {
         <svg {...common}>
           <rect x="6" y="2.5" width="12" height="19" rx="2.5" fill="var(--brand-soft)" />
           <path d="M12 8v6M9.5 11.5 12 14l2.5-2.5M10 18h4" />
+        </svg>
+      );
+
+    case 'shield-universal':
+      // Perisai serbaguna (Universal Shield): bintang menandakan melindungi dari semua serangan
+      return (
+        <svg {...common}>
+          <path
+            d="M12 3 4.5 6v5.5c0 5 3.2 8.5 7.5 9.5 4.3-1 7.5-4.5 7.5-9.5V6L12 3Z"
+            fill="var(--brand-soft)"
+          />
+          <path d="m12 7.8 1.25 2.55 2.8.4-2.03 1.98.48 2.8L12 14.2l-2.5 1.33.48-2.8-2.03-1.98 2.8-.4L12 7.8Z" />
         </svg>
       );
 

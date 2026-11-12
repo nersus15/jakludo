@@ -830,6 +830,7 @@ function startMatchCountdown(room) {
     winnerUserId: null,
     endReason: null,
     usedQuestionIds: new Set(),
+    departedPlayers: [], // pemain yang keluar/terputus di tengah match (tetap dicatat kalah)
     mathCount: 0,
     targetMathCount,
     currentRound: null,
@@ -1413,6 +1414,17 @@ function resolveCurrentRound(room, triggerReason = 'both_answered') {
   }, timings.roundTransitionMs);
 }
 
+// Pemain yang keluar atau terputus di tengah pertandingan: HP jadi 0 dan tetap dicatat kalah saat
+// pertandingan selesai, walaupun sudah dihapus dari room (mis. di mode 3 pemain match masih lanjut).
+function markPlayerDeparted(room, player) {
+  player.hp = 0;
+  player.forfeited = true;
+  const departed = room.match?.departedPlayers;
+  if (departed && !departed.some(d => d.userId === player.userId)) {
+    departed.push({ ...player, disconnectTimer: null });
+  }
+}
+
 function finishMatch(room, endReason = 'knockout', forcedWinnerUserId = null) {
   if (!room || !room.match || room.match.finished) return;
   room.match.finished = true;
@@ -1457,6 +1469,11 @@ function finishMatch(room, endReason = 'knockout', forcedWinnerUserId = null) {
     p.ready = false;
   }
 
+  // Semua peserta match, termasuk yang sudah keluar lebih dulu
+  const participants = room.players.concat(
+    (room.match.departedPlayers || []).filter(d => !room.players.some(p => p.userId === d.userId))
+  );
+
   quizStore.recordRoomStatus({ roomId: room.id, status: 'open' });
   const matchRecord = quizStore.recordMatchFinished({
     matchId: room.match.id,
@@ -1467,11 +1484,11 @@ function finishMatch(room, endReason = 'knockout', forcedWinnerUserId = null) {
     roundsPlayed: room.match.roundNo,
     startedAt: room.match.startedAt,
     finishedAt: now,
-    players: room.players
+    players: participants
   });
 
   const statsByUser = {};
-  for (const p of room.players) {
+  for (const p of participants) {
     statsByUser[p.userId] = quizStore.getPlayerStats(p.userId);
   }
 
@@ -1493,7 +1510,7 @@ function finishMatch(room, endReason = 'knockout', forcedWinnerUserId = null) {
     startedAt: room.match.startedAt,
     finishedAt: now,
     players: matchRecord.players.map(mp => {
-      const rp = room.players.find(p => p.userId === mp.userId);
+      const rp = participants.find(p => p.userId === mp.userId);
       const monster = getMonster(mp.monsterId);
       return {
         ...mp,
@@ -1558,7 +1575,7 @@ function leaveRoom(socket, payload = {}) {
   // Jika keluar secara sengaja saat pertandingan sedang berjalan:
   if (room.match && !room.match.finished && (room.phase === 'countdown' || room.phase === 'question' || room.phase === 'round_result')) {
     player.connected = false;
-    player.hp = 0;
+    markPlayerDeparted(room, player);
     const aliveConnected = room.players.filter(p => p.userId !== userId && p.connected && p.hp > 0);
     if (aliveConnected.length <= 1) {
       finishMatch(room, 'forfeit', aliveConnected[0] ? aliveConnected[0].userId : null);
@@ -1634,7 +1651,7 @@ function handleDisconnect(socket) {
 
     // Setelah grace period 30 detik berakhir dan pemain belum kembali:
     if (room.match && !room.match.finished && (room.phase === 'countdown' || room.phase === 'question' || room.phase === 'round_result')) {
-      player.hp = 0;
+      markPlayerDeparted(room, player);
       const aliveConnected = room.players.filter(p => p.userId !== player.userId && p.connected && p.hp > 0);
       if (aliveConnected.length <= 1) {
         finishMatch(room, 'forfeit', aliveConnected[0] ? aliveConnected[0].userId : null);

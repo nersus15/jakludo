@@ -620,3 +620,34 @@ test('Rotasi soal: soal yang sudah muncul jarang keluar lagi dan siklus di-reset
   assert.ok(general().every(q => q.shownCount >= 1));
 });
 
+test('Mode 3 pemain: pemain yang keluar duluan tetap tercatat kalah saat match selesai', async () => {
+  quizEngine.setTimings({ countdownMs: 30, questionDurationMs: 2000, roundTransitionMs: 40, maxRounds: 3 });
+  const quizStore = require('./store');
+  const [u1, u2, u3] = [await registerUser('tiga_a'), await registerUser('tiga_b'), await registerUser('tiga_c')];
+  const [s1, s2, s3] = [await connect(), await connect(), await connect()];
+
+  const code = (await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' })).code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+  await emitAck(s3, 'quiz:room:join', { token: u3.token, code, monsterId: 'terragon' });
+  const startedP = once(s1, 'question.started');
+  for (const [s, u] of [[s1, u1], [s2, u2], [s3, u3]]) {
+    await emitAck(s, 'quiz:player:ready', { token: u.token, code, ready: true });
+  }
+  await startedP;
+
+  // Pemain ketiga kabur: match masih lanjut antara dua pemain lain
+  await emitAck(s3, 'quiz:room:leave', { token: u3.token, code });
+  assert.equal(quizEngine.quizRooms.get(code).match.finished, false);
+
+  const finishedP = once(s1, 'game.finished');
+  await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
+  const finished = await finishedP;
+
+  assert.equal(finished.winnerUserId, u1.user.id);
+  const result = id => finished.players.find(p => p.userId === id)?.result;
+  assert.equal(result(u3.user.id), 'lose', 'pemain yang keluar duluan ikut tercatat');
+  assert.equal(result(u2.user.id), 'lose');
+  assert.equal(quizStore.getPlayerStats(u3.user.id).losses, 1);
+  assert.equal(quizStore.getPlayerStats(u3.user.id).matchesPlayed, 1);
+});
+

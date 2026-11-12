@@ -557,7 +557,10 @@ function recordMatchFinished({
 }) {
   const summaryPlayers = players.map(p => {
     let result = 'draw';
-    if (winnerUserId) {
+    if (p.forfeited) {
+      // Keluar/terputus di tengah match selalu dihitung kalah, walaupun hasil akhirnya seri
+      result = 'lose';
+    } else if (winnerUserId) {
       result = p.userId === winnerUserId ? 'win' : 'lose';
     }
     return {

@@ -1,9 +1,9 @@
-// Entry point server JakLudo: menyambungkan HTTP, Socket.IO, dan state permainan.
+// Entry point server PlayGo: menyambungkan HTTP, Socket.IO, dan state permainan (JakLudo & Monster Quiz).
 //   server/http/routes.js     REST API
 //   server/realtime/socket.js event Socket.IO
 //   server/game/              state room, engine permainan, aturan, inventaris item
 //   server/items/             definisi item toko (tambah item baru di sini)
-//   server/db.js              database SQLite
+//   server/db.js              database PostgreSQL (cadangan file lokal untuk dev/test)
 const express = require('express');
 const fs = require('fs');
 const http = require('http');
@@ -56,21 +56,26 @@ app.use((err, req, res, next) => {
 
 const dist = path.join(__dirname, '../dist');
 
+// Escape untuk nilai yang disisipkan ke HTML/XML (atribut & teks)
+const escapeHtml = value =>
+  String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+
+// Origin publik untuk canonical/og:url/sitemap. Di production set PUBLIC_URL (mis. https://playgo.example.com).
+// Tanpa PUBLIC_URL, header Host/X-Forwarded-* dipakai tapi divalidasi: hanya http/https dan host
+// berformat nama domain/IP + port, supaya header palsu tidak bisa menyisipkan HTML.
 function getPublicOrigin(req) {
   if (process.env.PUBLIC_URL) {
     return String(process.env.PUBLIC_URL).replace(/\/+$/, '');
   }
-  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http')
-    .split(',')[0]
-    .trim();
-  const host = String(req.headers['x-forwarded-host'] || req.get('host') || 'localhost:5172')
-    .split(',')[0]
-    .trim();
+  const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim().toLowerCase();
+  const proto = rawProto === 'https' ? 'https' : 'http';
+  const rawHost = String(req.headers['x-forwarded-host'] || req.get('host') || '').split(',')[0].trim();
+  const host = /^[a-z0-9.-]+(:\d{1,5})?$/i.test(rawHost) ? rawHost : 'localhost:5172';
   return `${proto}://${host}`;
 }
 
 app.get('/robots.txt', (req, res) => {
-  const origin = getPublicOrigin(req);
+  const origin = escapeHtml(getPublicOrigin(req));
   res.type('text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(
@@ -89,7 +94,7 @@ app.get('/robots.txt', (req, res) => {
 });
 
 app.get('/sitemap.xml', (req, res) => {
-  const origin = getPublicOrigin(req);
+  const origin = escapeHtml(getPublicOrigin(req));
   const today = new Date().toISOString().slice(0, 10);
   res.type('application/xml; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -161,38 +166,44 @@ app.get('*', (req, res) => {
       ? 'monster-quiz'
       : null;
   const gameMeta = gameKey ? GAME_SSR_META[gameKey] : null;
-  const canonicalUrl = `${origin}/${gameMeta ? gameMeta.query : ''}`;
+  const canonicalUrl = escapeHtml(`${origin}/${gameMeta ? gameMeta.query : ''}`);
+  const safeOrigin = escapeHtml(origin);
+  const metaTitle = gameMeta ? escapeHtml(gameMeta.title) : '';
+  const metaDescription = gameMeta ? escapeHtml(gameMeta.description) : '';
 
   if (gameMeta) {
     html = html
-      .replace(/<title>[\s\S]*?<\/title>/, `<title>${gameMeta.title}</title>`)
+      .replace(/<title>[\s\S]*?<\/title>/, `<title>${metaTitle}</title>`)
       .replace(
         /<meta name="description" content="[^"]*" \/>/,
-        `<meta name="description" content="${gameMeta.description}" />`
+        `<meta name="description" content="${metaDescription}" />`
       )
       .replace(
         /<meta property="og:title" content="[^"]*" \/>/,
-        `<meta property="og:title" content="${gameMeta.title}" />`
+        `<meta property="og:title" content="${metaTitle}" />`
       )
       .replace(
         /<meta property="og:description" content="[^"]*" \/>/,
-        `<meta property="og:description" content="${gameMeta.description}" />`
+        `<meta property="og:description" content="${metaDescription}" />`
       )
       .replace(
         /<meta name="twitter:title" content="[^"]*" \/>/,
-        `<meta name="twitter:title" content="${gameMeta.title}" />`
+        `<meta name="twitter:title" content="${metaTitle}" />`
       )
       .replace(
         /<meta name="twitter:description" content="[^"]*" \/>/,
-        `<meta name="twitter:description" content="${gameMeta.description}" />`
+        `<meta name="twitter:description" content="${metaDescription}" />`
       );
   }
 
   html = html
     .replace('<link rel="canonical" href="/" />', `<link rel="canonical" href="${canonicalUrl}" />`)
     .replace('<meta property="og:url" content="/" />', `<meta property="og:url" content="${canonicalUrl}" />`)
-    .replace('<meta property="og:image" content="/playgo-logo.jpg" />', `<meta property="og:image" content="${origin}/playgo-logo.jpg" />`)
-    .replace('<meta name="twitter:image" content="/playgo-logo.jpg" />', `<meta name="twitter:image" content="${origin}/playgo-logo.jpg" />`);
+    .replace('<meta property="og:image" content="/playgo-logo.jpg" />', `<meta property="og:image" content="${safeOrigin}/playgo-logo.jpg" />`)
+    .replace('<meta name="twitter:image" content="/playgo-logo.jpg" />', `<meta name="twitter:image" content="${safeOrigin}/playgo-logo.jpg" />`);
+
+  // URL di data terstruktur (JSON-LD) harus absolut
+  html = html.replace(/"url": "\//g, `"url": "${safeOrigin}/`);
 
   res.type('text/html; charset=utf-8').send(html);
 });

@@ -535,7 +535,12 @@
   gap: var(--space-2);
   overflow-x: auto;
   padding-bottom: 2px;
-  scrollbar-width: thin;
+  /* Tetap bisa digeser, tanpa scrollbar abu-abu di bawah chip */
+  scrollbar-width: none;
+}
+
+.chat__quick::-webkit-scrollbar {
+  display: none;
 }
 
 .chat__form {

@@ -5,6 +5,8 @@
   inset: 0;
   z-index: 100;
   display: grid;
+  /* Kolom tidak ikut melebar mengikuti isi (judul panjang, link, dll.), dialog selalu muat di layar */
+  grid-template-columns: minmax(0, 1fr);
   background: var(--overlay);
   padding: var(--gutter);
   overflow-y: auto;

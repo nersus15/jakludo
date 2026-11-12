@@ -2,11 +2,14 @@
 
 .social-stack {
   display: grid;
+  /* Kolom tidak ikut melebar mengikuti isi (nama panjang, form), supaya tidak meluber di HP */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
 }
 
 .social-section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
 }
 
@@ -194,8 +197,22 @@
 }
 
 .tabs--three {
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0, ...) agar tab bisa menyusut di HP sempit, tidak meluber ke samping */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: var(--space-2);
+}
+
+@media (max-width: 379px) {
+  .tabs--three .tabs__tab {
+    gap: var(--space-1);
+    padding-inline: var(--space-1);
+    font-size: var(--fs-sm);
+  }
+
+  /* Tombol kembali cukup ikon panah, nama tombol tetap dibacakan lewat aria-label */
+  .group-detail__back-label {
+    display: none;
+  }
 }
 
 .group-rename-bar {
@@ -378,6 +395,9 @@
 @media (hover: none), (max-width: 640px) {
   .gmsg__reply-btn {
     opacity: 0.85;
+    /* Layar sentuh: area ketuk lebih besar */
+    width: 36px;
+    height: 36px;
   }
 }
 
@@ -544,6 +564,64 @@
 .group-chat__composer .input {
   flex: 1;
   min-width: 0;
+}
+
+/* HP sempit: kolom ketik dapat satu baris penuh, tombol foto/suara/kirim di baris bawahnya */
+@media (max-width: 479px) {
+  .group-chat__composer {
+    flex-wrap: wrap;
+  }
+
+  .group-chat__composer .input {
+    order: -1;
+    flex-basis: 100%;
+  }
+
+  .group-chat__composer .btn--primary {
+    margin-left: auto;
+  }
+}
+
+/* Dialog chat (private & grup): dialog setinggi layar, daftar pesan mengisi sisa ruang,
+   kolom ketik selalu terlihat di bawah (tidak terdorong keluar di layar pendek) */
+.friends-modal--chat,
+.groups-modal--chat {
+  height: calc(100dvh - 2 * var(--gutter));
+  max-height: 820px;
+}
+
+.friends-modal--chat .modal__title,
+.groups-modal--chat .modal__title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.friends-modal--chat .modal__body,
+.friends-modal--chat .group-detail,
+.friends-modal--chat .group-chat,
+.groups-modal--chat .modal__body,
+.groups-modal--chat .group-detail,
+.groups-modal--chat .group-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.friends-modal--chat .group-chat__messages,
+.groups-modal--chat .group-chat__messages {
+  flex: 1;
+  min-height: 120px;
+  max-height: none;
+}
+
+/* Layar pendek: subtitle grup (peran & jumlah anggota) disembunyikan saat chat terbuka agar
+   area pesan lebih lega; jumlah anggota sudah ada di bar grup, peran ada di tab Anggota */
+@media (max-height: 700px) {
+  .groups-modal--chat .modal__subtitle {
+    display: none;
+  }
 }
 
 .group-chat__uploading {

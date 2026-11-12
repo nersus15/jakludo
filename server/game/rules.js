@@ -286,9 +286,9 @@ function captureFaces(room, player) {
 //    sehingga nasib buruk beruntun ditekan tapi peluang jangka panjang tetap 1/6.
 // 2. Dorongan makan (gamma) yang meluruh: angka yang bisa memakan lawan dikali
 //    (1 + gamma) x chainDecay^streak, streak = berapa kali pemain ini makan berturut-turut.
-//    Dengan gamma 0.4 dan chainDecay 0.5: 1.4 -> 0.7 -> 0.35 -> 0.175, jadi makan pertama
-//    sedikit didorong, makan kedua sudah di bawah normal, dan makan ketiga jarang terjadi.
-//    Kenaikan peluang dibatasi maxAdd (mis. 0.06 = 6 poin persen).
+//    Dengan gamma 0.1 dan chainDecay 0.5: 1.1 -> 0.55 -> 0.275 -> 0.1375, jadi makan pertama
+//    hanya sedikit didorong, makan kedua sudah di bawah normal, dan makan ketiga jarang terjadi.
+//    Kenaikan peluang dibatasi maxAdd (mis. 0.02 = 2 poin persen).
 // stats = { counts: [6 angka], total, captureStreak } milik pemain di permainan ini.
 function diceWeights(room, player, stats, { beta = 0, gamma = 0, maxAdd = 1, chainDecay = 1 } = {}) {
   const expected = stats.total / 6;

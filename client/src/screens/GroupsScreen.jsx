@@ -1420,6 +1420,7 @@ export default function GroupsScreen({
       isOpen={isOpen}
       onClose={onClose}
       size="lg"
+      className={activeGroupId && activeTab === 'chat' ? 'groups-modal--chat' : ''}
       icon="💬"
       title={activeGroupId ? currentGroupName : 'Grup & Chat'}
       subtitle={
@@ -1451,9 +1452,9 @@ export default function GroupsScreen({
         <div className="group-detail">
           <div className="group-detail__bar">
             <div className="group-detail__bar-left">
-              <button type="button" className="btn btn--secondary btn--sm" onClick={() => backToList()}>
+              <button type="button" className="btn btn--secondary btn--sm group-detail__back" aria-label="Semua grup" onClick={() => backToList()}>
                 <Icon name="arrow-left" size={16} />
-                <span>Semua grup</span>
+                <span className="group-detail__back-label">Semua grup</span>
               </button>
               <div className="group-detail__identity">
                 <GroupAvatar group={groupDetail || activeSummary} size={36} />

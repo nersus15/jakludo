@@ -105,8 +105,8 @@ bobot(f) = e^(beta × (n/6 − jumlah f yang sudah keluar))      koreksi defisit
 | Pengaturan | Nilai | Arti | Nilai netral |
 |---|---|---|---|
 | `beta` | 0,3 | kekuatan koreksi defisit | 0 |
-| `gamma` | 0,4 | dorongan untuk angka yang bisa memakan lawan | 0 |
-| `maxAdd` | 0,06 | kenaikan maksimum peluang makan (6 poin persen) | 1 |
+| `gamma` | 0,1 | dorongan untuk angka yang bisa memakan lawan | 0 |
+| `maxAdd` | 0,02 | kenaikan maksimum peluang makan (2 poin persen) | 1 |
 | `chainDecay` | 0,5 | pengali tiap makan beruntun | 1 |
 
 `beta: 0, gamma: 0, chainDecay: 1` = dadu random murni seperti dulu.
@@ -138,38 +138,35 @@ Kenapa "tebakan benar 24%" aman: di Ludo pemain wajib melempar setiap giliran, j
 
 Sebelum dadu keluar, server mencari angka yang membuat salah satu bidak memakan bidak lawan (`captureFaces`). Bidak lawan yang terlindungi tidak dihitung: bidak di petak start warnanya sendiri, atau di petak bintang saat safe zone aktif.
 
-Pengali angka makan turun setengah setiap kali pemain makan beruntun:
+Dorongannya sengaja kecil supaya makan tidak terasa "sudah diatur", dan pengalinya turun setengah setiap kali pemain makan beruntun:
 
 | Makan beruntun sebelumnya | Pengali | Peluang jika 1 angka bisa makan | Peluang jika 2 angka bisa makan |
 |---|---|---|---|
-| 0 (makan pertama) | 1,4 | 21,9% (normal 16,7%) | 39,3%, kena batas +6 poin (normal 33,3%) |
-| 1 (makan kedua) | 0,7 | 12,3% | 25,9% |
-| 2 (makan ketiga) | 0,35 | 6,5% | 14,9% |
-| 3 (makan keempat) | 0,175 | 3,4% | 8,0% |
+| 0 (makan pertama) | 1,1 | 18,0% (normal 16,7%) | 35,3%, kena batas +2 poin (normal 33,3%) |
+| 1 (makan kedua) | 0,55 | 9,9% | 21,6% |
+| 2 (makan ketiga) | 0,275 | 5,2% | 12,1% |
+| 3 (makan keempat) | 0,1375 | 2,7% | 6,4% |
 
 Angka di tabel dihitung tanpa koreksi defisit; di permainan, koreksi defisit menggeser sedikit naik atau turun.
 
 #### Hasil di permainan penuh
 
-Simulasi 3.000 permainan penuh per varian dengan aturan asli `rules.js`: 4 bot memakai AI JakLudo, safe zone aktif, Black Hole mati, bonus giliran dan hangus 3× angka 6 ikut dihitung.
+Simulasi 3.000 permainan penuh per varian memakai `diceWeights` asli dari `rules.js`: 4 bot dengan AI JakLudo, safe zone aktif, Black Hole mati, bonus giliran dan hangus 3× angka 6 ikut dihitung. "Peluang makan pertama" = dari lemparan yang punya kesempatan makan (dan pemainnya belum makan beruntun), berapa persen yang benar-benar keluar angka makan.
 
-| Dadu | Makan per permainan | Giliran dengan ≥ 2 makan | Permainan dengan giliran ≥ 3 makan | Permainan dengan 3 lemparan sendiri beruntun makan |
-|---|---|---|---|---|
-| Random murni (dulu) | 35,0 | 3,91 | 37,1% | 26,9% |
-| Dorongan tanpa peluruhan (versi awal) | 45,4 | 5,40 | 52,1% | 40,1% |
-| Redam ×0,4 setelah 2 makan | 45,0 | 4,75 | 32,6% | 14,5% |
-| Meluruh d = 0,6 | 44,4 | 4,29 | 31,1% | 16,2% |
-| **Meluruh d = 0,5 (dipakai)** | **44,1** | **3,91** | **27,2%** | **10,6%** |
-| Meluruh d = 0,4 | 43,8 | 3,57 | 21,1% | 6,2% |
+| Dadu | Peluang makan pertama | Korban hampir finish | Makan per permainan | Giliran dengan ≥ 2 makan | Permainan dengan giliran ≥ 3 makan |
+|---|---|---|---|---|---|
+| Random murni | 22,3% | 24,6% | 35,4 | 3,97 | 38,5% |
+| γ 0,4, batas +6 (versi sebelumnya) | 27,1% | 29,2% | 43,9 | 3,90 | 25,5% |
+| **γ 0,1, batas +2 (dipakai)** | **24,1%** | **26,4%** | **39,3** | **3,34** | **22,0%** |
 
-Dengan `chainDecay` 0,5:
+"Korban hampir finish" = kesempatan memakan bidak lawan yang sudah di langkah ke-30 atau lebih.
 
-- Makan sedikit lebih sering daripada dadu random murni (44 vs 35 per permainan), jadi permainan lebih seru.
-- Makan 2 kali dalam satu giliran sama seringnya dengan dadu random murni.
-- Makan 3 kali beruntun justru lebih jarang daripada dadu random murni (27% vs 37% permainan).
+Dengan pengaturan sekarang:
+
+- Peluang makan pertama hanya sekitar 2 poin di atas dadu biasa, jadi tidak bisa ditebak dari posisi bidak.
+- Makan 2 dan 3 kali dalam satu giliran lebih jarang daripada dadu random murni.
 - Peluang menang tiap kursi tetap sekitar 25%, dan frekuensi tiap angka tetap 16,6–16,7%.
-
-Biayanya, permainan sekitar 8–12% lebih panjang karena lebih banyak bidak yang dipulangkan ke markas.
+- Kesan "bidak hampir finish selalu dimakan" lebih banyak datang dari bot: AI bot memang mengutamakan memakan bidak lawan yang sudah jauh, sedangkan dadunya tidak membedakan korban.
 
 ### Dampak ke aturan lain
 
@@ -182,7 +179,7 @@ Biayanya, permainan sekitar 8–12% lebih panjang karena lebih banyak bidak yang
 
 | Kalau terasa… | Ubah |
 |---|---|
-| makan terlalu sering secara umum | turunkan `gamma` (mis. 0,25) |
+| makan terlalu sering secara umum | turunkan `gamma` (mis. 0,05) atau `0` untuk mematikan dorongan |
 | makan beruntun masih terlalu sering | turunkan `chainDecay` (mis. 0,4) |
 | keberuntungan antar pemain masih timpang | naikkan `beta` (mis. 0,35); di atas 0,45 dadu mulai lebih mudah ditebak |
 | ingin kembali ke dadu biasa | `beta: 0, gamma: 0, chainDecay: 1` |

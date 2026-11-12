@@ -40,7 +40,8 @@
 const ITEMS = [
   require('./blackhole-shield'),
   require('./universal-shield'),
-  require('./force-return')
+  require('./force-return'),
+  require('./quiz-hint')
 ];
 
 const KINDS = ['active', 'passive', 'reactive'];
@@ -84,8 +85,8 @@ function protectorsOf(event) {
 
 // Data item yang aman dikirim ke klien (tanpa function)
 function catalog() {
-  return ITEMS.map(({ id, name, icon, price, description, badge, badgeColor, highlight, kind, target, sound, protects }) => ({
-    id, name, icon, price, description, badge, badgeColor, highlight, kind, target: target || null, sound: sound || 'chime', protects: protects || []
+  return ITEMS.map(({ id, name, icon, price, game, description, badge, badgeColor, highlight, kind, target, sound, protects }) => ({
+    id, name, icon, price, game: game || 'ludo', description, badge, badgeColor, highlight, kind, target: target || null, sound: sound || 'chime', protects: protects || []
   }));
 }
 

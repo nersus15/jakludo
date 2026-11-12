@@ -5,14 +5,27 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 
 // Dialog yang bisa dipakai semua modal: Escape menutup, fokus dikunci di dalam dialog,
 // lalu dikembalikan ke elemen pemicu saat ditutup. variant="sheet" tampil dari bawah di HP.
-export default function Modal({ isOpen, onClose, title, subtitle, icon, variant = 'dialog', size = 'md', className = '', children, footer }) {
+// Jika asPage={true}, dirender sebagai halaman penuh (bukan popup modal) untuk navigasi mobile.
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  subtitle,
+  icon,
+  variant = 'dialog',
+  size = 'md',
+  className = '',
+  asPage = false,
+  children,
+  footer
+}) {
   const titleId = useId();
   const panelRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!isOpen || asPage) return undefined;
     const previouslyFocused = document.activeElement;
     const panel = panelRef.current;
     // Fokus ke elemen pertama di dalam dialog (lewati tombol tutup jika ada elemen lain)
@@ -49,9 +62,44 @@ export default function Modal({ isOpen, onClose, title, subtitle, icon, variant 
       document.body.style.overflow = overflow;
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };
-  }, [isOpen]);
+  }, [isOpen, asPage]);
+
+  useEffect(() => {
+    if (isOpen && asPage) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [isOpen, asPage]);
 
   if (!isOpen) return null;
+
+  if (asPage) {
+    return (
+      <main
+        ref={panelRef}
+        id="main"
+        className={`feature-page ${className}`.trim()}
+        aria-labelledby={title ? titleId : undefined}
+      >
+        {title && (
+          <header className="feature-page__header card">
+            <div className="feature-page__title-row">
+              {icon && (
+                <span className="feature-page__icon" aria-hidden="true">
+                  {typeof icon === 'string' ? <Icon name={icon} size={24} /> || icon : icon}
+                </span>
+              )}
+              <div className="feature-page__titles">
+                <h1 id={titleId} className="feature-page__title">{title}</h1>
+                {subtitle && <p className="feature-page__subtitle">{subtitle}</p>}
+              </div>
+            </div>
+          </header>
+        )}
+        <div className="feature-page__body card">{children}</div>
+        {footer && <footer className="feature-page__footer">{footer}</footer>}
+      </main>
+    );
+  }
 
   return (
     <div className={`modal-backdrop modal-backdrop--${variant}`} onMouseDown={e => e.target === e.currentTarget && onClose?.()}>

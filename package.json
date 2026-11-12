@@ -5,12 +5,12 @@
   "scripts": {
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite --host 0.0.0.0",
-    "dev:server": "node server/index.js",
+    "dev:server": "node --watch server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
     "db:migrate": "node server/migrate.js",
     "db:status": "node server/migrate.js --status",
-    "test": "node --test --test-concurrency=1 server/game/rules.test.js server/items/items.test.js server/server.test.js server/migrate.test.js server/social/social.test.js",
+    "test": "node --test --test-concurrency=1 server/game/rules.test.js server/items/items.test.js server/server.test.js server/migrate.test.js server/social/social.test.js server/quiz/quiz.test.js",
     "backup": "node server/backup.js"
   },
   "dependencies": {

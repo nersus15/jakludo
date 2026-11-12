@@ -524,9 +524,182 @@ p.state-msg {
   }
 }
 
-/* HP sempit: cukup logo (logo sudah memuat tulisan JakLudo) agar tombol header tidak menimpa */
+/* HP sempit: cukup logo agar tombol header tidak menimpa */
 @media (max-width: 419px) {
   .brand__name {
     display: none;
   }
 }
+
+/* ==========================================
+   ANIMATED MOBILE BOTTOM NAVIGATION BAR
+   (Teman, Grup & Chat, Toko Item pindah ke bawah di layar mobile < 768px)
+   ========================================== */
+
+@media (max-width: 767px) {
+  .app-header__nav-btn {
+    display: none !important;
+  }
+
+  .app-footer {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+}
+
+.mobile-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 120;
+  padding: 20px var(--gutter) max(12px, env(safe-area-inset-bottom));
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+}
+
+@media (min-width: 768px) {
+  .mobile-bottom-nav {
+    display: none;
+  }
+}
+
+.mobile-bottom-nav__bar {
+  position: relative;
+  width: min(100%, 420px);
+  height: 64px;
+  border-radius: 18px;
+  background: #141210;
+  box-shadow: 0 12px 28px rgba(20, 18, 16, 0.38);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* Indikator lekukan (notch) + lingkaran oranye aktif yang bergeser sesuai --active-index (0..3) */
+.mobile-bottom-nav__indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 25%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  transform: translateX(calc(var(--active-index, 0) * 100%));
+  transition: transform 0.42s cubic-bezier(0.32, 1.25, 0.36, 1);
+}
+
+/* Lekukan cekung (notch) memotong bagian atas bar hitam dengan warna latar halaman */
+.mobile-bottom-nav__notch {
+  position: relative;
+  top: -22px;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s var(--ease);
+}
+
+/* Lingkaran oranye melayang di dalam lekukan */
+.mobile-bottom-nav__orb {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ff8538 0%, var(--brand) 100%);
+  box-shadow: 0 6px 14px rgba(255, 98, 0, 0.42);
+}
+
+.mobile-bottom-nav__list {
+  position: relative;
+  z-index: 2;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mobile-bottom-nav__item {
+  height: 100%;
+}
+
+.mobile-bottom-nav__btn {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 250, 241, 0.65);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-bottom-nav__icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.38s cubic-bezier(0.32, 1.25, 0.36, 1), color 0.25s var(--ease);
+}
+
+/* Agar ikon di bar hitam tampil bersih satu warna garis seperti di referensi */
+.mobile-bottom-nav__icon svg *[fill="var(--brand-soft)"] {
+  fill: none;
+}
+
+.mobile-bottom-nav__btn.is-active {
+  color: #ffffff;
+}
+
+.mobile-bottom-nav__btn.is-active .mobile-bottom-nav__icon {
+  transform: translateY(-22px);
+}
+
+.mobile-bottom-nav__label {
+  position: absolute;
+  bottom: 7px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 250, 241, 0.88);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.25s var(--ease), transform 0.28s var(--ease);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.mobile-bottom-nav__btn.is-active .mobile-bottom-nav__label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.mobile-bottom-nav__badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #ffffff;
+  border: 2px solid #141210;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+}
+

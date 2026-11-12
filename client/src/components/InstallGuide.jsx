@@ -10,14 +10,14 @@ export default function InstallGuide({ platform, onClose }) {
       onClose={onClose}
       size="sm"
       icon="📲"
-      title={isIos ? 'Pasang di iPhone / iPad' : 'Pasang JakLudo'}
-      subtitle="JakLudo bisa dibuka dari layar utama seperti aplikasi biasa."
+      title={isIos ? 'Pasang di iPhone / iPad' : 'Pasang PlayGo'}
+      subtitle="PlayGo bisa dibuka dari layar utama seperti aplikasi biasa."
       footer={<button type="button" className="btn btn--primary" onClick={onClose}>Mengerti</button>}
     >
       <ol className="steps">
         {isIos ? (
           <>
-            <li>Buka JakLudo di <strong>Safari</strong>, lalu ketuk tombol <strong>Bagikan</strong> di bilah bawah.</li>
+            <li>Buka PlayGo di <strong>Safari</strong>, lalu ketuk tombol <strong>Bagikan</strong> di bilah bawah.</li>
             <li>Pilih <strong>Tambahkan ke Layar Utama</strong>, lalu ketuk <strong>Tambah</strong>.</li>
           </>
         ) : (

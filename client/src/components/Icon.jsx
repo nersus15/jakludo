@@ -35,6 +35,7 @@ const EMOJI_TO_ICON = {
   '🤖': 'bot',
   '🔄': 'extra-turn',
   '💥': 'force-return',
+  '💡': 'bulb',
   '✏️': 'edit',
   '🚪': 'logout'
 };
@@ -68,6 +69,14 @@ export default function Icon({ name, size = 20, className = '', label }) {
   };
 
   switch (resolved) {
+    case 'home':
+      return (
+        <svg {...common}>
+          <path d="M3.5 10.5 12 3.5l8.5 7v9a1.5 1.5 0 0 1-1.5 1.5h-14A1.5 1.5 0 0 1 3.5 19.5v-9Z" />
+          <path d="M9.5 21v-6a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6" />
+        </svg>
+      );
+
     case 'friends':
       return (
         <svg {...common}>
@@ -430,6 +439,34 @@ export default function Icon({ name, size = 20, className = '', label }) {
           <circle cx="9.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
           <circle cx="14.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
           <path d="M9 16h6" />
+        </svg>
+      );
+
+    case 'swords':
+    case 'battle':
+      return (
+        <svg {...common}>
+          <path d="M14.5 17.5 3 6V3h3l11.5 11.5" fill="var(--brand-soft)" />
+          <path d="M13 19l6-6" />
+          <path d="M16 16l4 4" />
+          <path d="M19 21l2-2" />
+          <path d="M9.5 17.5 21 6V3h-3L6.5 14.5" fill="var(--brand-soft)" />
+          <path d="M11 19l-6-6" />
+          <path d="M8 16l-4 4" />
+          <path d="M5 21l-2-2" />
+        </svg>
+      );
+
+    case 'bulb':
+    case 'quizHint':
+    case 'hint':
+      return (
+        <svg {...common}>
+          <path
+            d="M9 18h6M10 21h4M8.5 14.5A6 6 0 1 1 15.5 14.5c-.7.6-1.3 1.5-1.5 2.5h-4c-.2-1-.8-1.9-1.5-2.5Z"
+            fill="var(--brand-soft)"
+          />
+          <path d="M12 8v3" />
         </svg>
       );
 

@@ -115,7 +115,7 @@ function getPoolConfig(env = process.env) {
 
 function listMigrationFiles(dir = MIGRATIONS_DIR) {
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
+  const files = fs.readdirSync(dir)
     .filter(f => /^\d+_.+\.sql$/.test(f))
     .sort()
     .map(filename => {
@@ -127,6 +127,16 @@ function listMigrationFiles(dir = MIGRATIONS_DIR) {
         sql: fs.readFileSync(path.join(dir, filename), 'utf8')
       };
     });
+  // Versi migrasi wajib unik (schema_migrations.version adalah PRIMARY KEY). Gagal dengan pesan jelas
+  // daripada membuat transaksi migrasi gagal di tengah atau melewatkan salah satu file secara diam-diam.
+  const seen = new Map();
+  for (const m of files) {
+    if (seen.has(m.version)) {
+      throw new Error(`[PG MIGRATE] Nomor versi migrasi ganda ${m.version}: ${seen.get(m.version)} dan ${m.name}`);
+    }
+    seen.set(m.version, m.name);
+  }
+  return files;
 }
 
 // Buat database otomatis jika belum ada di server PostgreSQL lokal (error code 3D000)

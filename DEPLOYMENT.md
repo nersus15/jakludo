@@ -250,3 +250,15 @@ Pemain yang terputus otomatis menyambung ulang ke kursinya. Kursi di lobby ditah
 | **Backup Database PostgreSQL (aman saat server berjalan)** | `docker compose exec jakludo npm run backup` → `server/data/backups/jakludo-pg-<waktu>.sql` |
 | **Restore Database PostgreSQL** | `docker compose exec -T postgres psql -U ${POSTGRES_USER:-jakludo} -d ${POSTGRES_DB:-jakludo} < server/data/backups/jakludo-pg-<waktu>.sql` |
 
+---
+
+## 6. Monster Quiz Battle (Migrasi, Seed & Konfigurasi)
+
+Monster Quiz Battle terintegrasi langsung di proses JakLudo yang sama tanpa kontainer baru:
+- **Migrasi Skema (`009_monster_quiz.sql`)**: Dijalankan otomatis saat server start (`hydrateFromPostgres`) atau manual via `npm run db:migrate`. Membuat tabel `quiz_monsters`, `quiz_questions`, `quiz_rooms`, `quiz_room_players`, `quiz_matches`, `quiz_match_players`, `quiz_rounds`, `quiz_answers`, dan `quiz_player_stats` dengan foreign key ke tabel `users`.
+- **Seed Otomatis**: 6 monster elemen (`emberon`, `aquaris`, `terragon`, `voltix`, `sylvara`, `frostbite`) dan 64 bank soal tervalidasi (32 Pengetahuan Umum + 32 Hitung-hitungan Cepat) di-seed secara idempoten saat aplikasi menyala.
+- **Variabel Lingkungan Opsional (Admin Bank Soal)**:
+  - `QUIZ_ADMIN_USERNAMES=admin1,admin2` — daftar username yang diizinkan mengelola bank soal via `/api/quiz/questions`.
+  - `QUIZ_ADMIN_KEY=rahasia-admin` — kunci header `X-Quiz-Admin-Key` alternatif untuk endpoint manajemen soal.
+
+

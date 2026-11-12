@@ -15,6 +15,7 @@ import {
   MAX_VOICE_DURATION_MS,
   startVoiceRecording
 } from '../social/media';
+import monsterQuizLogo from '../assets/monster-quiz-logo.webp';
 
 const ROLE_LABELS = {
   owner: 'Owner',
@@ -70,7 +71,10 @@ function previewLastMessage(msg) {
   if (!msg) return 'Belum ada percakapan';
   const sender = msg.sender?.name ? `${msg.sender.name}: ` : '';
   if (msg.type === 'system') return msg.text || 'Info grup';
-  if (msg.type === 'match') return `${sender}Match grup (${msg.match?.code || 'Room'})`;
+  if (msg.type === 'match') {
+    const gName = msg.match?.gameType === 'quiz' ? 'Monster Quiz Battle' : 'JakLudo';
+    return `${sender}Match ${gName} (${msg.match?.code || 'Room'})`;
+  }
   if (msg.type === 'image') return `${sender}[Foto]${msg.text ? ` — ${msg.text}` : ''}`;
   if (msg.type === 'audio') return `${sender}[Pesan suara]`;
   return `${sender}${msg.text}`;
@@ -374,6 +378,8 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
 
             if (msg.type === 'match') {
               const matchCode = msg.match?.code;
+              const matchGameType = msg.match?.gameType === 'quiz' ? 'quiz' : 'ludo';
+              const matchGameName = matchGameType === 'quiz' ? 'Monster Quiz Battle' : 'JakLudo';
               return (
                 <div
                   key={msg.id}
@@ -382,14 +388,14 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
                 >
                   <div className="gmsg__match-info">
                     <span className="gmsg__match-icon" aria-hidden="true">
-                      <Icon name="dice" size={22} />
+                      <Icon name={matchGameType === 'quiz' ? 'swords' : 'dice'} size={22} />
                     </span>
                     <div>
                       <strong>
-                        {msg.sender?.name || 'Anggota'} membuat Match Grup
+                        {msg.sender?.name || 'Anggota'} membuat Match Grup · {matchGameName}
                       </strong>
                       <p className="muted">
-                        {msg.text || 'Ayo gabung ke room match khusus grup ini!'}
+                        {msg.text || `Ayo gabung ke room ${matchGameName} khusus grup ini!`}
                         {matchCode ? (
                           <>
                             {' · Kode '}
@@ -408,7 +414,7 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
                       <button
                         type="button"
                         className="btn btn--primary btn--sm"
-                        onClick={() => onJoinMatch(matchCode)}
+                        onClick={() => onJoinMatch(matchCode, matchGameType)}
                       >
                         Gabung match
                       </button>
@@ -1280,9 +1286,12 @@ function GroupLeaderboardTab({ groupId, currentUser, social, onCreateGroupMatch,
 export default function GroupsScreen({
   isOpen,
   onClose,
+  asPage = false,
   currentUser,
   social,
   gameActions,
+  quizActions,
+  onSelectGameMode,
   onViewProfile,
   onOpenAuth
 }) {
@@ -1293,6 +1302,7 @@ export default function GroupsScreen({
   const [creating, setCreating] = useState(false);
   const [busyInviteId, setBusyInviteId] = useState('');
   const [feedback, setFeedback] = useState(null);
+  const [showMatchGamePicker, setShowMatchGamePicker] = useState(false);
 
   const { groups, groupInvites, groupsLoading, actions } = social;
 
@@ -1401,13 +1411,32 @@ export default function GroupsScreen({
 
   const handleCreateGroupMatch = () => {
     if (!activeGroupId) return;
-    gameActions.createRoom(activeGroupId);
+    sound.playClick();
+    setShowMatchGamePicker(true);
+  };
+
+  const handleConfirmCreateGroupMatch = selectedGame => {
+    if (!activeGroupId) return;
+    setShowMatchGamePicker(false);
+    if (selectedGame === 'quiz') {
+      onSelectGameMode?.('quiz');
+      quizActions?.createRoom?.(activeGroupId);
+    } else {
+      onSelectGameMode?.('ludo');
+      gameActions.createRoom(activeGroupId);
+    }
     onClose();
   };
 
-  const handleJoinMatch = matchCode => {
+  const handleJoinMatch = (matchCode, matchGameType = 'ludo') => {
     if (!matchCode) return;
-    gameActions.joinRoom(matchCode);
+    if (matchGameType === 'quiz') {
+      onSelectGameMode?.('quiz');
+      quizActions?.joinRoomByCode?.(matchCode);
+    } else {
+      onSelectGameMode?.('ludo');
+      gameActions.joinRoom(matchCode);
+    }
     onClose();
   };
 
@@ -1419,6 +1448,7 @@ export default function GroupsScreen({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      asPage={asPage}
       size="lg"
       className={activeGroupId && activeTab === 'chat' ? 'groups-modal--chat' : ''}
       icon="💬"
@@ -1471,6 +1501,58 @@ export default function GroupsScreen({
               <span>Buat match grup</span>
             </button>
           </div>
+
+          {showMatchGamePicker && (
+            <div className="group-game-picker card card--focus" role="region" aria-label="Pilih game untuk Match Grup">
+              <div className="group-game-picker__head">
+                <div>
+                  <strong>Pilih Game untuk Match Grup</strong>
+                  <p className="muted">Kode room akan otomatis dikirim ke chat grup {currentGroupName}.</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => {
+                    sound.playClick();
+                    setShowMatchGamePicker(false);
+                  }}
+                >
+                  Batal
+                </button>
+              </div>
+              <div className="group-game-picker__grid">
+                <button
+                  type="button"
+                  className="group-game-picker__option"
+                  onClick={() => handleConfirmCreateGroupMatch('ludo')}
+                >
+                  <span className="group-game-picker__icon" aria-hidden="true">
+                    <Icon name="dice" size={26} />
+                  </span>
+                  <span className="group-game-picker__meta">
+                    <strong>JakLudo</strong>
+                    <span className="badge badge--brand">2–4 Pemain · Board Game</span>
+                    <span className="muted">Adu strategi dadu, zona aman, dan item spesial bersama anggota grup.</span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="group-game-picker__option"
+                  onClick={() => handleConfirmCreateGroupMatch('quiz')}
+                >
+                  <span className="group-game-picker__icon group-game-picker__icon--quiz" aria-hidden="true">
+                    <img src={monsterQuizLogo} alt="" width="44" height="44" />
+                  </span>
+                  <span className="group-game-picker__meta">
+                    <strong>Monster Quiz Battle</strong>
+                    <span className="badge badge--info">2–3 Pemain (Maks 3 Orang) · RPG Trivia</span>
+                    <span className="muted">Jawab soal pengetahuan &amp; matematika dalam 15 detik untuk menyerang monster lawan!</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="tabs tabs--three" role="tablist" aria-label="Menu grup">
             <button

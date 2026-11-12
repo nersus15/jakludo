@@ -111,8 +111,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       onClose={onClose}
       size="sm"
       icon="🎲"
-      title={isRegister ? 'Daftar akun JakLudo' : 'Masuk ke JakLudo'}
-      subtitle={isRegister ? 'Akun menyimpan poin, item toko, dan posisimu di peringkat.' : 'Masuk untuk membuat room dan mengumpulkan poin.'}
+      title={isRegister ? 'Daftar akun PlayGo' : 'Masuk ke PlayGo'}
+      subtitle={isRegister ? 'Satu akun PlayGo untuk semua game, poin, item toko, dan peringkat.' : 'Masuk untuk memilih game, membuat room, dan mengumpulkan poin.'}
     >
       <div className="tabs" role="tablist" aria-label="Pilih masuk atau daftar">
         <button type="button" role="tab" aria-selected={!isRegister} className="tabs__tab" onClick={() => switchTab('login')}>Masuk</button>

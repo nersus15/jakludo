@@ -4,7 +4,7 @@ import Icon from './Icon';
 import { NetworkIndicator } from './NetworkStatus';
 import { isAvatarUrl } from '../social/media';
 import { sound } from '../sound';
-import jakludoLogo from '../assets/jakludo-logo-sm.webp';
+import playgoLogo from '../assets/playgo-logo-sm.webp';
 
 function soundIconName(audio) {
   if (audio.bgmMuted && audio.sfxMuted) return 'volume-off';
@@ -195,6 +195,7 @@ export default function AppHeader({
   theme,
   friendBadgeCount = 0,
   groupBadgeCount = 0,
+  onGoHome,
   onOpenFriends,
   onOpenGroups,
   onOpenShop,
@@ -207,10 +208,26 @@ export default function AppHeader({
 }) {
   return (
     <header className="app-header">
-      <div className="brand">
-        <img src={jakludoLogo} alt="" width="40" height="40" className="brand__logo" />
+      <div
+        className="brand"
+        role={onGoHome ? 'button' : undefined}
+        tabIndex={onGoHome ? 0 : undefined}
+        onClick={onGoHome || undefined}
+        onKeyDown={
+          onGoHome
+            ? e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onGoHome();
+                }
+              }
+            : undefined
+        }
+        style={onGoHome ? { cursor: 'pointer' } : undefined}
+      >
+        <img src={playgoLogo} alt="" width="40" height="40" className="brand__logo" />
         <span className="brand__name">
-          Jak<span className="brand__accent">Ludo</span>
+          Play<span className="brand__accent">Go</span>
         </span>
       </div>
 
@@ -224,7 +241,7 @@ export default function AppHeader({
         {onOpenFriends && (
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn app-header__nav-btn"
             aria-label={friendBadgeCount > 0 ? `Teman (${friendBadgeCount} permintaan baru)` : 'Teman'}
             title="Teman"
             onClick={() => {
@@ -243,7 +260,7 @@ export default function AppHeader({
         {onOpenGroups && (
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn app-header__nav-btn"
             aria-label={groupBadgeCount > 0 ? `Grup & Chat (${groupBadgeCount} undangan baru)` : 'Grup & Chat'}
             title="Grup & Chat"
             onClick={() => {
@@ -261,7 +278,7 @@ export default function AppHeader({
         )}
         <button
           type="button"
-          className="icon-btn"
+          className="icon-btn app-header__nav-btn"
           aria-label="Toko item"
           title="Toko item"
           onClick={() => {

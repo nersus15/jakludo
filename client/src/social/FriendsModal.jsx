@@ -599,6 +599,7 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
 export default function FriendsModal({
   isOpen,
   onClose,
+  asPage = false,
   currentUser,
   social,
   initialChatFriendId = '',
@@ -718,6 +719,7 @@ export default function FriendsModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      asPage={asPage}
       size={activeFriend ? 'lg' : 'md'}
       className={activeFriend ? 'friends-modal--chat' : ''}
       icon="👥"

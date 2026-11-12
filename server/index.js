@@ -14,6 +14,7 @@ loadDotEnv();
 const db = require('./db');
 const store = require('./game/store');
 const engine = require('./game/engine');
+const quizEngine = require('./quiz/engine');
 const { createApiRouter } = require('./http/routes');
 const { registerSocketHandlers } = require('./realtime/socket');
 
@@ -38,9 +39,10 @@ const io = new Server(server, {
 });
 
 store.init(io);
+quizEngine.init(io);
 registerSocketHandlers(io);
 
-app.get('/health', (_, res) => res.json({ ok: true, rooms: store.rooms.size, db: db.getStatus().engine }));
+app.get('/health', (_, res) => res.json({ ok: true, rooms: store.rooms.size, quizRooms: quizEngine.quizRooms.size, db: db.getStatus().engine }));
 app.use('/api', createApiRouter());
 
 app.use((err, req, res, next) => {
@@ -80,6 +82,7 @@ process.on('unhandledRejection', err => {
 // Simpan snapshot semua room lalu tutup koneksi database. Room dipulihkan saat server start lagi.
 function shutdown() {
   store.stopAllTimers();
+  quizEngine.stopAllTimers();
   store.flushRooms();
   return db.close();
 }

@@ -1323,5 +1323,110 @@
   gap: var(--space-2);
 }
 
+/* ==========================================
+   PILIH GAME UNTUK MATCH GRUP
+   ========================================== */
+
+.group-game-picker {
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+  background: var(--surface-2);
+}
+
+.group-game-picker__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.group-game-picker__head strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+}
+
+.group-game-picker__head p {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+}
+
+.group-game-picker__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+@media (min-width: 560px) {
+  .group-game-picker__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.group-game-picker__option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 2px solid var(--ink-line);
+  box-shadow: var(--lift-1);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.14s var(--ease), background-color 0.14s var(--ease);
+}
+
+.group-game-picker__option:hover {
+  transform: translateY(-2px);
+  background: var(--brand-soft);
+}
+
+.group-game-picker__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 2px solid var(--ink-line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.group-game-picker__icon--quiz {
+  background: #0f172a;
+  padding: 2px;
+}
+
+.group-game-picker__icon--quiz img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.group-game-picker__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.group-game-picker__meta strong {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+}
+
+.group-game-picker__meta .muted {
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+}
+
+
 
 

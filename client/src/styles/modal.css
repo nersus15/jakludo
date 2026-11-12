@@ -49,6 +49,16 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+@media (max-width: 767px) {
+  .modal-backdrop {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+
+  .modal {
+    max-height: calc(100dvh - 108px - env(safe-area-inset-bottom));
+  }
+}
+
 @media (min-width: 768px) {
   .modal-backdrop--sheet {
     align-items: center;
@@ -107,6 +117,97 @@
 
 .modal__footer .btn {
   flex: 1 1 160px;
+}
+
+/* ==========================================
+   FEATURE PAGE (TAMPILAN HALAMAN PENUH DI MOBILE)
+   ========================================== */
+
+.feature-page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--gutter) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  animation: fade-in 0.16s var(--ease);
+}
+
+.feature-page__header {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+}
+
+.feature-page__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.feature-page__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 2px solid var(--ink-line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.feature-page__titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.feature-page__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+}
+
+.feature-page__subtitle {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.feature-page__body {
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.feature-page__body .group-chat__messages,
+.feature-page__body .dm-chat__messages {
+  max-height: 56dvh;
+}
+
+.feature-page__footer {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-md);
+}
+
+.shop-item__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 @keyframes fade-in {

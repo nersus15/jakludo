@@ -4,11 +4,14 @@ const store = require('../game/store');
 const lobby = require('../game/lobby');
 const engine = require('../game/engine');
 const social = require('../social/store');
+const quizEngine = require('../quiz/engine');
+const quizStore = require('../quiz/store');
 const { createLimiter } = require('../lib/limiter');
 const { EMOJIS, MAX_CHATS } = require('../game/config');
 
 const chatLimiter = createLimiter({ windowMs: 5000, max: 5 });
 const reactionLimiter = createLimiter({ windowMs: 5000, max: 8 });
+const quizActionLimiter = createLimiter({ windowMs: 3000, max: 12 });
 
 // Payload dari klien tidak bisa dipercaya: selalu objek, dan error di handler
 // tidak boleh menjatuhkan proses (yang akan menghapus semua room).
@@ -86,7 +89,46 @@ function registerSocketHandlers(io) {
     on(socket, 'room:invite', ({ userId: targetUserId }, cb) => {
       const reply = payload => { if (typeof cb === 'function') cb(payload); };
       const r = currentRoom();
-      if (!r || r.started) return reply({ ok: false, error: 'Room tidak tersedia atau permainan sudah dimulai.' });
+      const qr = !r && socket.data.quizRoom ? quizEngine.quizRooms.get(socket.data.quizRoom) : null;
+
+      if (!r && !qr) {
+        return reply({ ok: false, error: 'Room tidak tersedia atau permainan sudah dimulai.' });
+      }
+
+      if (qr) {
+        if (qr.phase !== 'lobby') {
+          return reply({ ok: false, error: 'Pertandingan Monster Quiz Battle sudah dimulai.' });
+        }
+        if (qr.players.length >= 3) {
+          return reply({ ok: false, error: 'Room Monster Quiz sudah penuh (maksimal 3 pemain).' });
+        }
+        const mePlayer = qr.players.find(p => p.socketId === socket.id || p.userId === socket.data.userId);
+        const senderUserId = socket.data.userId || mePlayer?.userId;
+        if (!senderUserId) return reply({ ok: false, error: 'Silakan login terlebih dahulu.' });
+        if (!targetUserId || targetUserId === senderUserId) return reply({ ok: false, error: 'Target undangan tidak valid.' });
+        if (qr.players.some(p => p.userId === targetUserId)) {
+          return reply({ ok: false, error: 'Pemain tersebut sudah berada di dalam room.' });
+        }
+        if (qr.groupId) {
+          if (!social.isGroupMember(qr.groupId, targetUserId)) {
+            return reply({ ok: false, error: 'Hanya anggota grup yang dapat diundang ke match grup ini.' });
+          }
+        } else if (!social.areFriends(senderUserId, targetUserId)) {
+          return reply({ ok: false, error: 'Kamu hanya dapat mengundang pemain yang sudah menjadi teman.' });
+        }
+        if (!social.isUserOnline(targetUserId)) {
+          return reply({ ok: false, error: 'Teman sedang offline.' });
+        }
+        social.emitToUser(targetUserId, 'room:invite', {
+          code: qr.code,
+          gameType: 'quiz',
+          from: social.userSummary(senderUserId),
+          group: qr.groupId ? social.getGroupBasic(qr.groupId) : null
+        });
+        return reply({ ok: true });
+      }
+
+      if (r.started) return reply({ ok: false, error: 'Room tidak tersedia atau permainan sudah dimulai.' });
       if (r.players.length >= 4) return reply({ ok: false, error: 'Room sudah penuh.' });
 
       const mePlayer = r.players.find(p => p.id === socket.id);
@@ -112,6 +154,7 @@ function registerSocketHandlers(io) {
 
       social.emitToUser(targetUserId, 'room:invite', {
         code: r.code,
+        gameType: 'ludo',
         from: social.userSummary(senderUserId),
         group: r.groupId ? social.getGroupBasic(r.groupId) : null
       });
@@ -238,9 +281,84 @@ function registerSocketHandlers(io) {
       delete socket.data.room;
     });
 
+    // ==========================================
+    // MONSTER QUIZ BATTLE SOCKET EVENTS
+    // ==========================================
+
+    on(socket, 'quiz:room:create', (payload, cb) => {
+      if (!quizActionLimiter(socket.id)) {
+        const err = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
+        if (cb) cb(err);
+        return;
+      }
+      const res = quizEngine.createRoom(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:room:join', (payload, cb) => {
+      if (!quizActionLimiter(socket.id)) {
+        const err = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
+        if (cb) cb(err);
+        return;
+      }
+      const res = quizEngine.joinRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:matchmaking:join', (payload, cb) => {
+      if (!quizActionLimiter(socket.id)) {
+        const err = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
+        if (cb) cb(err);
+        return;
+      }
+      const res = quizEngine.joinMatchmaking(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:matchmaking:leave', (payload, cb) => {
+      const res = quizEngine.leaveMatchmaking(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:monster:select', (payload, cb) => {
+      const res = quizEngine.selectMonster(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:player:ready', (payload, cb) => {
+      const res = quizEngine.setPlayerReady(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:answer:submit', (payload, cb) => {
+      const res = quizEngine.submitAnswer(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:hint:use', (payload, cb) => {
+      const res = quizEngine.useHint(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:room:leave', (payload, cb) => {
+      const res = quizEngine.leaveRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:leaderboard:get', (_, cb) => {
+      const lb = quizStore.getQuizLeaderboard();
+      socket.emit('quiz:leaderboard:update', lb);
+      if (cb) cb({ ok: true, leaderboard: lb });
+    });
+
     socket.on('disconnect', reason => {
       logConnection(socket, 'disconnect', ` reason="${reason}" after=${Math.round((Date.now() - connectedAt) / 1000)}s`);
       social.detachSocket(socket);
+      try {
+        quizEngine.handleDisconnect(socket);
+      } catch (err) {
+        console.error('[quiz disconnect]', err);
+      }
       try {
         const r = currentRoom();
         if (r) lobby.handleDeparture(socket, r, { intentional: false });

@@ -3,12 +3,13 @@ import Icon from './components/Icon';
 import { sound } from './sound';
 import { itemStock } from './items';
 
-// Daftar item yang dimiliki pemain
+// Daftar item yang dimiliki pemain (khusus item JakLudo)
 export function InventoryChips({ catalog, player }) {
-  if (catalog.length === 0) return <p className="muted">Memuat item...</p>;
+  const ludoItems = catalog.filter(item => item.game !== 'quiz');
+  if (ludoItems.length === 0) return <p className="muted">Memuat item...</p>;
   return (
     <ul className="inventory">
-      {catalog.map(item => {
+      {ludoItems.map(item => {
         const stock = itemStock(player, item.id);
         return (
           <li key={item.id} className={`inventory__item ${stock.count ? 'has-stock' : ''}`} title={item.highlight || item.description}>
@@ -32,7 +33,7 @@ export function InventoryChips({ catalog, player }) {
 // Tombol item aktif (mis. Force Return) yang bisa dipakai di giliran sendiri sebelum melempar dadu
 export function ActiveItemActions({ catalog, player, enabled, targetingItemId, onToggleTarget, onUse }) {
   if (!enabled) return null;
-  const usable = catalog.filter(item => item.kind === 'active' && itemStock(player, item.id).count > 0);
+  const usable = catalog.filter(item => item.game !== 'quiz' && item.kind === 'active' && itemStock(player, item.id).count > 0);
 
   return usable.map(item => {
     const stock = itemStock(player, item.id);

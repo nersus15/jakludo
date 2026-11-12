@@ -6,6 +6,8 @@ const inventory = require('../game/inventory');
 const store = require('../game/store');
 const { createLimiter } = require('../lib/limiter');
 const { registerSocialRoutes } = require('../social/routes');
+const { registerQuizRoutes } = require('../quiz/routes');
+const quizEngine = require('../quiz/engine');
 const social = require('../social/store');
 
 const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 20 });
@@ -123,6 +125,7 @@ function createApiRouter() {
         store.emitRoom(r);
       }
     }
+    quizEngine.syncUserInventory(user.id);
 
     res.json({
       success: true,
@@ -133,6 +136,7 @@ function createApiRouter() {
   });
 
   registerSocialRoutes(api);
+  registerQuizRoutes(api);
 
   api.use((req, res) => res.status(404).json({ success: false, error: 'Endpoint tidak ditemukan.' }));
 

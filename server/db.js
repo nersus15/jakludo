@@ -327,6 +327,7 @@ async function init(options = {}) {
       }
       await hydrateFromPostgres(pool);
       await require('./social/store').hydrateFromPostgres();
+      await require('./quiz/store').hydrateFromPostgres();
       console.log(`[PG] Terhubung ke PostgreSQL (${state.usersById.size} user, ${state.leaderboard.size} leaderboard, ${state.rooms.size} room aktif).`);
     } else {
       console.warn('[DB] DATABASE_URL belum diset; berjalan dengan penyimpanan lokal di', DATA_DIR);
@@ -817,6 +818,33 @@ function consumeUserItem({ userId, itemId }) {
   return true;
 }
 
+// Tambah poin PlayGo ke saldo pemain (mis. hadiah +30 poin menang Monster Quiz Battle)
+function awardUserPoints(userId, deltaPoints = 0) {
+  const amount = Math.floor(Number(deltaPoints) || 0);
+  if (!userId || amount <= 0) return null;
+  const user = findUserById(userId);
+  if (!user) return null;
+
+  const entry = ensureLeaderboardEntry(user);
+  entry.points += amount;
+  persistLocalFallback();
+
+  execPgTransaction(async client => {
+    await ensureGlobalLeaderboardRow(client, user);
+    await client.query(
+      'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+      [amount, user.id]
+    );
+  });
+
+  return {
+    userId: user.id,
+    pointsAwarded: amount,
+    totalPoints: entry.points,
+    user: sanitizeUser(findUserById(user.id))
+  };
+}
+
 
 // ==========================================
 // SNAPSHOT ROOM
@@ -903,6 +931,7 @@ module.exports = {
   getUserItems,
   purchaseItem,
   consumeUserItem,
+  awardUserPoints,
   saveRoom,
   deleteRoom,
   loadRooms,

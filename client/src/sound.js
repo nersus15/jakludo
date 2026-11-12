@@ -886,6 +886,123 @@ class SoundManager {
       osc.stop(n.time + n.dur + 0.02);
     });
   }
+
+  // Suara countdown arena Monster Quiz Battle
+  playQuizCountdown(isStart = false) {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(isStart ? 880 : 440, now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(isStart ? 0.28 : 0.18, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + (isStart ? 0.28 : 0.14));
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(now);
+    osc.stop(now + (isStart ? 0.3 : 0.16));
+  }
+
+  // Suara jawaban benar di Monster Quiz Battle
+  playQuizCorrect() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const now = this.ctx.currentTime;
+    [523.25, 659.25, 783.99].forEach((freq, i) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      const t = now + i * 0.055;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(0.22, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(t);
+      osc.stop(t + 0.2);
+    });
+  }
+
+  // Suara jawaban salah / waktu habis di Monster Quiz Battle
+  playQuizWrong() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.linearRampToValueAtTime(140, now + 0.24);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.16, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(now);
+    osc.stop(now + 0.28);
+  }
+
+  // Suara monster melancarkan serangan elemen
+  playMonsterAttack() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(260, now);
+    osc.frequency.exponentialRampToValueAtTime(720, now + 0.14);
+    osc.frequency.exponentialRampToValueAtTime(180, now + 0.28);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.26, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(now);
+    osc.stop(now + 0.32);
+  }
+
+  // Suara monster terkena serangan (-10 HP)
+  playMonsterHurt() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return;
+    this.init();
+    if (!this.ctx) return;
+    const dest = this.getDestination();
+    if (!dest) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.exponentialRampToValueAtTime(55, now + 0.22);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(now);
+    osc.stop(now + 0.26);
+  }
 }
 
 export const sound = new SoundManager();

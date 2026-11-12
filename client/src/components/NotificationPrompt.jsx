@@ -68,8 +68,8 @@ export default function NotificationPrompt({ enabled }) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event(NOTIF_PROMPT_RESOLVED_EVENT));
       }
-      notify('Notifikasi JakLudo aktif', {
-        body: 'Kamu akan diberi tahu saat giliran mengocok dadu, undangan match, dan pesan grup.',
+      notify('Notifikasi PlayGo aktif', {
+        body: 'Kamu akan diberi tahu saat giliran bermain, undangan match, dan pesan grup.',
         tag: 'jakludo-welcome',
         force: true
       });

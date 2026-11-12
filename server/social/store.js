@@ -552,6 +552,18 @@ async function formatMessage(msg) {
   const replyTo = msg.replyToId
     ? buildReplySummary(state.groupMessages.get(msg.groupId), msg.replyToId)
     : null;
+  let matchObj = null;
+  if (msg.matchCode) {
+    const rawCode = String(msg.matchCode);
+    const sepIdx = rawCode.indexOf(':');
+    const gameType = sepIdx !== -1 ? rawCode.slice(0, sepIdx) : (msg.matchGameType || 'ludo');
+    const cleanCode = sepIdx !== -1 ? rawCode.slice(sepIdx + 1) : rawCode;
+    matchObj = {
+      code: cleanCode,
+      gameType: gameType === 'quiz' ? 'quiz' : 'ludo',
+      gameName: gameType === 'quiz' ? 'Monster Quiz Battle' : 'JakLudo'
+    };
+  }
   return {
     id: msg.id,
     groupId: msg.groupId,
@@ -559,7 +571,7 @@ async function formatMessage(msg) {
     sender: msg.senderId ? userSummary(msg.senderId) : null,
     text: msg.text || '',
     media: mediaObj,
-    match: msg.matchCode ? { code: msg.matchCode } : null,
+    match: matchObj,
     replyToId: msg.replyToId || null,
     replyTo,
     createdAt: new Date(msg.createdAt).toISOString()
@@ -1145,15 +1157,19 @@ async function getGroupMessageAudio(groupId, messageId, userId) {
   return playable;
 }
 
-async function postGroupMatchMessage(groupId, creatorUserId, roomCode) {
+async function postGroupMatchMessage(groupId, creatorUserId, roomCode, gameType = 'ludo') {
   if (!state.groups.has(groupId)) return null;
   const creator = db.getUserById(creatorUserId);
+  const cleanGame = gameType === 'quiz' ? 'quiz' : 'ludo';
+  const gameName = cleanGame === 'quiz' ? 'Monster Quiz Battle (Maks 3 Pemain)' : 'JakLudo';
+  const icon = cleanGame === 'quiz' ? '🐉' : '🎲';
+  const storedMatchCode = cleanGame === 'quiz' ? `quiz:${roomCode}` : roomCode;
   const row = appendRawGroupMessage({
     groupId,
     senderId: creatorUserId,
     type: 'match',
-    text: `🎲 ${creator?.name || 'Anggota'} membuat Match Grup! Kode room: ${roomCode}`,
-    matchCode: roomCode
+    text: `${icon} ${creator?.name || 'Anggota'} membuat Match Grup ${gameName}! Kode room: ${roomCode}`,
+    matchCode: storedMatchCode
   });
   return broadcastNewGroupMessage(row);
 }

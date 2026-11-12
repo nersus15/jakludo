@@ -6,12 +6,12 @@ import { storage } from './storage';
 import { useItemCatalogState } from './items';
 
 const KIND_LABELS = {
-  active: 'Dipakai manual di giliranmu',
+  active: 'Dipakai manual saat bertanding',
   passive: 'Bekerja otomatis',
   reactive: 'Muncul pilihan saat dibutuhkan'
 };
 
-export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, authToken }) {
+export default function ShopModal({ isOpen, onClose, asPage = false, currentUser, onUpdateUser, authToken }) {
   const [buying, setBuying] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const catalog = useItemCatalogState();
@@ -45,6 +45,7 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      asPage={asPage}
       size="lg"
       icon="shop"
       title="Toko item"
@@ -72,6 +73,7 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       <ul className="shop__items">
         {catalog.items.map(item => {
           const affordable = points >= item.price;
+          const isQuizItem = item.game === 'quiz';
           return (
             <li key={item.id} className="shop-item card">
               <div className="shop-item__head">
@@ -79,8 +81,15 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
                   <Icon name={item.icon || item.id} size={26} />
                 </span>
                 <div>
-                  <h3>{item.name}</h3>
-                  <p className="muted">{KIND_LABELS[item.kind] || 'Bekerja otomatis'} · dimiliki {owned[item.id] || 0}</p>
+                  <div className="shop-item__title-row">
+                    <h3>{item.name}</h3>
+                    <span className={`badge ${isQuizItem ? 'badge--info' : 'badge--brand'}`}>
+                      {isQuizItem ? 'Monster Quiz Battle' : 'JakLudo'}
+                    </span>
+                  </div>
+                  <p className="muted">
+                    {isQuizItem ? 'Dipakai saat menjawab soal (50:50)' : KIND_LABELS[item.kind] || 'Bekerja otomatis'} · dimiliki {owned[item.id] || 0}
+                  </p>
                 </div>
               </div>
               <p className="shop-item__desc">{item.description}</p>
@@ -104,16 +113,17 @@ export default function ShopModal({ isOpen, onClose, currentUser, onUpdateUser, 
       </ul>
 
       <section className="shop__earn" aria-labelledby="earn-title">
-        <h3 id="earn-title">Cara dapat poin</h3>
+        <h3 id="earn-title">Cara dapat poin PlayGo</h3>
         <ul>
-          <li>Peringkat 1: <strong>+30 poin</strong></li>
-          <li>Peringkat 2: <strong>+20 poin</strong> (main 4 orang) atau <strong>+15</strong> (main 3 orang)</li>
-          <li>Peringkat 3 (main 4 orang): <strong>+15 poin</strong></li>
-          <li>Peringkat terakhir: <strong>+5 poin</strong></li>
+          <li>Menang <strong>Monster Quiz Battle</strong>: <strong>+30 poin</strong></li>
+          <li>Peringkat 1 <strong>JakLudo</strong>: <strong>+30 poin</strong></li>
+          <li>Peringkat 2 <strong>JakLudo</strong>: <strong>+20 poin</strong> (main 4 orang) atau <strong>+15</strong> (main 3 orang)</li>
+          <li>Peringkat 3 <strong>JakLudo</strong> (main 4 orang): <strong>+15 poin</strong></li>
+          <li>Peringkat terakhir <strong>JakLudo</strong>: <strong>+5 poin</strong></li>
           <li>Bonus harian: <strong>+5 poin</strong> untuk pertandingan pertama yang kamu selesaikan tiap hari</li>
           <li>Bonus akun baru: <strong>200 poin</strong></li>
         </ul>
-        <p className="muted">Peringkat dihitung dari jumlah bidak yang sudah finish saat ada pemenang. Poin hanya dihitung untuk pertandingan bersama minimal satu pemain lain (bukan hanya bot).</p>
+        <p className="muted">Poin dapat digunakan untuk membeli item di JakLudo maupun Hints Jawaban di Monster Quiz Battle.</p>
       </section>
     </Modal>
   );

@@ -1,7 +1,7 @@
 {
-  "name": "JakLudo · Realtime Multiplayer Ludo Arena",
-  "short_name": "JakLudo",
-  "description": "Game Ludo Multiplayer Realtime Seru dengan Dadu 3D, Toko Item, dan Perebutan Takhta Ludo King!",
+  "name": "PlayGo · Multiplayer Game Platform",
+  "short_name": "PlayGo",
+  "description": "Platform game multiplayer realtime: mainkan JakLudo dan Monster Quiz Battle bareng teman!",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

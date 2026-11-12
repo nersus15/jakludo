@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import AppHeader from './components/AppHeader';
+import MobileBottomNav from './components/MobileBottomNav';
 import GameHeader from './components/game/GameHeader';
 import Toasts from './components/Toasts';
 import { ReconnectBar } from './components/NetworkStatus';
@@ -10,11 +11,13 @@ import AvatarCropModal from './components/AvatarCropModal';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
+import MonsterQuizScreen from './screens/MonsterQuizScreen';
 import AudioSettingsModal from './AudioSettingsModal';
 import PlayerProfileModal from './social/PlayerProfileModal';
 import { useAuth } from './hooks/useAuth';
 import { useGameRoom } from './hooks/useGameRoom';
 import { useSocial } from './hooks/useSocial';
+import { useMonsterQuiz } from './hooks/useMonsterQuiz';
 import { useActiveRooms } from './hooks/useActiveRooms';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useTheme } from './hooks/useTheme';
@@ -43,11 +46,17 @@ function preloadDialogs() {
 
 export default function App() {
   const [modal, setModal] = useState(null); // 'auth' | 'shop' | 'audio' | 'leaderboard' | 'friends' | 'groups' | null
+  const [gameMode, setGameMode] = useState('hub'); // 'hub' | 'ludo' | 'quiz'
   const [profileUserId, setProfileUserId] = useState('');
   const [initialChatFriendId, setInitialChatFriendId] = useState('');
   const [cropRequest, setCropRequest] = useState(null);
   const [audio, setAudio] = useState(sound.getState());
   const [sheet, setSheet] = useState(null); // bottom sheet di layar permainan: 'chat' | 'scores'
+  const [isMobileView, setIsMobileView] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 767px)').matches
+      : false
+  );
   const auth = useAuth();
   const requestAvatarCrop = useCallback(({ file, title, subtitle }) => {
     if (!file || !String(file.type || '').startsWith('image/')) {
@@ -62,6 +71,14 @@ export default function App() {
     currentUser: auth.currentUser,
     onNeedLogin: () => setModal('auth')
   });
+  const quiz = useMonsterQuiz({
+    socket: game.socket,
+    authToken: auth.authToken,
+    currentUser: auth.currentUser,
+    onUpdateUser: auth.setCurrentUser,
+    onNeedLogin: () => setModal('auth'),
+    active: gameMode === 'quiz'
+  });
   const social = useSocial({
     socket: game.socket,
     authToken: auth.authToken,
@@ -72,11 +89,31 @@ export default function App() {
   const network = useNetworkStatus(game.socket);
   const theme = useTheme();
   const pwa = usePwaInstall({ onBeforePrompt: () => sound.playClick() });
-  const activeRooms = useActiveRooms({ enabled: game.screen === 'home', authToken: auth.authToken });
+  const activeRooms = useActiveRooms({
+    enabled: game.screen === 'home' && (gameMode === 'hub' || gameMode === 'ludo'),
+    authToken: auth.authToken
+  });
   const itemCatalog = useItemCatalog();
 
   useEffect(() => sound.subscribe(state => setAudio({ ...state })), []);
   useEffect(preloadDialogs, []);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = e => setIsMobileView(e.matches);
+    setIsMobileView(mq.matches);
+    if (mq.addEventListener) {
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
+  useEffect(() => {
+    if (quiz.room?.code && game.screen === 'home') {
+      setGameMode('quiz');
+    }
+  }, [quiz.room?.code, game.screen]);
 
   // Status chat terbuka dipakai untuk menghitung pesan belum dibaca
   const changeSheet = name => {
@@ -109,6 +146,8 @@ export default function App() {
 
   const inGame = game.screen === 'room' && game.room?.started;
   const inLobby = game.screen === 'room' && game.room && !game.room.started;
+  const isMobileFeaturePage =
+    isMobileView && !inGame && (modal === 'friends' || modal === 'groups' || modal === 'shop');
 
   return (
     <div className={`app ${inGame ? 'app--game' : ''}`}>
@@ -132,6 +171,19 @@ export default function App() {
           network={network}
           friendBadgeCount={social.friendBadgeCount}
           groupBadgeCount={social.groupBadgeCount}
+          onGoHome={
+            isMobileFeaturePage
+              ? () => {
+                  sound.playClick();
+                  close();
+                }
+              : game.screen === 'home' && !quiz.room
+              ? () => {
+                  sound.playClick();
+                  setGameMode('hub');
+                }
+              : undefined
+          }
           onOpenFriends={open('friends')}
           onOpenGroups={open('groups')}
           onOpenShop={open('shop')}
@@ -151,10 +203,16 @@ export default function App() {
         roomInvite={social.roomInvite}
         chatToast={game.chatToast}
         reactions={game.reactions}
-        onAcceptRoomInvite={targetCode => {
+        onAcceptRoomInvite={(targetCode, inviteGameType) => {
           social.actions.dismissRoomInvite();
           setModal(null);
-          game.actions.joinRoom(targetCode);
+          if (inviteGameType === 'quiz') {
+            setGameMode('quiz');
+            quiz.actions.joinRoomByCode(targetCode);
+          } else {
+            setGameMode('ludo');
+            game.actions.joinRoom(targetCode);
+          }
         }}
         onDismissRoomInvite={social.actions.dismissRoomInvite}
         onOpenChat={() => {
@@ -166,6 +224,51 @@ export default function App() {
 
       {inGame ? (
         <GameScreen game={game} itemCatalog={itemCatalog} sheet={sheet} onSheetChange={changeSheet} onOpenShop={open('shop')} />
+      ) : isMobileFeaturePage ? (
+        <Suspense
+          fallback={
+            <main className="loading-screen" id="main" role="status">
+              <span className="spinner" aria-hidden="true" /> Memuat halaman...
+            </main>
+          }
+        >
+          {modal === 'shop' && (
+            <ShopModal
+              isOpen
+              asPage
+              onClose={close}
+              currentUser={auth.currentUser}
+              onUpdateUser={auth.setCurrentUser}
+              authToken={auth.authToken}
+            />
+          )}
+          {modal === 'friends' && (
+            <FriendsModal
+              isOpen
+              asPage
+              onClose={close}
+              currentUser={auth.currentUser}
+              social={social}
+              initialChatFriendId={initialChatFriendId}
+              onViewProfile={openProfile}
+              onOpenAuth={open('auth')}
+            />
+          )}
+          {modal === 'groups' && (
+            <GroupsScreen
+              isOpen
+              asPage
+              onClose={close}
+              currentUser={auth.currentUser}
+              social={social}
+              gameActions={game.actions}
+              quizActions={quiz.actions}
+              onSelectGameMode={mode => setGameMode(mode)}
+              onViewProfile={openProfile}
+              onOpenAuth={open('auth')}
+            />
+          )}
+        </Suspense>
       ) : inLobby ? (
         <LobbyScreen
           room={game.room}
@@ -182,30 +285,74 @@ export default function App() {
         <main className="loading-screen" id="main" role="status">
           <span className="spinner" aria-hidden="true" /> Masuk ke room...
         </main>
+      ) : gameMode === 'quiz' ? (
+        <MonsterQuizScreen
+          quiz={quiz}
+          currentUser={auth.currentUser}
+          onBackToMenu={() => {
+            sound.playClick();
+            setGameMode('hub');
+          }}
+          onOpenAuth={open('auth')}
+          onOpenShop={open('shop')}
+          onOpenAudio={openAudio}
+          onViewProfile={openProfile}
+        />
       ) : (
         <HomeScreen
           user={auth.currentUser}
           checkingAuth={auth.checking}
+          gameMode={gameMode}
           code={game.code}
           error={game.error}
           activeRooms={activeRooms}
+          activeQuizRoom={quiz.room}
           isInstalled={pwa.isInstalled}
           actions={game.actions}
           friendBadgeCount={social.friendBadgeCount}
           groupBadgeCount={social.groupBadgeCount}
+          onSelectGame={mode => {
+            sound.playClick();
+            setGameMode(mode);
+          }}
+          onBackToHub={() => {
+            sound.playClick();
+            setGameMode('hub');
+          }}
           onOpenFriends={open('friends')}
           onOpenGroups={open('groups')}
           onOpenAuth={open('auth')}
           onOpenLeaderboard={open('leaderboard')}
+          onOpenMonsterQuiz={() => {
+            sound.playClick();
+            setGameMode('quiz');
+          }}
           onInstall={pwa.install}
         />
       )}
 
       {!inGame && (
         <footer className="app-footer">
-          <span>© 2026 JakLudo</span>
-          <span>Ludo online untuk main bareng teman</span>
+          <span>© 2026 PlayGo</span>
+          <span>Platform game multiplayer realtime bareng teman</span>
         </footer>
+      )}
+
+      {!inGame && !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby') && (
+        <MobileBottomNav
+          activeModal={modal}
+          friendBadgeCount={social.friendBadgeCount}
+          groupBadgeCount={social.groupBadgeCount}
+          onSelectHome={() => {
+            close();
+            if (game.screen === 'home' && !quiz.room) {
+              setGameMode('hub');
+            }
+          }}
+          onOpenFriends={open('friends')}
+          onOpenGroups={open('groups')}
+          onOpenShop={open('shop')}
+        />
       )}
 
       <Suspense fallback={null}>
@@ -226,10 +373,19 @@ export default function App() {
             currentUser={auth.currentUser}
             socket={game.socket}
             onViewProfile={openProfile}
+            initialTab={gameMode === 'quiz' ? 'quiz' : 'ludo'}
           />
         )}
-        {modal === 'shop' && <ShopModal isOpen onClose={close} currentUser={auth.currentUser} onUpdateUser={auth.setCurrentUser} authToken={auth.authToken} />}
-        {modal === 'friends' && (
+        {!isMobileFeaturePage && modal === 'shop' && (
+          <ShopModal
+            isOpen
+            onClose={close}
+            currentUser={auth.currentUser}
+            onUpdateUser={auth.setCurrentUser}
+            authToken={auth.authToken}
+          />
+        )}
+        {!isMobileFeaturePage && modal === 'friends' && (
           <FriendsModal
             isOpen
             onClose={close}
@@ -240,13 +396,15 @@ export default function App() {
             onOpenAuth={open('auth')}
           />
         )}
-        {modal === 'groups' && (
+        {!isMobileFeaturePage && modal === 'groups' && (
           <GroupsScreen
             isOpen
             onClose={close}
             currentUser={auth.currentUser}
             social={social}
             gameActions={game.actions}
+            quizActions={quiz.actions}
+            onSelectGameMode={mode => setGameMode(mode)}
             onViewProfile={openProfile}
             onOpenAuth={open('auth')}
           />

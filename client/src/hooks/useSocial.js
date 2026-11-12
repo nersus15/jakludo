@@ -14,7 +14,10 @@ function formatMessageNotifBody(msg) {
   if (!msg) return 'Pesan baru';
   if (msg.type === 'image') return msg.text ? `📷 Foto: ${msg.text}` : '📷 Mengirim foto';
   if (msg.type === 'audio') return msg.text ? `🎙️ Pesan suara: ${msg.text}` : '🎙️ Mengirim pesan suara';
-  if (msg.type === 'match') return `🎲 Mengajak Match Grup! Kode room: ${msg.match?.code || ''}`;
+  if (msg.type === 'match') {
+    const gameLabel = msg.match?.gameType === 'quiz' ? 'Monster Quiz Battle' : 'JakLudo';
+    return `${msg.match?.gameType === 'quiz' ? '🐉' : '🎲'} Mengajak Match Grup ${gameLabel}! Kode room: ${msg.match?.code || ''}`;
+  }
   return msg.text || 'Pesan baru';
 }
 
@@ -331,9 +334,13 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
     const onRoomInvite = payload => {
       if (!payload?.code) return;
       sound.playJoinNotification();
+      const gameType = payload.gameType === 'quiz' ? 'quiz' : 'ludo';
+      const gameName = gameType === 'quiz' ? 'Monster Quiz Battle' : 'JakLudo';
       const invite = {
         id: Date.now() + Math.random(),
         code: payload.code,
+        gameType,
+        gameName,
         from: payload.from || null,
         group: payload.group || null
       };
@@ -343,7 +350,7 @@ export function useSocial({ socket, authToken, currentUser, onUpdateUser, onCrop
         setRoomInvite(prev => (prev?.id === invite.id ? null : prev));
       }, 15000);
 
-      notify('🎲 Undangan Bermain JakLudo!', {
+      notify(`${gameType === 'quiz' ? '🐉' : '🎲'} Undangan Bermain ${gameName}!`, {
         body: `${payload.from?.name || 'Teman'} mengundangmu masuk ke room ${payload.code}${
           payload.group?.name ? ` (Match Grup ${payload.group.name})` : ''
         }.`,

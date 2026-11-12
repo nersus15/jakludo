@@ -176,6 +176,16 @@ function clearPlayerDisconnectTimer(player) {
   }
 }
 
+// Dipanggil saat server dimatikan (deploy/restart). Room kuis hanya ada di memori dan tidak bisa
+// dilanjutkan, jadi pemain diberi tahu supaya tidak tertahan di layar pertandingan yang sudah mati.
+function closeAllRoomsForShutdown() {
+  const reason = 'Server sedang diperbarui. Pertandingan kuis dibatalkan dan tidak dihitung, silakan mulai lagi.';
+  for (const room of Array.from(quizRooms.values())) {
+    emitToRoom(room, 'quiz:room:closed', { roomCode: room.code, reason });
+    closeAndDeleteRoom(room);
+  }
+}
+
 function stopAllTimers() {
   for (const room of quizRooms.values()) {
     clearRoomTimers(room);
@@ -1706,6 +1716,7 @@ module.exports = {
   leaveRoom,
   handleDisconnect,
   getActiveRoomForUser,
+  closeAllRoomsForShutdown,
   serializeRoomForUser
 };
 

@@ -222,6 +222,7 @@ process.on('unhandledRejection', err => {
 // Simpan snapshot semua room lalu tutup koneksi database. Room dipulihkan saat server start lagi.
 function shutdown() {
   store.stopAllTimers();
+  quizEngine.closeAllRoomsForShutdown();
   quizEngine.stopAllTimers();
   store.flushRooms();
   return db.close();

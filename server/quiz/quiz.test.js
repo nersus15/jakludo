@@ -680,3 +680,17 @@ test('Stok hint lawan tidak dikirim ke pemain lain', async () => {
   await emitAck(s1, 'quiz:room:leave', { token: u1.token, code });
   await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
 });
+
+test('Server dimatikan: pemain kuis diberi tahu dan room dihapus', async () => {
+  const u = await registerUser('restart');
+  const s = await connect();
+  const code = (await emitAck(s, 'quiz:room:create', { token: u.token, monsterId: 'emberon' })).code;
+  const closedP = once(s, 'quiz:room:closed');
+  quizEngine.closeAllRoomsForShutdown();
+  const closed = await closedP;
+  assert.equal(closed.roomCode, code);
+  assert.match(closed.reason, /Server sedang diperbarui/);
+  assert.equal(quizEngine.quizRooms.has(code), false);
+  assert.equal(quizEngine.getActiveRoomForUser(u.user.id), null);
+});
+

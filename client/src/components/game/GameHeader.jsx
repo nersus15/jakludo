@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Modal from '../Modal';
 import Icon from '../Icon';
 import ThemeToggle from '../ThemeToggle';
@@ -6,8 +6,12 @@ import { NetworkIndicator } from '../NetworkStatus';
 import { sound } from '../../sound';
 
 // Header ringkas saat bermain: kode room, sinyal, toko, suara, dan keluar (dengan konfirmasi)
-export default function GameHeader({ room, audio, network, theme, onOpenShop, onOpenAudio, onLeave }) {
+export default function GameHeader({ room, audio, network, theme, onOpenShop, onOpenAudio, onLeave, leaveRequest = 0 }) {
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // Tombol Back browser/HP saat bermain membuka konfirmasi yang sama dengan tombol Keluar
+  useEffect(() => {
+    if (leaveRequest) setConfirmLeave(true);
+  }, [leaveRequest]);
   const muted = audio.bgmMuted && audio.sfxMuted;
 
   return (

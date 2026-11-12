@@ -88,7 +88,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
         setCode(d.code);
         if (d.sessionId) storage.set('session_id', d.sessionId);
         storage.set('active_room', d.code);
-        history.replaceState({}, '', `?room=${d.code}`);
+        history.replaceState(history.state, '', `?room=${d.code}`);
         setScreen('room');
         setError('');
         if (d.reconnected) sound.playClick();
@@ -150,7 +150,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
       // Room dihapus server (mis. semua pemain OUT): kembali ke beranda dengan alasannya
       'room:closed': ({ reason } = {}) => {
         storage.remove('active_room', 'session_id');
-        if (location.search.includes('room=')) history.replaceState({}, '', location.pathname);
+        if (location.search.includes('room=')) history.replaceState(history.state, '', location.pathname);
         setCode('');
         resetRoomState();
         showError(reason || 'Room sudah ditutup.');
@@ -166,7 +166,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
         if (err.includes('tidak ditemukan') || err.includes('OUT') || err.includes('penuh')) {
           storage.remove('active_room');
           if (location.search.includes('room=')) {
-            history.replaceState({}, '', location.pathname);
+            history.replaceState(history.state, '', location.pathname);
             setCode('');
           }
           // Room sudah tidak ada / tidak bisa dimasuki: jangan biarkan pemain di layar room yang basi
@@ -299,7 +299,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     resetRoomState();
     setCode('');
     setError('');
-    history.replaceState({}, '', location.pathname);
+    history.replaceState(history.state, '', location.pathname);
   };
 
   const emitWithClick = (event, payload) => {

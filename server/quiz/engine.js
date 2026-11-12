@@ -190,10 +190,12 @@ function stopAllTimers() {
   matchmakingQueue.clear();
 }
 
-function serializePlayer(p, currentRound = null) {
+// Stok hint hanya dikirim ke pemiliknya; lawan tidak boleh tahu sisa hint pemain lain (null)
+function serializePlayer(p, currentRound = null, viewerUserId = null) {
   const monster = getMonster(p.monsterId) || listMonsters()[0];
   const hasAnswered = currentRound ? currentRound.answers.has(p.userId) : false;
-  const hintCount = p.isBot ? 0 : (p.userId ? Number(db.getUserItems(p.userId)?.quizHint || 0) : 0);
+  const isViewer = Boolean(viewerUserId) && p.userId === viewerUserId;
+  const hintCount = isViewer && !p.isBot ? Number(db.getUserItems(p.userId)?.quizHint || 0) : null;
   return {
     userId: p.userId,
     username: p.username,
@@ -225,7 +227,7 @@ function serializeRoomForUser(room, viewerUserId = null) {
   const players = room.players
     .slice()
     .sort((a, b) => a.slot - b.slot)
-    .map(p => serializePlayer(p, currentRound));
+    .map(p => serializePlayer(p, currentRound, viewerUserId));
 
   let activeQuestion = null;
   let mySubmittedIndex = null;

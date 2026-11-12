@@ -663,3 +663,20 @@ test('Spam event kuis dari satu socket ditolak rate limiter', async () => {
   const leave = await emitAck(s, 'quiz:room:leave', { token: u.token });
   assert.equal(leave.ok, true);
 });
+
+test('Stok hint lawan tidak dikirim ke pemain lain', async () => {
+  const u1 = await registerUser('hint_a');
+  const u2 = await registerUser('hint_b');
+  const s1 = await connect();
+  const s2 = await connect();
+  const code = (await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' })).code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+
+  const state = quizEngine.serializeRoomForUser(quizEngine.quizRooms.get(code), u1.user.id);
+  const me = state.players.find(p => p.userId === u1.user.id);
+  const rival = state.players.find(p => p.userId === u2.user.id);
+  assert.equal(typeof me.hintCount, 'number');
+  assert.equal(rival.hintCount, null);
+  await emitAck(s1, 'quiz:room:leave', { token: u1.token, code });
+  await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
+});

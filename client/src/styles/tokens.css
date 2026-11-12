@@ -78,6 +78,8 @@
   --radius-sm: 10px;
   --radius-md: 16px;
   --radius-lg: 22px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
 
   /* Bayangan "cetak": tepi keras menempel, seperti kartu/keping di atas meja.
      Hanya untuk elemen utama (tombol utama, kartu fokus, dialog); sisanya tanpa bayangan. */

@@ -503,10 +503,10 @@ p.state-msg {
   text-align: center;
 }
 
-@media (prefers-color-scheme: dark) {
-  .count-badge {
-    color: #1f1a17;
-  }
+/* --danger di tema gelap berwarna merah muda terang: huruf gelap supaya angka tetap terbaca */
+:root[data-theme='dark'] .count-badge,
+:root[data-theme='dark'] .mobile-bottom-nav__badge {
+  color: #1f1a17;
 }
 
 /* Tampilkan/sembunyikan per ukuran layar */
@@ -575,6 +575,11 @@ p.state-msg {
   pointer-events: auto;
   display: flex;
   align-items: center;
+}
+
+/* Di tema gelap bar hitam hampir sama dengan latar halaman; beri garis tepi agar tetap terlihat */
+:root[data-theme='dark'] .mobile-bottom-nav__bar {
+  box-shadow: 0 0 0 1.5px var(--ink-line), 0 12px 28px rgba(0, 0, 0, 0.55);
 }
 
 /* Indikator lekukan (notch) + lingkaran oranye aktif yang bergeser sesuai --active-index (0..3) */

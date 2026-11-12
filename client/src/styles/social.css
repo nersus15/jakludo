@@ -888,7 +888,7 @@
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   border: 2px solid var(--ink-line);
-  background: var(--surface-alt);
+  background: var(--surface-2);
   box-shadow: var(--lift-1);
 }
 
@@ -900,7 +900,7 @@
   border-radius: var(--radius-pill);
   border: 2px solid var(--ink-line);
   background: var(--brand);
-  color: var(--ink-on-brand);
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -944,7 +944,7 @@
   align-items: center;
   gap: var(--space-1);
   font-weight: 700;
-  color: var(--ink-soft);
+  color: var(--text-2);
   /* Durasi "1:58 / 2:00" tidak boleh terpecah ke beberapa baris */
   white-space: nowrap;
   flex-shrink: 0;
@@ -1041,7 +1041,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-3);
-  background: var(--surface-alt);
+  background: var(--surface-2);
   flex-wrap: wrap;
 }
 

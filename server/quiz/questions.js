@@ -1,4 +1,4 @@
-// Bank soal Monster Quiz Battle (94 soal tervalidasi: 62 Pengetahuan Umum + 32 Hitung-hitungan Cepat)
+// Bank soal Monster Quiz Battle (183 soal tervalidasi: 123 Pengetahuan Umum + 60 Hitung-hitungan Cepat)
 // serta modul manajemen bank soal (siap dihubungkan ke Admin Panel di masa depan).
 // Jawaban benar (correctIndex) HANYA disimpan di backend dan tidak pernah dikirim ke klien sebelum ronde selesai.
 const crypto = require('crypto');
@@ -116,7 +116,7 @@ const SEED_QUESTIONS = [
     category: 'general',
     topic: 'Sains Dasar',
     difficulty: 'medium',
-    prompt: 'Lambang unsur kimia untuk senyawa air adalah...',
+    prompt: 'Rumus kimia untuk senyawa air adalah...',
     options: ['CO2', 'H2O', 'NaCl', 'O2'],
     correctIndex: 1
   },
@@ -495,7 +495,7 @@ const SEED_QUESTIONS = [
     category: 'general',
     topic: 'Budaya & Sehari-hari',
     difficulty: 'easy',
-    prompt: 'Makanan tradisional berbahan dasar daging rendang yang terkenal kelezatannya di seluruh dunia berasal dari...',
+    prompt: 'Rendang, masakan daging berbumbu yang terkenal hingga ke mancanegara, berasal dari...',
     options: ['Padang, Sumatra Barat', 'Yogyakarta', 'Manado, Sulawesi Utara', 'Palembang, Sumatra Selatan'],
     correctIndex: 0
   },
@@ -882,6 +882,814 @@ const SEED_QUESTIONS = [
     prompt: 'Berapakah hasil dari (64 ÷ 8) × 5?',
     options: ['35', '40', '45', '30'],
     correctIndex: 1
+  },
+
+  // =========================================================================
+  // C. SOAL TANTANGAN (61 umum + 28 hitung-hitungan)
+  // Lebih menantang: fakta unik sains, luar angkasa, sejarah, budaya, dan hitungan bertingkat
+  // =========================================================================
+
+  {
+    id: 'q_gen_063',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'hard',
+    prompt: 'Negara yang memiliki garis pantai terpanjang di dunia adalah...',
+    options: ['Kanada', 'Indonesia', 'Rusia', 'Australia'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_064',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'hard',
+    prompt: 'Danau terdalam di dunia yang terletak di Siberia, Rusia adalah...',
+    options: ['Danau Baikal', 'Danau Tanganyika', 'Danau Toba', 'Laut Kaspia'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_065',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'medium',
+    prompt: 'Sungai terpanjang di benua Asia adalah...',
+    options: ['Sungai Yangtze', 'Sungai Mekong', 'Sungai Gangga', 'Sungai Huang He'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_066',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'medium',
+    prompt: 'Negara terkecil di dunia berdasarkan luas wilayahnya adalah...',
+    options: ['Vatikan', 'Monako', 'San Marino', 'Liechtenstein'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_067',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'medium',
+    prompt: 'Ibu kota negara Australia adalah...',
+    options: ['Canberra', 'Sydney', 'Melbourne', 'Perth'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_068',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'medium',
+    prompt: 'Ibu kota negara Kanada adalah...',
+    options: ['Ottawa', 'Toronto', 'Vancouver', 'Montreal'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_069',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'hard',
+    prompt: 'Selat yang memisahkan Pulau Bali dan Pulau Lombok adalah...',
+    options: ['Selat Lombok', 'Selat Bali', 'Selat Alas', 'Selat Makassar'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_070',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'hard',
+    prompt: 'Garis khayal pemisah fauna Asia dan Australia yang melintas di antara Bali dan Lombok disebut Garis...',
+    options: ['Wallace', 'Weber', 'Lydekker', 'Khatulistiwa'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_071',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'medium',
+    prompt: 'Kota di Indonesia yang dilalui garis khatulistiwa dan memiliki Tugu Khatulistiwa adalah...',
+    options: ['Pontianak', 'Samarinda', 'Palu', 'Manado'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_072',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Unsur kimia dengan lambang \'Fe\' adalah...',
+    options: ['Besi', 'Fluor', 'Fosfor', 'Timah'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_073',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'hard',
+    prompt: 'Lambang unsur kimia untuk emas adalah...',
+    options: ['Au', 'Ag', 'Em', 'Go'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_074',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'hard',
+    prompt: 'Logam yang berwujud cair pada suhu ruang adalah...',
+    options: ['Raksa', 'Timbal', 'Natrium', 'Aluminium'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_075',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Tulang terpanjang di tubuh manusia adalah tulang...',
+    options: ['Paha', 'Lengan atas', 'Kering', 'Belakang'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_076',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'hard',
+    prompt: 'Jumlah tulang pada tubuh manusia dewasa adalah...',
+    options: ['206', '212', '198', '300'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_077',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'hard',
+    prompt: 'Golongan darah yang dikenal sebagai donor universal adalah...',
+    options: ['O negatif', 'AB positif', 'A positif', 'B negatif'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_078',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'hard',
+    prompt: 'Kecepatan cahaya di ruang hampa kira-kira sebesar...',
+    options: ['300.000 km per detik', '30.000 km per detik', '3.000 km per detik', '340 meter per detik'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_079',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Bagian sel yang dijuluki \'pembangkit energi\' sel adalah...',
+    options: ['Mitokondria', 'Ribosom', 'Nukleus', 'Vakuola'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_080',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Satuan SI untuk gaya adalah...',
+    options: ['Newton', 'Joule', 'Watt', 'Pascal'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_081',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Satuan SI untuk hambatan listrik adalah...',
+    options: ['Ohm', 'Volt', 'Ampere', 'Coulomb'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_082',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Gas yang paling banyak terkandung di atmosfer Bumi adalah...',
+    options: ['Nitrogen', 'Oksigen', 'Karbon dioksida', 'Argon'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_083',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Lapisan atmosfer tempat terjadinya hujan, awan, dan cuaca adalah...',
+    options: ['Troposfer', 'Stratosfer', 'Mesosfer', 'Termosfer'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_084',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'hard',
+    prompt: 'Inti dalam Bumi (inner core) diyakini para ilmuwan berwujud...',
+    options: ['Padat', 'Cair', 'Gas', 'Plasma'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_085',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Vitamin yang dapat dibentuk kulit dengan bantuan sinar matahari pagi adalah...',
+    options: ['Vitamin D', 'Vitamin A', 'Vitamin C', 'Vitamin K'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_086',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Ilmuwan yang terkenal dengan teori relativitas adalah...',
+    options: ['Albert Einstein', 'Isaac Newton', 'Nikola Tesla', 'Galileo Galilei'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_087',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'hard',
+    prompt: 'Planet yang satu harinya (rotasi) lebih lama daripada satu tahunnya (revolusi) adalah...',
+    options: ['Venus', 'Merkurius', 'Mars', 'Neptunus'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_088',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'hard',
+    prompt: 'Planet yang berotasi seperti \'menggelinding\' karena sumbunya miring hampir 98 derajat adalah...',
+    options: ['Uranus', 'Saturnus', 'Jupiter', 'Neptunus'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_089',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'hard',
+    prompt: 'Bintang yang paling dekat dengan planet Bumi adalah...',
+    options: ['Matahari', 'Proxima Centauri', 'Sirius', 'Polaris'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_090',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'hard',
+    prompt: 'Satuan \'tahun cahaya\' dalam astronomi dipakai untuk mengukur...',
+    options: ['Jarak', 'Waktu', 'Kecepatan', 'Kecerahan'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_091',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'hard',
+    prompt: 'Hewan laut yang memiliki tiga jantung dan darah berwarna biru adalah...',
+    options: ['Gurita', 'Bintang laut', 'Ubur-ubur', 'Kepiting'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_092',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'hard',
+    prompt: 'Mamalia asal Australia yang berkembang biak dengan bertelur adalah...',
+    options: ['Platipus', 'Koala', 'Wombat', 'Kanguru'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_093',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'medium',
+    prompt: 'Burung terbesar di dunia yang tidak bisa terbang adalah...',
+    options: ['Burung unta', 'Kasuari', 'Emu', 'Penguin kaisar'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_094',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'hard',
+    prompt: 'Satwa endemik Sulawesi yang taringnya tumbuh menembus moncong hingga melengkung ke atas adalah...',
+    options: ['Babirusa', 'Anoa', 'Tarsius', 'Maleo'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_095',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'medium',
+    prompt: 'Primata mungil endemik Sulawesi yang terkenal dengan matanya yang sangat besar adalah...',
+    options: ['Tarsius', 'Orangutan', 'Kukang', 'Bekantan'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_096',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'medium',
+    prompt: 'Bunga tunggal terbesar di dunia yang tumbuh di hutan Sumatra adalah...',
+    options: ['Rafflesia arnoldii', 'Anggrek bulan', 'Teratai raksasa', 'Melati'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_097',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'hard',
+    prompt: 'Selain manusia dan primata, hewan yang memiliki sidik jari sangat mirip manusia adalah...',
+    options: ['Koala', 'Panda', 'Kanguru', 'Beruang madu'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_098',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'medium',
+    prompt: 'Tumbuhan pemakan serangga yang daunnya berbentuk kantong disebut...',
+    options: ['Kantong semar', 'Putri malu', 'Kaktus', 'Venus flytrap'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_099',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'medium',
+    prompt: 'Konferensi Asia Afrika pertama diadakan di Bandung pada tahun...',
+    options: ['1955', '1945', '1961', '1950'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_100',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'medium',
+    prompt: 'Pahlawan dari Maluku yang memimpin perlawanan terhadap Belanda pada tahun 1817 adalah...',
+    options: ['Kapitan Pattimura', 'Sultan Hasanuddin', 'Pangeran Diponegoro', 'Tuanku Imam Bonjol'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_101',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'medium',
+    prompt: 'Tokoh pendiri perguruan Taman Siswa yang dijuluki Bapak Pendidikan Nasional adalah...',
+    options: ['Ki Hajar Dewantara', 'K.H. Ahmad Dahlan', 'Dr. Soetomo', 'H.O.S. Tjokroaminoto'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_102',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'hard',
+    prompt: 'Perundingan tahun 1949 yang membuat Belanda mengakui kedaulatan Indonesia adalah...',
+    options: ['Konferensi Meja Bundar', 'Perjanjian Linggarjati', 'Perjanjian Renville', 'Perjanjian Roem-Royen'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_103',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'medium',
+    prompt: 'Wakil Presiden pertama Republik Indonesia adalah...',
+    options: ['Mohammad Hatta', 'Sutan Sjahrir', 'Adam Malik', 'Sri Sultan Hamengkubuwono IX'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_104',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'hard',
+    prompt: 'Kota kuno peninggalan suku Inca di puncak Pegunungan Andes, Peru, adalah...',
+    options: ['Machu Picchu', 'Chichen Itza', 'Petra', 'Angkor Wat'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_105',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'medium',
+    prompt: 'Bahasa pemrograman yang diciptakan oleh Guido van Rossum adalah...',
+    options: ['Python', 'Java', 'C++', 'Ruby'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_106',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'hard',
+    prompt: 'Kepanjangan dari HTTP adalah...',
+    options: ['HyperText Transfer Protocol', 'High Transfer Text Protocol', 'HyperText Transmission Program', 'Host Transfer Text Protocol'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_107',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'hard',
+    prompt: 'Dalam sistem biner yang umum dipakai komputer, 1 kilobyte sama dengan... byte',
+    options: ['1024', '1000', '512', '2048'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_108',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'hard',
+    prompt: 'Bilangan biner 1010 jika diubah ke bilangan desimal bernilai...',
+    options: ['10', '12', '5', '1010'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_109',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'medium',
+    prompt: 'Sistem bilangan berbasis 16 yang memakai angka 0–9 dan huruf A–F disebut...',
+    options: ['Heksadesimal', 'Oktal', 'Biner', 'Desimal'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_110',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'medium',
+    prompt: 'Pendiri Microsoft bersama Paul Allen adalah...',
+    options: ['Bill Gates', 'Steve Jobs', 'Mark Zuckerberg', 'Larry Page'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_111',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'medium',
+    prompt: 'Senjata tradisional khas Aceh yang bentuknya menyerupai huruf L adalah...',
+    options: ['Rencong', 'Keris', 'Kujang', 'Mandau'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_112',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'hard',
+    prompt: 'Alat musik petik Sasando yang terbuat dari daun lontar berasal dari...',
+    options: ['Pulau Rote, NTT', 'Pulau Nias, Sumatra Utara', 'Pulau Lombok, NTB', 'Pulau Ambon, Maluku'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_113',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'medium',
+    prompt: 'Tari Saman yang terkenal dengan gerakan tepuk tangan serempak berasal dari...',
+    options: ['Aceh', 'Bali', 'Papua', 'Sulawesi Selatan'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_114',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'hard',
+    prompt: 'Upacara pemakaman adat yang terkenal dari Tana Toraja disebut...',
+    options: ['Rambu Solo', 'Ngaben', 'Kasada', 'Sekaten'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_115',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'medium',
+    prompt: 'Penulis novel \'Laskar Pelangi\' adalah...',
+    options: ['Andrea Hirata', 'Tere Liye', 'Pramoedya Ananta Toer', 'Habiburrahman El Shirazy'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_116',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'hard',
+    prompt: 'Penulis novel \'Bumi Manusia\' adalah...',
+    options: ['Pramoedya Ananta Toer', 'Chairil Anwar', 'Sapardi Djoko Damono', 'Ahmad Tohari'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_117',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'medium',
+    prompt: 'Lukisan terkenal \'Mona Lisa\' dibuat oleh...',
+    options: ['Leonardo da Vinci', 'Vincent van Gogh', 'Pablo Picasso', 'Michelangelo'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_118',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'medium',
+    prompt: 'Negara tuan rumah Piala Dunia FIFA 2022 adalah...',
+    options: ['Qatar', 'Rusia', 'Brasil', 'Arab Saudi'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_119',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'medium',
+    prompt: 'Jumlah lingkaran yang ada pada bendera Olimpiade adalah...',
+    options: ['5', '4', '6', '7'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_120',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'hard',
+    prompt: 'Dalam bulu tangkis dengan sistem reli, satu gim dimenangkan saat pemain mencapai poin...',
+    options: ['21', '15', '11', '25'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_121',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'medium',
+    prompt: 'Bahasa dengan jumlah penutur asli terbanyak di dunia adalah...',
+    options: ['Mandarin', 'Inggris', 'Spanyol', 'Hindi'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_122',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'medium',
+    prompt: 'Mata uang resmi negara Thailand adalah...',
+    options: ['Baht', 'Ringgit', 'Dong', 'Kip'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_123',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'hard',
+    prompt: 'Sel-sel sarang lebah madu berbentuk bangun...',
+    options: ['Segi enam', 'Segi lima', 'Persegi', 'Segitiga'],
+    correctIndex: 0
+  },
+
+  {
+    id: 'q_math_033',
+    category: 'math',
+    topic: 'Persen',
+    difficulty: 'medium',
+    prompt: 'Berapakah 15% dari 240?',
+    options: ['36', '24', '32', '40'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_034',
+    category: 'math',
+    topic: 'Persen',
+    difficulty: 'medium',
+    prompt: 'Berapakah 25% dari 360?',
+    options: ['90', '72', '80', '120'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_035',
+    category: 'math',
+    topic: 'Persen',
+    difficulty: 'hard',
+    prompt: 'Harga baju Rp200.000 mendapat diskon 30%. Berapa yang harus dibayar?',
+    options: ['Rp140.000', 'Rp170.000', 'Rp130.000', 'Rp160.000'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_036',
+    category: 'math',
+    topic: 'Kuadrat & Akar',
+    difficulty: 'medium',
+    prompt: 'Berapakah hasil dari 13 × 13?',
+    options: ['169', '156', '149', '196'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_037',
+    category: 'math',
+    topic: 'Kuadrat & Akar',
+    difficulty: 'hard',
+    prompt: 'Berapakah akar kuadrat dari 196?',
+    options: ['14', '16', '13', '18'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_038',
+    category: 'math',
+    topic: 'Kuadrat & Akar',
+    difficulty: 'hard',
+    prompt: 'Berapakah akar kuadrat dari 289?',
+    options: ['17', '19', '16', '23'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_039',
+    category: 'math',
+    topic: 'Pangkat',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari 2 pangkat 10?',
+    options: ['1024', '512', '2048', '1000'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_040',
+    category: 'math',
+    topic: 'Pangkat',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari 3 pangkat 5?',
+    options: ['243', '81', '125', '729'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_041',
+    category: 'math',
+    topic: 'Pola Bilangan',
+    difficulty: 'hard',
+    prompt: 'Lanjutkan pola bilangan: 2, 6, 12, 20, 30, ...',
+    options: ['42', '40', '36', '44'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_042',
+    category: 'math',
+    topic: 'Pola Bilangan',
+    difficulty: 'medium',
+    prompt: 'Lanjutkan pola bilangan: 1, 1, 2, 3, 5, 8, 13, ...',
+    options: ['21', '18', '20', '26'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_043',
+    category: 'math',
+    topic: 'Pola Bilangan',
+    difficulty: 'medium',
+    prompt: 'Lanjutkan pola bilangan: 3, 9, 27, 81, ...',
+    options: ['243', '162', '324', '108'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_044',
+    category: 'math',
+    topic: 'Pola Bilangan',
+    difficulty: 'hard',
+    prompt: 'Lanjutkan pola bilangan: 1, 4, 9, 16, 25, ...',
+    options: ['36', '30', '35', '49'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_045',
+    category: 'math',
+    topic: 'Perkalian',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari 17 × 6?',
+    options: ['102', '96', '112', '106'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_046',
+    category: 'math',
+    topic: 'Perkalian',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari 25 × 24?',
+    options: ['600', '500', '625', '480'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_047',
+    category: 'math',
+    topic: 'Perkalian',
+    difficulty: 'medium',
+    prompt: 'Berapakah hasil dari 45 × 11?',
+    options: ['495', '455', '505', '450'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_048',
+    category: 'math',
+    topic: 'Perkalian',
+    difficulty: 'medium',
+    prompt: 'Berapakah hasil dari 125 × 8?',
+    options: ['1000', '800', '1250', '900'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_049',
+    category: 'math',
+    topic: 'Pecahan',
+    difficulty: 'hard',
+    prompt: 'Berapakah 3/4 dari 84?',
+    options: ['63', '56', '64', '72'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_050',
+    category: 'math',
+    topic: 'Pecahan',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari 1/2 + 1/3?',
+    options: ['5/6', '2/5', '1/6', '2/3'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_051',
+    category: 'math',
+    topic: 'Pecahan',
+    difficulty: 'medium',
+    prompt: 'Berapakah hasil dari 0,25 × 48?',
+    options: ['12', '24', '8', '16'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_052',
+    category: 'math',
+    topic: 'Operasi Campuran',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari (18 × 5) ÷ 6?',
+    options: ['15', '12', '18', '20'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_053',
+    category: 'math',
+    topic: 'Operasi Campuran',
+    difficulty: 'hard',
+    prompt: 'Berapakah hasil dari 7 × 8 + 8 × 3?',
+    options: ['80', '192', '64', '88'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_054',
+    category: 'math',
+    topic: 'Operasi Campuran',
+    difficulty: 'medium',
+    prompt: 'Berapakah hasil dari 1001 − 297?',
+    options: ['704', '714', '694', '804'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_055',
+    category: 'math',
+    topic: 'Soal Cerita',
+    difficulty: 'hard',
+    prompt: 'Mobil melaju 60 km/jam selama 2,5 jam. Berapa jarak yang ditempuh?',
+    options: ['150 km', '120 km', '125 km', '160 km'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_056',
+    category: 'math',
+    topic: 'Soal Cerita',
+    difficulty: 'medium',
+    prompt: 'Berapa jumlah detik dalam 1 jam?',
+    options: ['3.600', '360', '6.000', '1.440'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_057',
+    category: 'math',
+    topic: 'Soal Cerita',
+    difficulty: 'hard',
+    prompt: 'Rata-rata dari 12, 15, 18, dan 21 adalah...',
+    options: ['16,5', '16', '17', '15,5'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_058',
+    category: 'math',
+    topic: 'FPB & KPK',
+    difficulty: 'hard',
+    prompt: 'Berapakah FPB (faktor persekutuan terbesar) dari 24 dan 36?',
+    options: ['12', '6', '8', '72'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_059',
+    category: 'math',
+    topic: 'FPB & KPK',
+    difficulty: 'medium',
+    prompt: 'Berapakah KPK (kelipatan persekutuan terkecil) dari 6 dan 8?',
+    options: ['24', '48', '12', '14'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_math_060',
+    category: 'math',
+    topic: 'Geometri',
+    difficulty: 'medium',
+    prompt: 'Jumlah besar ketiga sudut dalam sebuah segitiga adalah...',
+    options: ['180°', '360°', '90°', '270°'],
+    correctIndex: 0
   }
 ];
 
@@ -895,8 +1703,8 @@ function validateQuestionInput(input = {}) {
     return { valid: false, error: 'Topik soal wajib diisi (maksimal 60 karakter).' };
   }
   const difficulty = String(input.difficulty || 'easy').trim();
-  if (difficulty !== 'easy' && difficulty !== 'medium') {
-    return { valid: false, error: 'Tingkat kesulitan harus "easy" atau "medium".' };
+  if (difficulty !== 'easy' && difficulty !== 'medium' && difficulty !== 'hard') {
+    return { valid: false, error: 'Tingkat kesulitan harus "easy", "medium", atau "hard".' };
   }
   const prompt = String(input.prompt || '').trim();
   if (prompt.length < 5 || prompt.length > 300) {

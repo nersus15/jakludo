@@ -80,17 +80,17 @@ async function registerUser(prefix = 'qp') {
   return body;
 }
 
-test('Bank Soal & Katalog Monster: minimal 90 soal tervalidasi (62 umum & 32 matematika) dan 6 monster 100 HP', () => {
+test('Bank Soal & Katalog Monster: minimal 180 soal tervalidasi (120 umum & 60 matematika) dan 6 monster 100 HP', () => {
   assert.equal(QUIZ_MONSTERS.length, 6);
   for (const m of QUIZ_MONSTERS) {
     assert.equal(m.baseHp, 100);
     assert.ok(m.id && m.name && m.description);
   }
-  assert.ok(SEED_QUESTIONS.length >= 90, `Expected >=90 questions, got ${SEED_QUESTIONS.length}`);
+  assert.ok(SEED_QUESTIONS.length >= 180, `Expected >=180 questions, got ${SEED_QUESTIONS.length}`);
   const generalCount = SEED_QUESTIONS.filter(q => q.category === 'general').length;
   const mathCount = SEED_QUESTIONS.filter(q => q.category === 'math').length;
-  assert.ok(generalCount >= 60, `Expected >=60 general questions, got ${generalCount}`);
-  assert.ok(mathCount >= 30, `Expected >=30 math questions, got ${mathCount}`);
+  assert.ok(generalCount >= 120, `Expected >=120 general questions, got ${generalCount}`);
+  assert.ok(mathCount >= 60, `Expected >=60 math questions, got ${mathCount}`);
 
   for (const q of SEED_QUESTIONS) {
     const roundQ = buildRoundQuestionPayload(q, 1, 20, Date.now(), Date.now() + 15000);

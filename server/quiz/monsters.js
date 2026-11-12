@@ -68,6 +68,23 @@ const MONSTERS = [
   }
 ];
 
+// Profil bot AI untuk Cari Lawan Cepat (Monster Quiz Battle).
+// Menggunakan nama dan username organik seperti pemain sungguhan agar pengalaman bermain terasa natural.
+const BOT_PROFILES = [
+  { id: 'bot_quiz_rex', username: 'rian_pratama', name: 'Rian Pratama', avatar: '1', monsterId: 'emberon' },
+  { id: 'bot_quiz_luna', username: 'nadiasafitri', name: 'Nadia Safitri', avatar: '2', monsterId: 'aquaris' },
+  { id: 'bot_quiz_blaze', username: 'dimas_stw', name: 'Dimas Setiawan', avatar: '3', monsterId: 'voltix' },
+  { id: 'bot_quiz_terra', username: 'citrakirana', name: 'Citra Kirana', avatar: '4', monsterId: 'terragon' },
+  { id: 'bot_quiz_flora', username: 'reza_aditya', name: 'Reza Aditya', avatar: '5', monsterId: 'sylvara' },
+  { id: 'bot_quiz_frosty', username: 'indah_prm', name: 'Indah Permata', avatar: '6', monsterId: 'frostbite' },
+  { id: 'bot_quiz_budi', username: 'budi_santoso', name: 'Budi Santoso', avatar: '1', monsterId: 'emberon' },
+  { id: 'bot_quiz_alya', username: 'alya_putri', name: 'Alya Putri', avatar: '2', monsterId: 'aquaris' },
+  { id: 'bot_quiz_fajar', username: 'fajar_nugraha', name: 'Fajar Nugraha', avatar: '3', monsterId: 'voltix' },
+  { id: 'bot_quiz_sitir', username: 'siti_rahma', name: 'Siti Rahma', avatar: '4', monsterId: 'terragon' },
+  { id: 'bot_quiz_kevin', username: 'kevin_wijaya', name: 'Kevin Wijaya', avatar: '5', monsterId: 'sylvara' },
+  { id: 'bot_quiz_dewi', username: 'dewi_lestari', name: 'Dewi Lestari', avatar: '6', monsterId: 'frostbite' }
+];
+
 const MONSTERS_BY_ID = new Map(MONSTERS.map(m => [m.id, m]));
 
 function listMonsters() {
@@ -84,6 +101,7 @@ module.exports = {
   INITIAL_HP,
   ATTACK_DAMAGE,
   MONSTERS,
+  BOT_PROFILES,
   listMonsters,
   getMonster
 };

@@ -867,7 +867,7 @@ export default function MonsterQuizScreen({
                     <div key={p.userId} className="mq-result-player">
                       <PlayerAvatar player={p} size={36} />
                       <div>
-                        <strong>{p.name}</strong>
+                        <strong>{p.name} {p.userId === currentUser?.id ? '(Kamu)' : ''}</strong>
                         <p className="muted">
                           {getClientMonster(p.monsterId).name} · Sisa {p.hp} HP · {p.correctAnswers || 0} Benar
                         </p>

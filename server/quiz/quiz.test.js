@@ -80,17 +80,17 @@ async function registerUser(prefix = 'qp') {
   return body;
 }
 
-test('Bank Soal & Katalog Monster: minimal 60 soal tervalidasi (umum & matematika) dan 6 monster 100 HP', () => {
+test('Bank Soal & Katalog Monster: minimal 90 soal tervalidasi (62 umum & 32 matematika) dan 6 monster 100 HP', () => {
   assert.equal(QUIZ_MONSTERS.length, 6);
   for (const m of QUIZ_MONSTERS) {
     assert.equal(m.baseHp, 100);
     assert.ok(m.id && m.name && m.description);
   }
-  assert.ok(SEED_QUESTIONS.length >= 60, `Expected >=60 questions, got ${SEED_QUESTIONS.length}`);
+  assert.ok(SEED_QUESTIONS.length >= 90, `Expected >=90 questions, got ${SEED_QUESTIONS.length}`);
   const generalCount = SEED_QUESTIONS.filter(q => q.category === 'general').length;
   const mathCount = SEED_QUESTIONS.filter(q => q.category === 'math').length;
-  assert.ok(generalCount >= 30);
-  assert.ok(mathCount >= 30);
+  assert.ok(generalCount >= 60, `Expected >=60 general questions, got ${generalCount}`);
+  assert.ok(mathCount >= 30, `Expected >=30 math questions, got ${mathCount}`);
 
   for (const q of SEED_QUESTIONS) {
     const roundQ = buildRoundQuestionPayload(q, 1, 20, Date.now(), Date.now() + 15000);
@@ -434,4 +434,93 @@ test('Skenario 14: Reconnect saat pertandingan berlangsung memulihkan state tanp
   assert.equal(restoredState.phase, 'question');
   assert.equal(restoredState.match.roundNo, 1);
   assert.ok(restoredState.match.question);
+});
+
+test('Skenario 15: Cari Lawan Cepat bermain dengan bot jika tidak menemukan pemain sungguhan', async () => {
+  quizEngine.setTimings({
+    countdownMs: 30,
+    questionDurationMs: 250,
+    roundTransitionMs: 40,
+    disconnectGraceMs: 2000,
+    botMatchmakingDelayMs: 80,
+    maxRounds: 5
+  });
+
+  const u = await registerUser('botSeeker');
+  const s = await connect();
+
+  const joinedEventP = once(s, 'room.joined');
+  const ack = await emitAck(s, 'quiz:matchmaking:join', { token: u.token, monsterId: 'emberon' });
+  assert.equal(ack.ok, true);
+  assert.equal(ack.matched, false);
+  assert.equal(ack.searching, true);
+
+  // Tunggu bot matchmaking memicu pembuatan room
+  const joinedPayload = await joinedEventP;
+  assert.equal(joinedPayload.matched, true);
+  assert.ok(joinedPayload.roomCode);
+
+  const room = quizEngine.quizRooms.get(joinedPayload.roomCode);
+  assert.ok(room);
+  assert.equal(room.players.length, 2);
+  assert.equal(room.players[0].userId, u.user.id);
+  assert.ok(room.players[1].isBot);
+  assert.equal(room.players[1].ready, true);
+  assert.ok(room.players[1].userId.startsWith('bot_'));
+  assert.ok(!room.players[1].name.toLowerCase().includes('bot'), 'Nama pemain bot harus organik tanpa kata bot');
+});
+
+test('Skenario 16: Cari Lawan Cepat membatalkan pencarian sebelum dipasangkan dengan bot', async () => {
+  quizEngine.setTimings({
+    botMatchmakingDelayMs: 300
+  });
+
+  const u = await registerUser('canceller');
+  const s = await connect();
+
+  const ackJoin = await emitAck(s, 'quiz:matchmaking:join', { token: u.token, monsterId: 'emberon' });
+  assert.equal(ackJoin.ok, true);
+  assert.equal(ackJoin.searching, true);
+
+  const ackLeave = await emitAck(s, 'quiz:matchmaking:leave', { token: u.token });
+  assert.equal(ackLeave.ok, true);
+
+  // Tunggu lebih lama dari delay bot
+  await new Promise(r => setTimeout(r, 350));
+  assert.equal(quizEngine.getActiveRoomForUser(u.user.id), null);
+});
+
+test('Skenario 17: Pertandingan melawan bot berjalan otomatis hingga ronde dievaluasi', async () => {
+  quizEngine.setTimings({
+    countdownMs: 30,
+    questionDurationMs: 200,
+    roundTransitionMs: 40,
+    botMatchmakingDelayMs: 50,
+    maxRounds: 3
+  });
+
+  const u = await registerUser('botPlayer');
+  const s = await connect();
+
+  const joinedEventP = once(s, 'room.joined');
+  await emitAck(s, 'quiz:matchmaking:join', { token: u.token, monsterId: 'aquaris' });
+  const joinedPayload = await joinedEventP;
+  const code = joinedPayload.roomCode;
+
+  // Pemain manusia klik siap -> langsung mulai karena bot sudah siap
+  const questionP = once(s, 'question.started');
+  await emitAck(s, 'quiz:player:ready', { token: u.token, code, ready: true });
+  const qPayload = await questionP;
+  assert.equal(qPayload.roundNo, 1);
+
+  // Hasil ronde diterima baik setelah submit atau setelah timeout bot
+  const ansResultP = once(s, 'answer.result');
+  // Pemain submit jawaban index 0
+  await emitAck(s, 'quiz:answer:submit', { token: u.token, code, roundId: qPayload.roundId, selectedIndex: 0 });
+
+  const result = await ansResultP;
+  assert.equal(result.roundNo, 1);
+  assert.ok(result.answers);
+  const botUserId = Object.keys(result.answers).find(id => id.startsWith('bot_'));
+  assert.ok(botUserId, 'Bot harus tercatat pada hasil ronde');
 });

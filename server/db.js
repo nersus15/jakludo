@@ -375,7 +375,38 @@ function buildUserObject(row) {
 
 function findUserById(id) {
   if (typeof id !== 'string') return null;
-  return buildUserObject(state.usersById.get(id));
+  const row = state.usersById.get(id);
+  if (row) return buildUserObject(row);
+  if (id.startsWith('bot_')) {
+    const botProfileMap = {
+      bot_quiz_rex: { name: 'Rian Pratama', username: 'rian_pratama', avatar: '1' },
+      bot_quiz_luna: { name: 'Nadia Safitri', username: 'nadiasafitri', avatar: '2' },
+      bot_quiz_blaze: { name: 'Dimas Setiawan', username: 'dimas_stw', avatar: '3' },
+      bot_quiz_terra: { name: 'Citra Kirana', username: 'citrakirana', avatar: '4' },
+      bot_quiz_flora: { name: 'Reza Aditya', username: 'reza_aditya', avatar: '5' },
+      bot_quiz_frosty: { name: 'Indah Permata', username: 'indah_prm', avatar: '6' },
+      bot_quiz_budi: { name: 'Budi Santoso', username: 'budi_santoso', avatar: '1' },
+      bot_quiz_alya: { name: 'Alya Putri', username: 'alya_putri', avatar: '2' },
+      bot_quiz_fajar: { name: 'Fajar Nugraha', username: 'fajar_nugraha', avatar: '3' },
+      bot_quiz_sitir: { name: 'Siti Rahma', username: 'siti_rahma', avatar: '4' },
+      bot_quiz_kevin: { name: 'Kevin Wijaya', username: 'kevin_wijaya', avatar: '5' },
+      bot_quiz_dewi: { name: 'Dewi Lestari', username: 'dewi_lestari', avatar: '6' }
+    };
+    const mapped = botProfileMap[id];
+    const rawName = id.replace(/^bot_(quiz_)?/, '');
+    const cleanName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+    return {
+      id,
+      username: mapped?.username || id,
+      name: mapped?.name || cleanName || 'Pemain',
+      passwordHash: '',
+      authType: 'bot',
+      avatar: mapped?.avatar || '1',
+      createdAt: Date.now(),
+      inventory: {}
+    };
+  }
+  return null;
 }
 
 function findUserByUsername(username) {

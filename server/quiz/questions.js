@@ -1,4 +1,4 @@
-// Bank soal Monster Quiz Battle (64 soal tervalidasi: 32 Pengetahuan Umum + 32 Hitung-hitungan Cepat)
+// Bank soal Monster Quiz Battle (94 soal tervalidasi: 62 Pengetahuan Umum + 32 Hitung-hitungan Cepat)
 // serta modul manajemen bank soal (siap dihubungkan ke Admin Panel di masa depan).
 // Jawaban benar (correctIndex) HANYA disimpan di backend dan tidak pernah dikirim ke klien sebelum ronde selesai.
 const crypto = require('crypto');
@@ -307,6 +307,278 @@ const SEED_QUESTIONS = [
     prompt: 'Burung khas Papua yang terkenal karena keindahan bulunya dan dijuluki Burung Surga adalah...',
     options: ['Burung Merak', 'Burung Cenderawasih', 'Burung Jalak Bali', 'Burung Kasuari'],
     correctIndex: 1
+  },
+
+  // Soal Pengayaan Tambahan Pengetahuan Umum (30 soal baru: q_gen_033 - q_gen_062)
+  {
+    id: 'q_gen_033',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'easy',
+    prompt: 'Ibu kota baru Republik Indonesia yang terletak di Kalimantan Timur bernama...',
+    options: ['Nusantara', 'Tarakan', 'Balikpapan', 'Samarinda'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_034',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'medium',
+    prompt: 'Gunung tertinggi di Indonesia yang puncaknya diselimuti salju abadi adalah...',
+    options: ['Puncak Jaya', 'Gunung Kerinci', 'Gunung Rinjani', 'Gunung Semeru'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_035',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'easy',
+    prompt: 'Negara kepulauan terbesar di dunia berdasarkan jumlah pulau adalah...',
+    options: ['Filipina', 'Indonesia', 'Madagaskar', 'Jepang'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_036',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'easy',
+    prompt: 'Samudra terluas dan terdalam di permukaan Bumi adalah...',
+    options: ['Samudra Atlantik', 'Samudra Hindia', 'Samudra Pasifik', 'Samudra Arktik'],
+    correctIndex: 2
+  },
+  {
+    id: 'q_gen_037',
+    category: 'general',
+    topic: 'Geografi',
+    difficulty: 'easy',
+    prompt: 'Menara Eiffel yang terkenal di dunia berada di kota...',
+    options: ['London', 'Roma', 'Paris', 'Berlin'],
+    correctIndex: 2
+  },
+  {
+    id: 'q_gen_038',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'easy',
+    prompt: 'Planet terbesar dalam Tata Surya kita adalah...',
+    options: ['Saturnus', 'Jupiter', 'Neptunus', 'Uranus'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_039',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'easy',
+    prompt: 'Satelit alami yang senantiasa mengitari planet Bumi adalah...',
+    options: ['Bulan', 'Matahari', 'Titan', 'Phobos'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_040',
+    category: 'general',
+    topic: 'Luar Angkasa',
+    difficulty: 'easy',
+    prompt: 'Planet di Tata Surya yang sering dijuluki sebagai "Planet Merah" adalah...',
+    options: ['Venus', 'Merkurius', 'Mars', 'Jupiter'],
+    correctIndex: 2
+  },
+  {
+    id: 'q_gen_041',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'easy',
+    prompt: 'Zat hijau pada daun tumbuhan yang berperan menyerap energi cahaya matahari adalah...',
+    options: ['Karoten', 'Klorofil', 'Glukosa', 'Kambium'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_042',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Benda langit yang terbakar saat memasuki atmosfer Bumi dan tampak menyala terang di langit malam disebut...',
+    options: ['Komet', 'Meteor', 'Asteroid', 'Supernova'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_043',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'easy',
+    prompt: 'Perubahan wujud benda dari zat cair menjadi zat gas disebut...',
+    options: ['Membeku', 'Menguap', 'Menyublim', 'Mengembun'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_044',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'easy',
+    prompt: 'Gaya tarik Bumi yang menyebabkan semua benda jatuh ke bawah disebut...',
+    options: ['Gaya Gesek', 'Gaya Gravitasi', 'Gaya Magnet', 'Gaya Pegas'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_045',
+    category: 'general',
+    topic: 'Sains Dasar',
+    difficulty: 'medium',
+    prompt: 'Organ tubuh manusia yang berfungsi utama memompa darah ke seluruh tubuh adalah...',
+    options: ['Paru-paru', 'Ginjal', 'Hati', 'Jantung'],
+    correctIndex: 3
+  },
+  {
+    id: 'q_gen_046',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'easy',
+    prompt: 'Hewan mamalia yang terkenal dapat terbang aktif dengan sayap selaput adalah...',
+    options: ['Kelelawar', 'Tupai Terbang', 'Burung Hantu', 'Kasuari'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_047',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'easy',
+    prompt: 'Hewan reptil yang terkenal dapat berkamuflase mengubah warna kulitnya sesuai lingkungan adalah...',
+    options: ['Bunglon', 'Katak Pohon', 'Iguana', 'Trenggiling'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_048',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'easy',
+    prompt: 'Proses perubahan bentuk tubuh hewan dari telur, ulat, kepompong, hingga menjadi kupu-kupu disebut...',
+    options: ['Metamorfosis', 'Evolusi', 'Hibernasi', 'Regenerasi'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_049',
+    category: 'general',
+    topic: 'Hewan & Alam',
+    difficulty: 'easy',
+    prompt: 'Mamalia khas benua Australia yang membesarkan anaknya di dalam kantung perut adalah...',
+    options: ['Koala', 'Kanguru', 'Platipus', 'Wombat'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_050',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'easy',
+    prompt: 'Presiden pertama Republik Indonesia yang membacakan naskah Proklamasi Kemerdekaan adalah...',
+    options: ['Soeharto', 'Ir. Soekarno', 'B.J. Habibie', 'Abdurrahman Wahid'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_051',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'easy',
+    prompt: 'Pahlawan nasional wanita dari Jepara yang gigih memperjuangkan emansipasi pendidikan wanita adalah...',
+    options: ['Cut Nyak Dien', 'R.A. Kartini', 'Dewi Sartika', 'Martha Christina Tiahahu'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_052',
+    category: 'general',
+    topic: 'Sejarah Umum',
+    difficulty: 'medium',
+    prompt: 'Kerajaan maritim Hindu-Buddha terbesar di Nusantara yang berpusat di Jawa Timur adalah...',
+    options: ['Kerajaan Sriwijaya', 'Kerajaan Majapahit', 'Kerajaan Tarumanegara', 'Kerajaan Mataram Kuno'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_053',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'easy',
+    prompt: 'Makanan tradisional berbahan dasar daging rendang yang terkenal kelezatannya di seluruh dunia berasal dari...',
+    options: ['Padang, Sumatra Barat', 'Yogyakarta', 'Manado, Sulawesi Utara', 'Palembang, Sumatra Selatan'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_054',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'easy',
+    prompt: 'Kain tradisional bermotif indah warisan budaya dunia asli Indonesia yang diakui UNESCO adalah...',
+    options: ['Kain Songket', 'Kain Ulos', 'Kain Batik', 'Kain Tenun Ikat'],
+    correctIndex: 2
+  },
+  {
+    id: 'q_gen_055',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'easy',
+    prompt: 'Tari Kecak yang menampilkan puluhan penari pria duduk melingkar melantunkan irama vokal berasal dari provinsi...',
+    options: ['Bali', 'Lombok', 'Jawa Tengah', 'Sumatra Utara'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_056',
+    category: 'general',
+    topic: 'Budaya & Sehari-hari',
+    difficulty: 'easy',
+    prompt: 'Makanan khas Yogyakarta bercita rasa manis legit yang dimasak dari nangka muda adalah...',
+    options: ['Gudeg', 'Rawon', 'Pempek', 'Papeda'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_057',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'easy',
+    prompt: 'Aplikasi penjelajah web (browser) populer yang dikembangkan oleh perusahaan Google adalah...',
+    options: ['Safari', 'Google Chrome', 'Mozilla Firefox', 'Opera Mini'],
+    correctIndex: 1
+  },
+  {
+    id: 'q_gen_058',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'easy',
+    prompt: 'Perangkat keras komputer yang berfungsi untuk menampilkan antarmuka visual kepada pengguna adalah...',
+    options: ['Monitor', 'Keyboard', 'Hard Disk', 'Motherboard'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_059',
+    category: 'general',
+    topic: 'Teknologi',
+    difficulty: 'easy',
+    prompt: 'Kepanjangan dari teknologi koneksi nirkabel jarak pendek Wi-Fi adalah singkatan dari...',
+    options: ['Wireless Fidelity', 'Wireless File', 'Wide Filter', 'Web Fiber'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_060',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'easy',
+    prompt: 'Warna primer dalam seni rupa pigmen yang tidak dapat dihasilkan dari campuran warna lain adalah...',
+    options: ['Merah, Kuning, Biru', 'Merah, Hijau, Hitam', 'Biru, Oranye, Ungu', 'Kuning, Hijau, Putih'],
+    correctIndex: 0
+  },
+  {
+    id: 'q_gen_061',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'easy',
+    prompt: 'Berapakah jumlah hari dalam satu tahun kabisat yang terjadi setiap empat tahun sekali?',
+    options: ['364 hari', '365 hari', '366 hari', '367 hari'],
+    correctIndex: 2
+  },
+  {
+    id: 'q_gen_062',
+    category: 'general',
+    topic: 'Pengetahuan Umum',
+    difficulty: 'easy',
+    prompt: 'Berapa banyak warna utama yang tampak pada spektrum pelangi standar?',
+    options: ['5 warna', '6 warna', '7 warna', '8 warna'],
+    correctIndex: 2
   },
 
   // =========================================================================

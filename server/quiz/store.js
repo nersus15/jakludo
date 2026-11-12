@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
-const { MONSTERS, listMonsters, getMonster } = require('./monsters');
+const { MONSTERS, BOT_PROFILES, listMonsters, getMonster } = require('./monsters');
 const { SEED_QUESTIONS, validateQuestionInput } = require('./questions');
 
 const LOCAL_QUIZ_FILE = path.join(db.DATA_DIR, 'jakludo-quiz.json');
@@ -126,6 +126,16 @@ async function hydrateFromPostgres() {
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, TRUE, $8, $8)
          ON CONFLICT (id) DO NOTHING`,
         [q.id, q.category, q.topic, q.difficulty, q.prompt, JSON.stringify(q.options), q.correctIndex, now]
+      );
+    }
+
+    // Seed profil akun bot quiz ke tabel users (auth_type = 'bot') agar integritas foreign key terjamin
+    for (const b of (BOT_PROFILES || [])) {
+      await client.query(
+        `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at)
+         VALUES ($1, $2, $3, '', 'bot', $4, $5)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, username = EXCLUDED.username, avatar = EXCLUDED.avatar`,
+        [b.id, b.username, b.name, b.avatar, now]
       );
     }
 
@@ -318,7 +328,7 @@ function setQuestionActive(id, active) {
  * Pilih satu soal acak yang belum pernah dipakai di dalam pertandingan ini.
  * Menyeimbangkan kategori 'general' dan 'math' secara bergantian apabila memungkinkan.
  */
-function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = null) {
+function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = null, forceCategory = false) {
   const unused = [];
   const unusedPreferred = [];
 
@@ -329,6 +339,13 @@ function selectRandomUnusedQuestion(usedIds = new Set(), preferredCategory = nul
     if (preferredCategory && q.category === preferredCategory) {
       unusedPreferred.push(q);
     }
+  }
+
+  // Jika forceCategory aktif dan tersedia soal kategori tersebut, batasi ketat pada kategori pilihan
+  if (forceCategory && preferredCategory && unusedPreferred.length > 0) {
+    const idx = crypto.randomInt(0, unusedPreferred.length);
+    const chosen = unusedPreferred[idx];
+    return { ...chosen, options: [...chosen.options] };
   }
 
   const pool = unusedPreferred.length > 0 ? unusedPreferred : unused;
@@ -497,8 +514,9 @@ function recordMatchFinished({
     };
   });
 
-  // Update in-memory stats untuk masing-masing pemain (terpisah dari leaderboard Ludo!)
+  // Update in-memory stats untuk masing-masing pemain manusia (terpisah dari leaderboard Ludo!)
   for (const sp of summaryPlayers) {
+    if (String(sp.userId).startsWith('bot_')) continue;
     const cur = state.stats.get(sp.userId) || {
       userId: sp.userId,
       matchesPlayed: 0,
@@ -560,17 +578,20 @@ function recordMatchFinished({
       const deltaLoss = sp.result === 'lose' ? 1 : 0;
       const deltaDraw = sp.result === 'draw' ? 1 : 0;
 
-      await client.query(
-        `INSERT INTO quiz_player_stats (user_id, matches_played, wins, losses, draws, updated_at)
-         VALUES ($1, 1, $2, $3, $4, $5)
-         ON CONFLICT (user_id) DO UPDATE SET
-           matches_played = quiz_player_stats.matches_played + 1,
-           wins = quiz_player_stats.wins + EXCLUDED.wins,
-           losses = quiz_player_stats.losses + EXCLUDED.losses,
-           draws = quiz_player_stats.draws + EXCLUDED.draws,
-           updated_at = EXCLUDED.updated_at`,
-        [sp.userId, deltaWin, deltaLoss, deltaDraw, finishedAt]
-      );
+      // Hanya catat statistik untuk pemain terdaftar asli, bukan bot
+      if (!String(sp.userId).startsWith('bot_')) {
+        await client.query(
+          `INSERT INTO quiz_player_stats (user_id, matches_played, wins, losses, draws, updated_at)
+           VALUES ($1, 1, $2, $3, $4, $5)
+           ON CONFLICT (user_id) DO UPDATE SET
+             matches_played = quiz_player_stats.matches_played + 1,
+             wins = quiz_player_stats.wins + EXCLUDED.wins,
+             losses = quiz_player_stats.losses + EXCLUDED.losses,
+             draws = quiz_player_stats.draws + EXCLUDED.draws,
+             updated_at = EXCLUDED.updated_at`,
+          [sp.userId, deltaWin, deltaLoss, deltaDraw, finishedAt]
+        );
+      }
     }
   });
 

@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const db = require('../db');
 const quizStore = require('./store');
 const social = require('../social/store');
-const { INITIAL_HP, ATTACK_DAMAGE, getMonster, listMonsters } = require('./monsters');
+const { INITIAL_HP, ATTACK_DAMAGE, getMonster, listMonsters, BOT_PROFILES } = require('./monsters');
 const { buildRoundQuestionPayload } = require('./questions');
 
 const MIN_PLAYERS = 2;
@@ -18,7 +18,8 @@ const DEFAULT_TIMINGS = {
   questionDurationMs: 15000,
   roundTransitionMs: 3200,
   disconnectGraceMs: 30000,
-  maxRounds: 20
+  maxRounds: 20,
+  botMatchmakingDelayMs: 5000
 };
 
 const timings = { ...DEFAULT_TIMINGS };
@@ -38,6 +39,8 @@ const quizRooms = new Map();
 const userRoomMap = new Map();
 // Antrean matchmaking: Map<userId, { userId, socketId, monsterId, joinedAt }>
 const matchmakingQueue = new Map();
+// Timer matchmaking bot per user: Map<userId, Timeout>
+const matchmakingTimers = new Map();
 
 function init(io) {
   ioInstance = io;
@@ -125,6 +128,15 @@ function evaluateRoundOutcome({ p0Correct, p1Correct, p0Hp, p1Hp, p0UserId, p1Us
   };
 }
 
+function clearMatchmakingTimer(userId) {
+  if (!userId) return;
+  const timer = matchmakingTimers.get(userId);
+  if (timer) {
+    clearTimeout(timer);
+    matchmakingTimers.delete(userId);
+  }
+}
+
 function clearRoomTimers(room) {
   if (!room) return;
   if (room.countdownTimer) {
@@ -138,6 +150,16 @@ function clearRoomTimers(room) {
   if (room.transitionTimer) {
     clearTimeout(room.transitionTimer);
     room.transitionTimer = null;
+  }
+  if (room.autoReadyTimer) {
+    clearTimeout(room.autoReadyTimer);
+    room.autoReadyTimer = null;
+  }
+  if (room.botTimers) {
+    for (const t of room.botTimers) {
+      clearTimeout(t);
+    }
+    room.botTimers.clear();
   }
 }
 
@@ -159,13 +181,17 @@ function stopAllTimers() {
       clearPlayerDisconnectTimer(p);
     }
   }
+  for (const timer of matchmakingTimers.values()) {
+    clearTimeout(timer);
+  }
+  matchmakingTimers.clear();
   matchmakingQueue.clear();
 }
 
 function serializePlayer(p, currentRound = null) {
   const monster = getMonster(p.monsterId) || listMonsters()[0];
   const hasAnswered = currentRound ? currentRound.answers.has(p.userId) : false;
-  const hintCount = p.userId ? Number(db.getUserItems(p.userId)?.quizHint || 0) : 0;
+  const hintCount = p.isBot ? 0 : (p.userId ? Number(db.getUserItems(p.userId)?.quizHint || 0) : 0);
   return {
     userId: p.userId,
     username: p.username,
@@ -176,6 +202,7 @@ function serializePlayer(p, currentRound = null) {
     monster,
     ready: Boolean(p.ready),
     connected: Boolean(p.connected),
+    isBot: Boolean(p.isBot),
     disconnectedAt: p.disconnectedAt || null,
     graceEndsAt: p.graceEndsAt || null,
     hp: typeof p.hp === 'number' ? p.hp : INITIAL_HP,
@@ -274,6 +301,30 @@ function buildPlayerEntry(user, socketId, slot, preferredMonsterId = null) {
     monsterId: validMonster.id,
     ready: false,
     connected: true,
+    isBot: false,
+    disconnectedAt: null,
+    graceEndsAt: null,
+    disconnectTimer: null,
+    startHp: INITIAL_HP,
+    hp: INITIAL_HP,
+    correctAnswers: 0
+  };
+}
+
+function buildBotPlayerEntry(botProfile, slot, preferredMonsterId = null) {
+  const monsterId = preferredMonsterId || botProfile.monsterId || DEFAULT_SLOT_MONSTERS[slot] || 'aquaris';
+  const validMonster = getMonster(monsterId) || listMonsters()[0];
+  return {
+    userId: botProfile.id,
+    username: botProfile.username,
+    name: botProfile.name,
+    avatar: botProfile.avatar || '1',
+    socketId: null,
+    slot,
+    monsterId: validMonster.id,
+    ready: true,
+    connected: true,
+    isBot: true,
     disconnectedAt: null,
     graceEndsAt: null,
     disconnectTimer: null,
@@ -285,6 +336,7 @@ function buildPlayerEntry(user, socketId, slot, preferredMonsterId = null) {
 
 function removeFromMatchmaking(userId) {
   matchmakingQueue.delete(userId);
+  clearMatchmakingTimer(userId);
 }
 
 function authenticateSocketUser(socket, payload = {}) {
@@ -480,6 +532,64 @@ function joinRoom(socket, payload = {}) {
   return { ok: true, code: room.code, reconnected: false, room: statePayload };
 }
 
+function matchUserWithBot(socket, user, requestedMonsterId, existingLudoRooms = null) {
+  if (!matchmakingQueue.has(user.id)) return null;
+  matchmakingQueue.delete(user.id);
+  clearMatchmakingTimer(user.id);
+
+  // Pilih bot yang monsternya berbeda dari pilihan pemain
+  const userMonster = requestedMonsterId || 'emberon';
+  const candidates = BOT_PROFILES.filter(b => b.monsterId !== userMonster);
+  const botProfile = candidates.length > 0
+    ? candidates[crypto.randomInt(0, candidates.length)]
+    : BOT_PROFILES[crypto.randomInt(0, BOT_PROFILES.length)];
+
+  const code = makeQuizRoomCode(existingLudoRooms);
+  const roomId = 'qroom_' + crypto.randomUUID();
+  const now = Date.now();
+  const p0 = buildPlayerEntry(user, socket.id, 0, userMonster);
+  const p1 = buildBotPlayerEntry(botProfile, 1);
+
+  const room = {
+    id: roomId,
+    code,
+    source: 'matchmaking',
+    phase: 'lobby',
+    hostUserId: user.id,
+    createdAt: now,
+    countdownEndsAt: null,
+    players: [p0, p1],
+    match: null,
+    countdownTimer: null,
+    roundTimer: null,
+    transitionTimer: null,
+    autoReadyTimer: null,
+    botTimers: new Set()
+  };
+
+  quizRooms.set(code, room);
+  userRoomMap.set(user.id, code);
+
+  socket.join(socketRoomName(code));
+  socket.data.quizRoom = code;
+
+  quizStore.recordRoomCreated({ roomId, code, createdBy: user.id, source: 'matchmaking', createdAt: now });
+  quizStore.recordRoomPlayerJoined({ roomId, userId: user.id, slot: 0, monsterId: p0.monsterId, joinedAt: now });
+  quizStore.recordRoomPlayerJoined({ roomId, userId: botProfile.id, slot: 1, monsterId: p1.monsterId, joinedAt: now });
+
+  socket.emit('room.created', { roomCode: code, room: serializeRoomForUser(room, user.id) });
+  emitToRoom(room, 'room.joined', {
+    roomCode: code,
+    matched: true,
+    reconnected: false,
+    userId: user.id,
+    room: serializeRoomForUser(room, null)
+  });
+  emitRoomState(room);
+
+  return room;
+}
+
 function joinMatchmaking(socket, payload = {}, existingLudoRooms = null) {
   const user = authenticateSocketUser(socket, payload);
   if (!user) {
@@ -502,12 +612,15 @@ function joinMatchmaking(socket, payload = {}, existingLudoRooms = null) {
     const otherSocket = ioInstance?.sockets?.sockets?.get(entry.socketId);
     if (!otherSocket || !otherSocket.connected) {
       matchmakingQueue.delete(otherUserId);
+      clearMatchmakingTimer(otherUserId);
       continue;
     }
 
     // Pasangan ditemukan! Buat room otomatis untuk kedua pemain
     matchmakingQueue.delete(otherUserId);
     matchmakingQueue.delete(user.id);
+    clearMatchmakingTimer(otherUserId);
+    clearMatchmakingTimer(user.id);
 
     const otherUser = db.getUserById(otherUserId);
     if (!otherUser) continue;
@@ -535,7 +648,9 @@ function joinMatchmaking(socket, payload = {}, existingLudoRooms = null) {
       match: null,
       countdownTimer: null,
       roundTimer: null,
-      transitionTimer: null
+      transitionTimer: null,
+      autoReadyTimer: null,
+      botTimers: new Set()
     };
 
     quizRooms.set(code, room);
@@ -556,6 +671,7 @@ function joinMatchmaking(socket, payload = {}, existingLudoRooms = null) {
       roomCode: code,
       matched: true,
       reconnected: false,
+      userId: user.id,
       room: serializeRoomForUser(room, null)
     });
     emitRoomState(room);
@@ -563,20 +679,38 @@ function joinMatchmaking(socket, payload = {}, existingLudoRooms = null) {
     return { ok: true, matched: true, code, room: serializeRoomForUser(room, user.id) };
   }
 
-  // Belum ada lawan: masukkan ke antrean
-  matchmakingQueue.set(user.id, {
+  // Belum ada lawan manusia: masukkan ke antrean dan pasang timer bot jika tidak menemukan orang sungguhan
+  const entry = {
     userId: user.id,
     socketId: socket.id,
     monsterId: payload.monsterId || 'emberon',
     joinedAt: Date.now()
-  });
+  };
+  matchmakingQueue.set(user.id, entry);
+
+  clearMatchmakingTimer(user.id);
+  const botDelay = timings.botMatchmakingDelayMs || 5000;
+  const botTimer = setTimeout(() => {
+    matchmakingTimers.delete(user.id);
+    const queuedEntry = matchmakingQueue.get(user.id);
+    if (!queuedEntry) return;
+    const sock = ioInstance?.sockets?.sockets?.get(queuedEntry.socketId);
+    if (!sock || !sock.connected) {
+      matchmakingQueue.delete(user.id);
+      return;
+    }
+    matchUserWithBot(sock, user, queuedEntry.monsterId, existingLudoRooms);
+  }, botDelay);
+  matchmakingTimers.set(user.id, botTimer);
 
   return { ok: true, matched: false, searching: true };
 }
 
 function leaveMatchmaking(socket, payload = {}) {
   const user = authenticateSocketUser(socket, payload);
-  if (user) matchmakingQueue.delete(user.id);
+  if (user) {
+    removeFromMatchmaking(user.id);
+  }
   return { ok: true };
 }
 
@@ -636,6 +770,13 @@ function setPlayerReady(socket, payload = {}) {
   const nextReady = payload.ready !== undefined ? Boolean(payload.ready) : !player.ready;
   player.ready = nextReady;
 
+  // Pastikan bot selalu siap bertarung
+  for (const p of room.players) {
+    if (p.isBot) {
+      p.ready = true;
+    }
+  }
+
   emitToRoom(room, 'player.ready', {
     roomCode: room.code,
     userId: player.userId,
@@ -665,6 +806,8 @@ function startMatchCountdown(room) {
   const matchId = 'qmatch_' + crypto.randomUUID();
   const totalAvailableQuestions = quizStore.listQuestions({ activeOnly: true }).length;
   const maxRounds = Math.min(timings.maxRounds, Math.max(1, totalAvailableQuestions));
+  // Batasi soal matematika muncul 2 sampai 3 kali saja per pertandingan
+  const targetMathCount = crypto.randomInt(2, 4);
 
   room.players.sort((a, b) => a.slot - b.slot);
   for (const p of room.players) {
@@ -685,6 +828,8 @@ function startMatchCountdown(room) {
     winnerUserId: null,
     endReason: null,
     usedQuestionIds: new Set(),
+    mathCount: 0,
+    targetMathCount,
     currentRound: null,
     lastRoundResult: null,
     finished: false
@@ -729,16 +874,38 @@ function startNextQuestion(room) {
     return finishMatch(room, 'questions_exhausted');
   }
 
-  // Seimbangkan kategori general dan math secara bergantian
+  // Batasi soal matematika hanya muncul 2 sampai 3 kali saja per pertandingan
+  const targetMathCount = match.targetMathCount || 2;
+  const currentMathCount = match.mathCount || 0;
   const nextRoundNo = match.roundNo + 1;
-  const preferredCategory = nextRoundNo % 2 === 1 ? 'general' : 'math';
-  const question = quizStore.selectRandomUnusedQuestion(match.usedQuestionIds, preferredCategory);
+
+  let preferredCategory = 'general';
+  let forceCategory = true;
+
+  if (currentMathCount < targetMathCount) {
+    // Tentukan ronde untuk mengeluarkan soal matematika (diselingi soal umum):
+    // Contoh target 2: ronde 3 dan 7
+    // Contoh target 3: ronde 3, 6, dan 9
+    const isMathRound = targetMathCount === 3
+      ? (nextRoundNo === 3 || nextRoundNo === 6 || nextRoundNo === 9)
+      : (nextRoundNo === 3 || nextRoundNo === 7);
+
+    if (isMathRound) {
+      preferredCategory = 'math';
+      forceCategory = false;
+    }
+  }
+
+  const question = quizStore.selectRandomUnusedQuestion(match.usedQuestionIds, preferredCategory, forceCategory);
 
   if (!question) {
     return finishMatch(room, 'questions_exhausted');
   }
 
   match.usedQuestionIds.add(question.id);
+  if (question.category === 'math') {
+    match.mathCount = (match.mathCount || 0) + 1;
+  }
   match.roundNo = nextRoundNo;
   room.countdownEndsAt = null;
   room.phase = 'question';
@@ -776,10 +943,81 @@ function startNextQuestion(room) {
   });
   emitRoomState(room);
 
+  scheduleBotAnswers(room, round);
+
   room.roundTimer = setTimeout(() => {
     room.roundTimer = null;
     resolveCurrentRound(room, 'timeout');
   }, timings.questionDurationMs);
+}
+
+function scheduleBotAnswers(room, round) {
+  if (!room || !room.match || room.match.finished || !round) return;
+  const bots = room.players.filter(p => p.isBot && (p.hp ?? INITIAL_HP) > 0);
+  if (bots.length === 0) return;
+
+  if (!room.botTimers) room.botTimers = new Set();
+
+  for (const bot of bots) {
+    const qDuration = timings.questionDurationMs;
+    const minDelay = Math.max(50, Math.min(3500, Math.floor(qDuration * 0.25)));
+    const maxDelay = Math.max(minDelay + 50, Math.min(7500, Math.floor(qDuration * 0.55)));
+    const delay = crypto.randomInt(minDelay, maxDelay);
+
+    const timer = setTimeout(() => {
+      if (room.botTimers) room.botTimers.delete(timer);
+      if (
+        !room ||
+        !room.match ||
+        room.match.finished ||
+        room.phase !== 'question' ||
+        room.match.currentRound?.id !== round.id ||
+        round.resolved ||
+        round.answers.has(bot.userId)
+      ) {
+        return;
+      }
+
+      // Akurasi bot: ~70% benar, 30% salah
+      const isCorrect = Math.random() < 0.7;
+      let selectedIndex = round.shuffledCorrectIndex;
+      if (!isCorrect) {
+        const wrongIndices = [0, 1, 2, 3].filter(idx => idx !== round.shuffledCorrectIndex);
+        selectedIndex = wrongIndices[crypto.randomInt(0, wrongIndices.length)];
+      }
+
+      const answeredAt = Date.now();
+      const responseMs = Math.max(0, Math.min(timings.questionDurationMs, answeredAt - round.startedAt));
+
+      round.answers.set(bot.userId, {
+        userId: bot.userId,
+        selectedIndex,
+        isCorrect: selectedIndex === round.shuffledCorrectIndex,
+        timedOut: false,
+        answeredAt,
+        responseMs
+      });
+
+      emitToRoom(room, 'answer.submitted', {
+        roomCode: room.code,
+        matchId: room.match.id,
+        roundId: round.id,
+        roundNo: round.roundNo,
+        userId: bot.userId,
+        slot: bot.slot,
+        answered: true,
+        answeredAt
+      });
+      emitRoomState(room);
+
+      const activePlayers = room.players.filter(p => (p.hp ?? INITIAL_HP) > 0);
+      if (activePlayers.length > 0 && activePlayers.every(p => round.answers.has(p.userId))) {
+        resolveCurrentRound(room, 'both_answered');
+      }
+    }, delay);
+
+    room.botTimers.add(timer);
+  }
 }
 
 function useHint(socket, payload = {}) {
@@ -1201,8 +1439,9 @@ function finishMatch(room, endReason = 'knockout', forcedWinnerUserId = null) {
     }
   }
 
-  const reward = winnerUserId ? db.awardUserPoints(winnerUserId, WIN_REWARD_POINTS) : null;
-  const rewardPoints = winnerUserId ? WIN_REWARD_POINTS : 0;
+  const isBotWinner = winnerUserId && winnerUserId.startsWith('bot_');
+  const reward = winnerUserId && !isBotWinner ? db.awardUserPoints(winnerUserId, WIN_REWARD_POINTS) : null;
+  const rewardPoints = winnerUserId && !isBotWinner ? WIN_REWARD_POINTS : 0;
 
   room.phase = 'finished';
   room.match.status = 'finished';
@@ -1333,12 +1572,12 @@ function leaveRoom(socket, payload = {}) {
 
   // Di lobby atau setelah pertandingan selesai
   room.players = room.players.filter(p => p.userId !== userId);
-  if (room.players.length === 0) {
+  if (room.players.length === 0 || room.players.every(p => p.isBot)) {
     closeAndDeleteRoom(room);
   } else {
     room.players.forEach((p, idx) => {
       p.slot = idx;
-      p.ready = false;
+      p.ready = p.isBot ? true : false;
     });
     room.hostUserId = room.players[0].userId;
     room.phase = 'lobby';
@@ -1399,7 +1638,7 @@ function handleDisconnect(socket) {
     // Bersihkan pemain yang terputus dari room
     userRoomMap.delete(player.userId);
     room.players = room.players.filter(p => p.userId !== player.userId);
-    if (room.players.length === 0 || room.players.every(p => !p.connected)) {
+    if (room.players.length === 0 || room.players.every(p => !p.connected || p.isBot)) {
       closeAndDeleteRoom(room);
     } else {
       room.players.forEach((p, idx) => { p.slot = idx; });
@@ -1433,6 +1672,7 @@ module.exports = {
   joinRoom,
   joinMatchmaking,
   leaveMatchmaking,
+  matchUserWithBot,
   selectMonster,
   setPlayerReady,
   useHint,

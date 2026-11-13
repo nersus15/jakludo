@@ -55,6 +55,31 @@ function LudoBoardView({
   const lastPlayedCaptureIdRef = useRef(room.lastCapture?.id ?? null);
   const lastPlayedBlackHoleIdRef = useRef(room.lastBlackHole?.id ?? null);
   const lastPlayedGoalIdRef = useRef(room.lastGoal?.id ?? null);
+  const lastPlayedItemIdRef = useRef(room.lastItemEvent?.id ?? null);
+
+  // Efek visual singkat di petak papan (injak, keluar base, finish, item, black hole)
+  const [boardFx, setBoardFx] = useState([]);
+  const fxTimers = useRef([]);
+  useEffect(() => () => fxTimers.current.forEach(clearTimeout), []);
+  const addFx = (kind, coord, color = null, ms = 1400) => {
+    if (!coord) return;
+    const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const pieces = kind === 'crown'
+      ? Array.from({ length: 18 }, (_, i) => {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 40 + Math.random() * 60;
+          return {
+            i,
+            dx: `${Math.round(Math.cos(angle) * dist)}px`,
+            dy: `${Math.round(Math.sin(angle) * dist - 20)}px`,
+            r: `${Math.round(Math.random() * 720)}deg`,
+            color: COLORS[i % COLORS.length]
+          };
+        })
+      : null;
+    setBoardFx(list => [...list, { id, kind, r: coord[0], c: coord[1], color, pieces }]);
+    fxTimers.current.push(setTimeout(() => setBoardFx(list => list.filter(fx => fx.id !== id)), ms));
+  };
 
   const currentTurnPlayer = room.players[room.turn];
   const safeZonesActive = room.settings?.safeZones !== false;
@@ -135,7 +160,13 @@ function LudoBoardView({
       isHopping: true,
       stepIdx: 0
     });
-    sound.playStep(0);
+    if (move.from === 0) {
+      const mover = room.players.find(p => p.id === move.playerId);
+      sound.playLeaveBase();
+      if (mover) addFx('dust', START_TILES[mover.color], mover.color, 800);
+    } else {
+      sound.playStep(0);
+    }
 
     const stepInterval = setInterval(() => {
       stepIdx++;
@@ -183,7 +214,11 @@ function LudoBoardView({
   useEffect(() => {
     if (room.lastCapture && room.lastCapture.id && room.lastCapture.id !== lastPlayedCaptureIdRef.current) {
       lastPlayedCaptureIdRef.current = room.lastCapture.id;
-      sound.playFunnyElimination();
+      // Force Return punya suara & efeknya sendiri lewat pengumuman item
+      if (!room.lastCapture.isForceReturn) {
+        sound.playCapture();
+        addFx('squash', TRACK_COORDS[room.lastCapture.trackPos], room.lastCapture.color, 1100);
+      }
     }
   }, [room.lastCapture]);
 
@@ -192,6 +227,7 @@ function LudoBoardView({
     if (room.lastBlackHole && room.lastBlackHole.id && room.lastBlackHole.id !== lastPlayedBlackHoleIdRef.current) {
       lastPlayedBlackHoleIdRef.current = room.lastBlackHole.id;
       sound.playFunnyBlackHole();
+      addFx('suck', TRACK_COORDS[room.lastBlackHole.trackPos], room.lastBlackHole.color, 1000);
     }
   }, [room.lastBlackHole]);
 
@@ -200,8 +236,21 @@ function LudoBoardView({
     if (room.lastGoal && room.lastGoal.id && room.lastGoal.id !== lastPlayedGoalIdRef.current) {
       lastPlayedGoalIdRef.current = room.lastGoal.id;
       sound.playGoalCelebration();
+      addFx('crown', [5, 5], room.lastGoal.color, 2600);
     }
   }, [room.lastGoal]);
+
+  // Efek visual item (suaranya diputar di useGameRoom bersama pengumuman item)
+  useEffect(() => {
+    const event = room.lastItemEvent;
+    if (!event?.id || event.id === lastPlayedItemIdRef.current) return;
+    lastPlayedItemIdRef.current = event.id;
+    const kind = { forceReturn: 'bolt', universalShield: 'shield', blackholeShield: 'bhshield' }[event.itemId];
+    if (!kind || !event.fx) return;
+    const coord = getPawnCoord(event.fx.color, event.fx.val);
+    if (kind === 'bolt') addFx('flash', [0, 0], null, 450);
+    addFx(kind, coord, event.fx.color, 1300);
+  }, [room.lastItemEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Kumpulkan posisi semua bidak yang ada di luar markas (val > 0)
   const pawnsByCoord = {};
@@ -513,6 +562,44 @@ function LudoBoardView({
     );
   };
 
+  // Isi efek visual. Emoji dibungkus counterStyle supaya tetap tegak walau papan diputar.
+  const renderFx = fx => {
+    switch (fx.kind) {
+      case 'dust':
+        return <span className="board-fx__dust" />;
+      case 'squash':
+        return (
+          <>
+            <span className={`board-fx__ghost board-fx__ghost--squash color-${fx.color}`} />
+            <span className="board-fx__upright" style={counterStyle}><span className="board-fx__stars">💫</span></span>
+          </>
+        );
+      case 'suck':
+        return <span className={`board-fx__ghost board-fx__ghost--suck color-${fx.color}`} />;
+      case 'crown':
+        return (
+          <>
+            {fx.pieces.map(p => (
+              <span
+                key={p.i}
+                className={`board-fx__confetti color-${p.color}`}
+                style={{ '--dx': p.dx, '--dy': p.dy, '--r': p.r }}
+              />
+            ))}
+            <span className="board-fx__upright" style={counterStyle}><span className="board-fx__crown">👑</span></span>
+          </>
+        );
+      case 'bolt':
+        return <span className="board-fx__upright" style={counterStyle}><span className="board-fx__bolt">⚡</span></span>;
+      case 'shield':
+        return <span className="board-fx__shield" />;
+      case 'bhshield':
+        return <span className="board-fx__bhshield" />;
+      default:
+        return null;
+    }
+  };
+
   const corners = getCornerColors(boardRotation);
 
   return (
@@ -545,6 +632,17 @@ function LudoBoardView({
 
           {/* Finish Goal Tengah (1x1) */}
           {renderCenterGoal()}
+
+          {boardFx.map(fx => (
+            <div
+              key={fx.id}
+              className={`board-fx board-fx--${fx.kind}`}
+              style={fx.kind === 'flash' ? undefined : { gridRow: fx.r + 1, gridColumn: fx.c + 1 }}
+              aria-hidden="true"
+            >
+              {renderFx(fx)}
+            </div>
+          ))}
         </div>
       </div>
 

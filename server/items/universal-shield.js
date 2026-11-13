@@ -20,6 +20,6 @@ module.exports = {
     const what = event === 'forceReturn' ? `Force Return dari ${attacker?.name || 'lawan'}` : 'sedotan Black Hole';
     game.addHistory(`🔰 UNIVERSAL SHIELD! Bidak ${pawnIdx + 1} milik ${player.name} selamat dari ${what}.`);
     game.setMessage(`🔰 Universal Shield ${player.name} menahan ${what}!`);
-    game.announce({ title: 'UNIVERSAL SHIELD AKTIF!', text: `Bidak ${player.name} selamat dari ${what}.` });
+    game.announce({ title: 'UNIVERSAL SHIELD AKTIF!', text: `Bidak ${player.name} selamat dari ${what}.`, pawn: { player, pawnIdx } });
   }
 };

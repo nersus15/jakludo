@@ -95,6 +95,7 @@ test('Force Return yang dibeli bisa langsung dipakai tanpa harus menginjak lawan
   assert.equal(pa.items.forceReturn.owned, 0);
   assert.equal(db.getUserItems(a.user.id).forceReturn || 0, 0, 'stok di database berkurang');
   assert.equal(room.lastItemEvent.itemId, 'forceReturn');
+  assert.deepEqual(room.lastItemEvent.fx, { color: pb.color, val: 12 }, 'posisi efek = petak sebelum dipulangkan');
   assert.equal(room.turn, 0, 'giliran tetap milik pemain yang memakai item');
 });
 
@@ -192,6 +193,7 @@ test('Blackhole Shield otomatis mencegah bidak tersedot dan mengurangi stok', as
   assert.equal(pa.items.blackholeShield.owned, 0);
   assert.equal(db.getUserItems(a.user.id).blackholeShield || 0, 0);
   assert.equal(room.lastItemEvent.itemId, 'blackholeShield');
+  assert.deepEqual(room.lastItemEvent.fx, { color: pa.color, val: 5 }, 'efek perisai di petak Black Hole');
 });
 
 test('poin tidak cukup menolak pembelian', async () => {

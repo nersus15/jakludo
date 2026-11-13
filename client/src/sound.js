@@ -1,5 +1,7 @@
 // Web Audio API Sound Synthesizer & Background Music Controller - JakLudo
+import { createSynth, makeImpulse } from './audio/synth';
 import { ElectroBgm } from './audio/electroBgm';
+import * as ludoSfx from './audio/ludoSfx';
 
 // localStorage bisa melempar error (mode privat, in-app browser WhatsApp/Instagram, storage diblokir).
 // Error di sini terjadi saat modul dimuat, jadi tanpa pengaman seluruh aplikasi gagal tampil.
@@ -117,6 +119,17 @@ class SoundManager {
         this.sfxGain = this.ctx.createGain();
         this.sfxGain.gain.setValueAtTime(this.sfxMuted ? 0 : this.sfxVolume, this.ctx.currentTime);
         this.sfxGain.connect(this.ctx.destination);
+        // Jalur SFX dengan reverb (sorakan, gong, burung kukuk) agar terdengar lebih "luas"
+        this.sfxVerb = this.ctx.createGain();
+        this.sfxVerb.connect(this.sfxGain);
+        const verb = this.ctx.createConvolver();
+        verb.buffer = makeImpulse(this.ctx, 2.6, 2.5);
+        const send = this.ctx.createGain();
+        send.gain.value = 0.45;
+        this.sfxVerb.connect(send);
+        send.connect(verb);
+        verb.connect(this.sfxGain);
+        this.synth = createSynth(this.ctx);
       }
     }
     // iOS memakai state 'interrupted' (telepon masuk, aplikasi di background)
@@ -577,107 +590,47 @@ class SoundManager {
     popOsc.stop(popTime + 0.25);
   }
 
+  // Jalur & alat sintesis untuk efek di audio/ludoSfx.js; null bila SFX mati atau audio belum siap
+  sfxTools() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return null;
+    this.init();
+    if (!this.ctx || !this.synth) return null;
+    return { synth: this.synth, out: this.sfxGain, verb: this.sfxVerb };
+  }
+
+  // Bidak terinjak: satu suara dipilih acak murni dari pool (trombon sedih + 5 suara ejekan)
   playCapture() {
-    this.playFunnyElimination();
+    const tools = this.sfxTools();
+    if (!tools) return;
+    const pick = Math.floor(Math.random() * (ludoSfx.CAPTURE_SOUNDS.length + 1));
+    if (pick === 0) this.playFunnyElimination();
+    else ludoSfx.CAPTURE_SOUNDS[pick - 1](tools);
   }
 
-  // Efek suara menggelegar untuk item serangan (mis. Force Return)
-  playThunder() {
-    if (this.sfxMuted || this.sfxVolume <= 0) return;
-    this.init();
-    if (!this.ctx) return;
-    const dest = this.getDestination();
-    if (!dest) return;
-
-    const ctx = this.ctx;
-    const now = ctx.currentTime;
-
-    // 1. Electric Zap Sweep (Petir frekuensi tinggi meluncur ke bawah)
-    const zapOsc = ctx.createOscillator();
-    const zapGain = ctx.createGain();
-    zapOsc.type = 'sawtooth';
-    zapOsc.frequency.setValueAtTime(1400, now);
-    zapOsc.frequency.exponentialRampToValueAtTime(80, now + 0.35);
-
-    zapGain.gain.setValueAtTime(0.35, now);
-    zapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-
-    zapOsc.connect(zapGain);
-    zapGain.connect(dest);
-    zapOsc.start(now);
-    zapOsc.stop(now + 0.4);
-
-    // 2. Thunder Rumble Boom (Dentuman petir bergemuruh)
-    const boomOsc = ctx.createOscillator();
-    const boomGain = ctx.createGain();
-    boomOsc.type = 'triangle';
-    boomOsc.frequency.setValueAtTime(120, now + 0.05);
-    boomOsc.frequency.exponentialRampToValueAtTime(35, now + 0.65);
-
-    boomGain.gain.setValueAtTime(0.001, now + 0.05);
-    boomGain.gain.linearRampToValueAtTime(0.4, now + 0.12);
-    boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
-
-    boomOsc.connect(boomGain);
-    boomGain.connect(dest);
-    boomOsc.start(now + 0.05);
-    boomOsc.stop(now + 0.72);
+  playLeaveBase() {
+    const tools = this.sfxTools();
+    if (tools) ludoSfx.keluarBase(tools);
   }
 
-  // Efek suara menang saat bidak berhasil memasukkan ke garis akhir/tengah (Goal)
+  playForceReturn() {
+    const tools = this.sfxTools();
+    if (tools) ludoSfx.forceReturn(tools);
+  }
+
+  playUniversalShield() {
+    const tools = this.sfxTools();
+    if (tools) ludoSfx.universalShield(tools);
+  }
+
+  playBlackholeShield() {
+    const tools = this.sfxTools();
+    if (tools) ludoSfx.blackholeShield(tools);
+  }
+
+  // Bidak finish: "Gong raja" (saron gamelan naik, kendang, lalu gong besar)
   playGoalCelebration() {
-    if (this.sfxMuted || this.sfxVolume <= 0) return;
-    this.init();
-    if (!this.ctx) return;
-    const dest = this.getDestination();
-    if (!dest) return;
-
-    const ctx = this.ctx;
-    const now = ctx.currentTime;
-
-    // 1. Arpeggio kemenangan cepat naik (C5 -> E5 -> G5 -> C6 -> E6)
-    const fanfareNotes = [
-      { freq: 523.25, time: now, dur: 0.10 },         // C5
-      { freq: 659.25, time: now + 0.08, dur: 0.10 },  // E5
-      { freq: 783.99, time: now + 0.16, dur: 0.10 },  // G5
-      { freq: 1046.50, time: now + 0.24, dur: 0.14 }, // C6
-      { freq: 1318.51, time: now + 0.36, dur: 0.45 }  // E6 (final triumphant hold)
-    ];
-
-    fanfareNotes.forEach(n => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(n.freq, n.time);
-
-      gain.gain.setValueAtTime(0.001, n.time);
-      gain.gain.linearRampToValueAtTime(0.28, n.time + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.001, n.time + n.dur);
-
-      osc.connect(gain);
-      gain.connect(dest);
-      osc.start(n.time);
-      osc.stop(n.time + n.dur + 0.02);
-    });
-
-    // 2. Sparkle Chimes (Gemerincing kristal bintang perayaan finish)
-    const chimes = [1567.98, 1760.00, 2093.00, 2637.02];
-    chimes.forEach((f, idx) => {
-      const t = now + 0.38 + idx * 0.06;
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(f, t);
-
-      g.gain.setValueAtTime(0.001, t);
-      g.gain.linearRampToValueAtTime(0.18, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-
-      o.connect(g);
-      g.connect(dest);
-      o.start(t);
-      o.stop(t + 0.26);
-    });
+    const tools = this.sfxTools();
+    if (tools) ludoSfx.gongRaja(tools);
   }
 
   playWin() {

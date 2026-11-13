@@ -432,8 +432,14 @@ function gameApi(room, player, item) {
   return {
     addHistory: text => addHistory(room, text),
     setMessage: text => { room.message = text; },
-    announce: ({ title, text }) => {
+    // pawn (opsional): bidak yang terkena item, untuk posisi efek visual di klien.
+    // val bisa diisi manual bila bidaknya sudah dipindah (mis. Force Return sudah memulangkannya).
+    announce: ({ title, text, pawn = null }) => {
+      const fx = pawn
+        ? { color: pawn.player.color, val: pawn.val ?? room.pawns[pawn.player.id]?.[pawn.pawnIdx] ?? 0 }
+        : null;
       room.lastItemEvent = {
+        fx,
         id: eventId(),
         itemId: item.id,
         icon: item.icon,

@@ -187,8 +187,12 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
     if (!event || event.id === lastItemEventId.current) return undefined;
     lastItemEventId.current = event.id;
     setItemNotice({ id: event.id, icon: event.icon, title: event.title, text: event.text });
-    if (event.sound === 'thunder') sound.playThunder();
-    else sound.playJoinNotification();
+    const itemSounds = {
+      forceReturn: () => sound.playForceReturn(),
+      universalShield: () => sound.playUniversalShield(),
+      blackholeShield: () => sound.playBlackholeShield()
+    };
+    (itemSounds[event.itemId] || (() => sound.playJoinNotification()))();
     const timer = setTimeout(() => setItemNotice(null), 5500);
     return () => clearTimeout(timer);
   }, [room?.lastItemEvent]);

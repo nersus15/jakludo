@@ -39,6 +39,8 @@ services:
         condition: service_healthy
     ports:
       - "${PORT:-5172}:5172"
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=5172
@@ -63,6 +65,13 @@ services:
       # Otomatis terhubung ke container postgres di jaringan internal Docker (bebas bentrok port host)
       - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-jakludo}:${POSTGRES_PASSWORD:-jakludo_secret}@postgres:5432/${POSTGRES_DB:-jakludo}}
       - PGSSLMODE=${PGSSLMODE:-}
+      # Google OAuth 2.0 (Sign-In with Google)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      # Midtrans Payment Gateway
+      - MIDTRANS_SERVER_KEY=${MIDTRANS_SERVER_KEY:-}
+      - MIDTRANS_CLIENT_KEY=${MIDTRANS_CLIENT_KEY:-}
+      - MIDTRANS_IS_PRODUCTION=${MIDTRANS_IS_PRODUCTION:-0}
     volumes:
       # Folder data lokal tetap di-mount agar saat pertama kali deploy dengan PostgreSQL,
       # file jakludo.db lama otomatis dimigrasikan ke PostgreSQL dan hasil backup tersimpan di host.

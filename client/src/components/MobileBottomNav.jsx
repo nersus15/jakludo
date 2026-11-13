@@ -75,6 +75,7 @@ export default function MobileBottomNav({
                 <button
                   type="button"
                   className={`mobile-bottom-nav__btn ${isActive ? 'is-active' : ''}`}
+                  data-tour={item.key}
                   aria-label={
                     badge > 0 ? `${item.label} (${badge} notifikasi baru)` : item.label
                   }

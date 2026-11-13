@@ -1,4 +1,4 @@
--- Migrasi 011: Tingkat kesulitan 'hard' untuk soal tantangan Monster Quiz Battle,
+-- Migrasi 013: Tingkat kesulitan 'hard' untuk soal tantangan Monster Quiz Battle,
 -- plus perbaikan teks dua soal bawaan (hanya jika belum diubah lewat admin).
 ALTER TABLE quiz_questions DROP CONSTRAINT IF EXISTS quiz_questions_difficulty_check;
 ALTER TABLE quiz_questions ADD CONSTRAINT quiz_questions_difficulty_check

@@ -5,8 +5,8 @@
 :root {
   color-scheme: light;
 
-  /* Tinggi menu bawah floating di HP (bar 64px + ruang lingkaran aktif 20px + jarak bawah) */
-  --bottom-nav-space: calc(84px + max(12px, env(safe-area-inset-bottom)));
+  /* Ruang menu bawah di HP: bar 58px + tonjolan lingkaran aktif + safe area (iPhone) */
+  --bottom-nav-space: calc(76px + env(safe-area-inset-bottom, 0px));
 
   /* Meja & kartu: krem hangat seperti kertas papan Ludo */
   --bg: #f5ecdc;

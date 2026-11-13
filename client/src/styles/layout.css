@@ -545,6 +545,13 @@ p.state-msg {
   .app--bottom-nav {
     padding-bottom: var(--bottom-nav-space);
   }
+
+  /* Menu bawah turun tersembunyi saat mengetik chat: ruang di bawah halaman ikut dilepas */
+  .app--bottom-nav:has(.group-chat__composer input:focus),
+  .app--bottom-nav:has(.group-chat__composer textarea:focus),
+  .app--bottom-nav:has(.chat__form input:focus) {
+    padding-bottom: 0;
+  }
 }
 
 .mobile-bottom-nav {
@@ -553,10 +560,12 @@ p.state-msg {
   right: 0;
   bottom: 0;
   z-index: 120;
-  padding: 20px var(--gutter) max(12px, env(safe-area-inset-bottom));
+  padding: 0;
+  margin: 0;
   pointer-events: none;
   display: flex;
   justify-content: center;
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
 }
 
 @media (min-width: 768px) {
@@ -567,11 +576,14 @@ p.state-msg {
 
 .mobile-bottom-nav__bar {
   position: relative;
-  width: min(100%, 420px);
-  height: 64px;
-  border-radius: 18px;
+  width: 100%;
+  max-width: 100%;
+  height: calc(58px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-radius: 16px 16px 0 0;
   background: #141210;
-  box-shadow: 0 12px 28px rgba(20, 18, 16, 0.38);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.35);
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -599,9 +611,9 @@ p.state-msg {
 /* Lekukan cekung (notch) memotong bagian atas bar hitam dengan warna latar halaman */
 .mobile-bottom-nav__notch {
   position: relative;
-  top: -22px;
-  width: 66px;
-  height: 66px;
+  top: -20px;
+  width: 62px;
+  height: 62px;
   border-radius: 50%;
   background: var(--bg);
   display: flex;
@@ -612,11 +624,22 @@ p.state-msg {
 
 /* Lingkaran oranye melayang di dalam lekukan */
 .mobile-bottom-nav__orb {
-  width: 50px;
-  height: 50px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   background: linear-gradient(145deg, #ff8538 0%, var(--brand) 100%);
   box-shadow: 0 6px 14px rgba(255, 98, 0, 0.42);
+}
+
+@media (max-width: 767px) {
+  /* Saat keyboard HP muncul dan kolom ketik chat difokuskan,
+     sembunyikan navigation bar ke bawah agar tidak bertumpuk di atas input */
+  body:has(.group-chat__composer input:focus) .mobile-bottom-nav,
+  body:has(.group-chat__composer textarea:focus) .mobile-bottom-nav,
+  body:has(.chat__form input:focus) .mobile-bottom-nav {
+    transform: translateY(100%);
+    pointer-events: none;
+  }
 }
 
 .mobile-bottom-nav__list {

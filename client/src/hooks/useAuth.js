@@ -43,6 +43,25 @@ export function useAuth() {
     sound.playWin();
   }, []);
 
+  const updateProfile = useCallback(async ({ name, username, email, currentPassword, newPassword }) => {
+    if (!authToken) throw new Error('Silakan login terlebih dahulu.');
+    const res = await fetch('/api/auth/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ name, username, email, currentPassword, newPassword })
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || 'Gagal memperbarui profil.');
+    }
+    setCurrentUser(data.user);
+    sound.playWin();
+    return data.user;
+  }, [authToken]);
+
   const logout = useCallback(() => {
     if (authToken) {
       fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => {});
@@ -53,5 +72,5 @@ export function useAuth() {
     sound.playClick();
   }, [authToken]);
 
-  return { authToken, currentUser, setCurrentUser, checking, loginSuccess, logout };
+  return { authToken, currentUser, setCurrentUser, checking, loginSuccess, logout, updateProfile };
 }

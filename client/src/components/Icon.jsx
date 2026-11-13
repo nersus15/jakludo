@@ -399,6 +399,22 @@ export default function Icon({ name, size = 20, className = '', label }) {
         </svg>
       );
 
+    case 'lock':
+      return (
+        <svg {...common}>
+          <rect x="5" y="11" width="14" height="10" rx="2" fill="var(--brand-soft)" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+      );
+
+    case 'mail':
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="14" rx="2" fill="var(--brand-soft)" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      );
+
     case 'edit':
       return (
         <svg {...common}>

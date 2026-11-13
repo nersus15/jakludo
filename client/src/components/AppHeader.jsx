@@ -171,7 +171,7 @@ function AccountMenu({
               {groupBadgeCount > 0 && <span className="badge badge--brand">{groupBadgeCount}</span>}
             </button>
           )}
-          <button type="button" className="account__item" onClick={pick(onOpenLeaderboard)}>
+          <button type="button" className="account__item" data-tour="leaderboard" onClick={pick(onOpenLeaderboard)}>
             <span className="account__item-label">
               <Icon name="trophy" size={17} /> Peringkat pemain
             </span>
@@ -242,6 +242,7 @@ export default function AppHeader({
           <button
             type="button"
             className="icon-btn app-header__nav-btn"
+            data-tour="friends"
             aria-label={friendBadgeCount > 0 ? `Teman (${friendBadgeCount} permintaan baru)` : 'Teman'}
             title="Teman"
             onClick={() => {
@@ -261,6 +262,7 @@ export default function AppHeader({
           <button
             type="button"
             className="icon-btn app-header__nav-btn"
+            data-tour="groups"
             aria-label={groupBadgeCount > 0 ? `Grup & Chat (${groupBadgeCount} undangan baru)` : 'Grup & Chat'}
             title="Grup & Chat"
             onClick={() => {

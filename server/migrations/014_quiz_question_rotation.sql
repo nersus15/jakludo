@@ -1,4 +1,4 @@
--- Migrasi 012: Rotasi soal Monster Quiz Battle.
+-- Migrasi 014: Rotasi soal Monster Quiz Battle.
 -- cycle_seen menandai soal yang sudah muncul di siklus ini. Soal yang sudah muncul diberi peluang
 -- kecil sampai semua soal aktif sekategori pernah muncul, lalu tandanya di-reset.
 ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS cycle_seen BOOLEAN NOT NULL DEFAULT FALSE;

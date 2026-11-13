@@ -1,4 +1,5 @@
 // Web Audio API Sound Synthesizer & Background Music Controller - JakLudo
+import { ElectroBgm } from './audio/electroBgm';
 
 // localStorage bisa melempar error (mode privat, in-app browser WhatsApp/Instagram, storage diblokir).
 // Error di sini terjadi saat modul dimuat, jadi tanpa pengaman seluruh aplikasi gagal tampil.
@@ -43,40 +44,21 @@ class SoundManager {
     this.hasUnlocked = false;
     this.isInRoom = false; // BGM hanya dimainkan saat berada di dalam room/gameplay
 
-    // Musik latar (±5 MB) baru diunduh saat pemain masuk room, bukan di halaman depan.
-    // Tanpa cache buster agar browser bisa memakai cache.
+    // Musik latar dibuat prosedural lewat Web Audio (lihat audio/electroBgm.js), tanpa file mp3
+    this.music = new ElectroBgm();
+    this.updateBgmAudioVolume();
     if (typeof window !== 'undefined') {
-      try {
-        this.bgmAudio = new Audio();
-        this.bgmAudio.loop = true;
-        this.bgmAudio.preload = 'none';
-        this.bgmAudio.addEventListener('error', () => {
-          console.warn('BGM tidak dapat dimuat:', this.bgmAudio.error?.message || this.bgmAudio.error?.code);
-        });
-        this.updateBgmAudioVolume();
-        this.setupAutoplayUnlock();
-        this.setupVisibilityHandling();
-      } catch (err) {
-        console.warn('Failed to initialize BGM audio element:', err);
-      }
-    }
-  }
-
-  // Pastikan sumber BGM terpasang sebelum diputar
-  ensureBgmSource() {
-    if (this.bgmAudio && !this.bgmAudio.src) {
-      this.bgmAudio.src = '/bgm.mp3';
-      this.bgmAudio.preload = 'auto';
+      this.setupAutoplayUnlock();
+      this.setupVisibilityHandling();
     }
   }
 
   // Putar BGM hanya jika semua syarat terpenuhi (di room, aktif, tidak mute, halaman terlihat)
   resumeBgmIfAllowed() {
-    if (!this.bgmAudio || !this.isInRoom || !this.bgmEnabled || this.bgmMuted || !this.hasUnlocked) return;
+    if (!this.isInRoom || !this.bgmEnabled || this.bgmMuted || !this.hasUnlocked) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    this.ensureBgmSource();
-    const promise = this.bgmAudio.play();
-    if (promise !== undefined) promise.catch(() => {});
+    this.init();
+    if (this.ctx) this.music.start(this.ctx);
   }
 
   // Hentikan musik saat aplikasi di background (pindah ke aplikasi lain / layar terkunci)
@@ -84,7 +66,7 @@ class SoundManager {
     if (typeof document === 'undefined') return;
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
-        if (this.bgmAudio && !this.bgmAudio.paused) this.bgmAudio.pause();
+        this.music.stop();
         if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {});
       } else {
         if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') this.ctx.resume().catch(() => {});
@@ -175,9 +157,8 @@ class SoundManager {
   // BACKGROUND MUSIC (BGM) CONTROLS
   // ==========================================
   updateBgmAudioVolume() {
-    if (!this.bgmAudio) return;
     const target = (this.bgmMuted || !this.bgmEnabled) ? 0 : Math.max(0, Math.min(1, this.bgmVolume));
-    this.bgmAudio.volume = target;
+    this.music.setVolume(target);
   }
 
   setBgmVolume(val) {
@@ -221,9 +202,7 @@ class SoundManager {
   }
 
   pauseBgm() {
-    if (this.bgmAudio) {
-      this.bgmAudio.pause();
-    }
+    this.music.stop();
     this.notifyListeners();
   }
 
@@ -239,7 +218,7 @@ class SoundManager {
   }
 
   isBgmPlaying() {
-    return Boolean(this.bgmAudio && !this.bgmAudio.paused && !this.bgmAudio.ended && this.bgmAudio.readyState > 2);
+    return this.music.playing;
   }
 
   // ==========================================

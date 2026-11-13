@@ -331,3 +331,43 @@ test('Black Hole: Blackhole Shield otomatis dipakai lebih dulu sebelum Universal
   assert.equal(pa.items.blackholeShield.earned, 0);
   assert.equal(pa.items.universalShield.earned, 1, 'Universal Shield tetap utuh');
 });
+
+test('admin menghapus item lewat endpoint: stok di room aktif ikut hilang tanpa reload', async () => {
+  process.env.ADMIN_KEY = 'kunci-admin-tes';
+  const { a, host, room, pa, pb } = await startedRoom();
+  await buy(a.token, 'forceReturn');
+  assert.equal(pa.items.forceReturn.owned, 1);
+
+  const patch = (token, body, key) => fetch(`${url}/api/admin/users/${a.user.username}/items`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(key ? { 'X-Admin-Key': key } : {}) },
+    body: JSON.stringify(body)
+  });
+
+  // Pemain biasa tidak boleh memakai endpoint admin
+  assert.equal((await patch(a.token, { items: { forceReturn: 5 } })).status, 403);
+
+  const res = await patch(a.token, { items: { forceReturn: 0 }, points: 0 }, 'kunci-admin-tes').then(r => r.json());
+  assert.equal(res.success, true);
+  assert.equal(res.items.forceReturn, undefined, 'item terhapus dari akun');
+  assert.equal(res.points, 0);
+  assert.equal(db.getUserItems(a.user.id).forceReturn || 0, 0, 'cache server ikut berubah');
+  assert.equal(pa.items.forceReturn.owned, 0, 'stok di room yang sedang berjalan ikut berubah');
+
+  // Halaman pemain belum di-reload: mencoba memakai item tetap ditolak server
+  room.pawns[pb.id] = [12, 0, 0, 0];
+  room.pawns[pa.id] = [5, 0, 0, 0];
+  host.emit('game:use_item', { itemId: 'forceReturn', target: { playerId: pb.id, pawnIdx: 0 } });
+  await wait(100);
+  assert.equal(room.pawns[pb.id][0], 12, 'bidak lawan tidak terkena Force Return');
+
+  // Poin sudah 0: tidak bisa membeli lagi
+  const again = await buy(a.token, 'forceReturn');
+  assert.equal(again.success, false);
+
+  // Validasi input
+  assert.equal((await patch(a.token, { items: { itemPalsu: 1 } }, 'kunci-admin-tes')).status, 400);
+  assert.equal((await patch(a.token, { items: { forceReturn: -1 } }, 'kunci-admin-tes')).status, 400);
+  delete process.env.ADMIN_KEY;
+});
+

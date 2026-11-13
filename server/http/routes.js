@@ -37,6 +37,38 @@ function requireUser(req, res, message = 'Silakan login terlebih dahulu.') {
   return user;
 }
 
+// Admin: username di ADMIN_USERNAMES (default 'admin') atau header X-Admin-Key = ADMIN_KEY.
+// Jika variabel ADMIN_* kosong, memakai QUIZ_ADMIN_* yang sudah ada.
+function requireAdmin(req, res) {
+  const user = requireUser(req, res);
+  if (!user) return null;
+  const adminUsers = String(process.env.ADMIN_USERNAMES || process.env.QUIZ_ADMIN_USERNAMES || 'admin')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  const adminKey = String(process.env.ADMIN_KEY || process.env.QUIZ_ADMIN_KEY || '');
+  const headerKey = String(req.headers['x-admin-key'] || '');
+  const isAllowed = adminUsers.includes(String(user.username || '').toLowerCase()) || (adminKey && headerKey === adminKey);
+  if (!isAllowed) {
+    res.status(403).json({ success: false, error: 'Akses ditolak: khusus admin.' });
+    return null;
+  }
+  return user;
+}
+
+// Stok item pemain di cache server berubah: samakan juga ke room Ludo & kuis yang sedang berjalan
+function syncUserItemsToRooms(userId) {
+  const owned = db.getUserItems(userId);
+  for (const r of store.rooms.values()) {
+    const playerInRoom = r.players.find(p => p.userId === userId);
+    if (playerInRoom) {
+      inventory.loadOwned(playerInRoom, owned);
+      store.emitRoom(r);
+    }
+  }
+  quizEngine.syncUserInventory(userId);
+}
+
 function createApiRouter() {
   const api = express.Router();
 
@@ -202,14 +234,7 @@ function createApiRouter() {
     if (result.error) return res.status(400).json({ success: false, error: result.error });
 
     // Sinkronkan stok jika user sedang berada di room aktif
-    for (const r of store.rooms.values()) {
-      const playerInRoom = r.players.find(p => p.userId === user.id);
-      if (playerInRoom) {
-        inventory.loadOwned(playerInRoom, result.user.inventory);
-        store.emitRoom(r);
-      }
-    }
-    quizEngine.syncUserInventory(user.id);
+    syncUserItemsToRooms(user.id);
 
     res.json({
       success: true,
@@ -218,6 +243,62 @@ function createApiRouter() {
       user: withKing(result.user)
     });
   });
+
+  // ==========================================
+  // ADMIN: KOREKSI STOK ITEM & POIN PEMAIN
+  // Ubah lewat endpoint ini, bukan langsung di database: server menyimpan stok & poin di cache,
+  // jadi perubahan langsung di database baru terbaca setelah server restart.
+  // ==========================================
+
+  const findTargetUser = (req, res) => {
+    const target = db.getUserByUsername(String(req.params.username || '').replace(/^@/, ''));
+    if (!target) res.status(404).json({ success: false, error: 'Pemain tidak ditemukan.' });
+    return target;
+  };
+  const itemsAndPoints = target => ({
+    username: target.username,
+    points: db.sanitizeUser(target).points ?? 0,
+    items: db.getUserItems(target.id)
+  });
+
+  api.get('/admin/users/:username/items', (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const target = findTargetUser(req, res);
+    if (!target) return;
+    res.json({ success: true, ...itemsAndPoints(target) });
+  });
+
+  // Body: { items?: { [itemId]: jumlah }, points?: jumlah }. Nilai = jumlah akhir (bukan tambahan);
+  // jumlah 0 menghapus item. Room yang sedang berjalan langsung memakai stok baru.
+  api.patch('/admin/users/:username/items', asyncRoute(async (req, res) => {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    const target = findTargetUser(req, res);
+    if (!target) return;
+
+    const isCount = v => Number.isInteger(v) && v >= 0 && v <= 100000;
+    const body = req.body || {};
+    const quantities = body.items && typeof body.items === 'object' ? body.items : {};
+    for (const [itemId, qty] of Object.entries(quantities)) {
+      if (!items.get(itemId)) return res.status(400).json({ success: false, error: `Item ${itemId} tidak dikenal.` });
+      if (!isCount(qty)) return res.status(400).json({ success: false, error: `Jumlah ${itemId} harus bilangan bulat >= 0.` });
+    }
+    if (body.points !== undefined && !isCount(body.points)) {
+      return res.status(400).json({ success: false, error: 'Poin harus bilangan bulat >= 0.' });
+    }
+    if (!Object.keys(quantities).length && body.points === undefined) {
+      return res.status(400).json({ success: false, error: 'Isi items dan/atau points.' });
+    }
+
+    if (Object.keys(quantities).length) {
+      await db.setUserItemQuantities(target.id, quantities);
+      syncUserItemsToRooms(target.id);
+    }
+    if (body.points !== undefined) await db.setUserPoints(target.id, body.points);
+
+    console.log(`[admin] ${admin.username} mengubah @${target.username}: ${JSON.stringify({ items: quantities, points: body.points })}`);
+    res.json({ success: true, ...itemsAndPoints(target) });
+  }));
 
   // ==========================================
   // TOPUP DIAMONDS (MIDTRANS CORE API)

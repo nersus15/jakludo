@@ -1141,6 +1141,41 @@ function consumeUserItem({ userId, itemId }) {
   return true;
 }
 
+// Admin: atur stok item pemain ke jumlah tertentu ({ [itemId]: jumlah }), cache & database sekaligus.
+// Dipakai untuk koreksi (mis. menghapus item hasil kecurangan) tanpa perlu restart server.
+async function setUserItemQuantities(userId, quantities) {
+  for (const [itemId, qty] of Object.entries(quantities)) setItemInState(userId, itemId, qty);
+  persistLocalFallback();
+  await execPgTransaction(async client => {
+    for (const [itemId, qty] of Object.entries(quantities)) {
+      if (qty > 0) {
+        await client.query(
+          `INSERT INTO user_items (user_id, item_id, quantity) VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
+          [userId, itemId, qty]
+        );
+      } else {
+        await client.query('DELETE FROM user_items WHERE user_id = $1 AND item_id = $2', [userId, itemId]);
+      }
+    }
+  });
+  return getUserItems(userId);
+}
+
+// Admin: atur saldo poin pemain ke nilai tertentu, cache & database sekaligus
+async function setUserPoints(userId, points) {
+  const user = findUserById(userId);
+  if (!user) return null;
+  const entry = ensureLeaderboardEntry(user);
+  entry.points = points;
+  persistLocalFallback();
+  await execPgTransaction(async client => {
+    await ensureGlobalLeaderboardRow(client, user);
+    await client.query('UPDATE leaderboard SET points = $1 WHERE user_id = $2', [points, user.id]);
+  });
+  return entry.points;
+}
+
 // Tambah poin PlayGo ke saldo pemain (mis. hadiah +10 poin menang Monster Quiz Battle)
 function awardUserPoints(userId, deltaPoints = 0) {
   const amount = Math.floor(Number(deltaPoints) || 0);
@@ -1365,6 +1400,8 @@ module.exports = {
   getUserItems,
   purchaseItem,
   consumeUserItem,
+  setUserItemQuantities,
+  setUserPoints,
   awardUserPoints,
   createTopupOrder,
   getTopupOrder,

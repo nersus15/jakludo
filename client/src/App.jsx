@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import AppHeader from './components/AppHeader';
 import MobileBottomNav from './components/MobileBottomNav';
 import GameHeader from './components/game/GameHeader';
@@ -24,7 +24,8 @@ import { useTheme } from './hooks/useTheme';
 import { usePwaInstall } from './hooks/usePwaInstall';
 import { useItemCatalog } from './items';
 import { sound } from './sound';
-import { applySeo, getInitialGameModeFromUrl } from './seo';
+import { applySeo, gameModeUrl, getInitialGameModeFromUrl } from './seo';
+import { runBackHandler } from './backHandlers';
 
 // Dialog yang jarang dibuka dimuat terpisah agar bundle awal lebih kecil.
 // Diunduh di belakang layar saat browser senggang, jadi tetap langsung muncul saat dibuka.
@@ -53,11 +54,42 @@ export default function App() {
   const [cropRequest, setCropRequest] = useState(null);
   const [audio, setAudio] = useState(sound.getState());
   const [sheet, setSheet] = useState(null); // bottom sheet di layar permainan: 'chat' | 'scores'
+  const [leaveRequest, setLeaveRequest] = useState(0); // Back saat bermain Ludo membuka konfirmasi keluar
   const [isMobileView, setIsMobileView] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(max-width: 767px)').matches
       : false
   );
+  // Riwayat navigasi: pindah game dan membuka halaman/dialog menambah entri history, jadi tombol Back
+  // (browser/HP) kembali ke layar sebelumnya, bukan keluar dari situs. Tiap entri menyimpan entri
+  // sebelumnya (back) supaya tombol "kembali" di aplikasi memakai history.back() bila tujuannya sama.
+  const navCur = useRef({ mode: gameMode, modal: null });
+  const expectingPop = useRef(false);
+  const roomRef = useRef({});
+  useEffect(() => {
+    navCur.current = { mode: gameMode, modal };
+  }, [gameMode, modal]);
+
+  const navigateTo = useCallback(({ mode = navCur.current.mode, modal: nextModal = null }) => {
+    const cur = navCur.current;
+    if (cur.mode === mode && cur.modal === nextModal) return;
+    navCur.current = { mode, modal: nextModal };
+    setGameMode(mode);
+    setModal(nextModal);
+    const st = window.history.state?.playgo ? window.history.state : null;
+    const back = st?.back;
+    if (back && back.mode === mode && (back.modal || null) === nextModal) {
+      expectingPop.current = true;
+      window.history.back();
+      return;
+    }
+    // Selama di room URL ?room= dipertahankan; dialog tidak menambah entri di atas dialog lain
+    const url = roomRef.current.inRoom ? window.location.pathname + window.location.search : gameModeUrl(mode);
+    const entry = { playgo: true, mode, modal: nextModal, back: cur.modal ? back || null : cur };
+    if (cur.modal) window.history.replaceState(entry, '', url);
+    else window.history.pushState(entry, '', url);
+  }, []);
+
   const auth = useAuth();
   const requestAvatarCrop = useCallback(({ file, title, subtitle }) => {
     if (!file || !String(file.type || '').startsWith('image/')) {
@@ -70,14 +102,14 @@ export default function App() {
   const game = useGameRoom({
     authToken: auth.authToken,
     currentUser: auth.currentUser,
-    onNeedLogin: () => setModal('auth')
+    onNeedLogin: () => navigateTo({ modal: 'auth' })
   });
   const quiz = useMonsterQuiz({
     socket: game.socket,
     authToken: auth.authToken,
     currentUser: auth.currentUser,
     onUpdateUser: auth.setCurrentUser,
-    onNeedLogin: () => setModal('auth'),
+    onNeedLogin: () => navigateTo({ modal: 'auth' }),
     active: gameMode === 'quiz'
   });
   const social = useSocial({
@@ -113,6 +145,7 @@ export default function App() {
   useEffect(() => {
     if (quiz.room?.code && game.screen === 'home') {
       setGameMode('quiz');
+      if (window.history.state?.playgo) window.history.replaceState({ ...window.history.state, mode: 'quiz' }, '');
     }
   }, [quiz.room?.code, game.screen]);
   useEffect(() => {
@@ -120,6 +153,60 @@ export default function App() {
     const activeCode = game.room?.code || quiz.room?.code || null;
     applySeo({ gameMode: activeMode, modal, roomCode: activeCode });
   }, [gameMode, game.screen, game.room?.code, quiz.room?.code, modal]);
+
+  useEffect(() => {
+    const st = window.history.state?.playgo ? window.history.state : {};
+    window.history.replaceState({ ...st, playgo: true, mode: navCur.current.mode, modal: null }, '');
+
+    const apply = st => {
+      navCur.current = { mode: st.mode || 'hub', modal: st.modal || null };
+      setGameMode(st.mode || 'hub');
+      setModal(st.modal || null);
+      if (st.modal !== 'friends') setInitialChatFriendId('');
+    };
+    const onPopState = e => {
+      const st = e.state?.playgo ? e.state : { mode: getInitialGameModeFromUrl(), modal: null };
+      if (expectingPop.current) {
+        expectingPop.current = false;
+        apply(st);
+        return;
+      }
+      const r = roomRef.current;
+      const cur = navCur.current;
+      // Back ditahan: kembalikan entri yang baru saja dilewati
+      const restore = url =>
+        window.history.pushState({ playgo: true, mode: cur.mode, modal: cur.modal, back: st }, '', url);
+      if (r.profileOpen) {
+        r.closeProfile();
+        restore(r.currentUrl);
+        return;
+      }
+      // Layar bertingkat di dalam halaman (chat teman, detail grup) kembali ke daftarnya dulu
+      if (runBackHandler()) {
+        restore(r.currentUrl);
+        return;
+      }
+      if (cur.modal) {
+        apply(st);
+        return;
+      }
+      if (r.inGame || r.inQuizBattle) {
+        restore(r.currentUrl);
+        if (r.inGame) setLeaveRequest(n => n + 1);
+        return;
+      }
+      if (r.inLobby || r.inQuizRoom) {
+        // Back dari lobby = keluar room, tetap di halaman game yang sama
+        if (r.inLobby) r.leaveLudo();
+        else r.leaveQuiz();
+        restore(gameModeUrl(cur.mode));
+        return;
+      }
+      apply(st);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Status chat terbuka dipakai untuk menghitung pesan belum dibaca
   const changeSheet = name => {
@@ -129,11 +216,11 @@ export default function App() {
 
   const open = name => () => {
     if (name === 'friends') setInitialChatFriendId('');
-    setModal(name);
+    navigateTo({ modal: name });
   };
   const close = () => {
     setInitialChatFriendId('');
-    setModal(null);
+    navigateTo({ modal: null });
   };
   const openProfile = userId => {
     if (!userId) return;
@@ -142,21 +229,36 @@ export default function App() {
   const openChatWithFriend = friendId => {
     setProfileUserId('');
     setInitialChatFriendId(String(friendId || ''));
-    setModal('friends');
+    navigateTo({ modal: 'friends' });
   };
   const openAudio = () => {
     sound.init();
     sound.playClick();
-    setModal('audio');
+    navigateTo({ modal: 'audio' });
   };
 
   const inGame = game.screen === 'room' && game.room?.started;
   const inLobby = game.screen === 'room' && game.room && !game.room.started;
   const isMobileFeaturePage =
     isMobileView && !inGame && (modal === 'friends' || modal === 'groups' || modal === 'shop');
+  const quizRoom = quiz.room;
+  roomRef.current = {
+    inRoom: game.screen === 'room',
+    inGame,
+    inLobby: game.screen === 'room' && !inGame,
+    inQuizRoom: !!quizRoom,
+    inQuizBattle: !!quizRoom && quizRoom.phase !== 'lobby' && quizRoom.phase !== 'finished',
+    currentUrl: window.location.pathname + window.location.search,
+    profileOpen: !!profileUserId,
+    closeProfile: () => setProfileUserId(''),
+    leaveLudo: game.actions.leaveRoom,
+    leaveQuiz: quiz.actions.leaveRoom
+  };
+
+  const showBottomNav = !inGame && !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby');
 
   return (
-    <div className={`app ${inGame ? 'app--game' : ''}`}>
+    <div className={`app ${inGame ? 'app--game' : ''} ${showBottomNav ? 'app--bottom-nav' : ''}`}>
       <a className="skip-link" href="#main">Langsung ke konten</a>
       <ReconnectBar {...network} />
 
@@ -169,6 +271,7 @@ export default function App() {
           theme={theme}
           onOpenAudio={openAudio}
           onLeave={game.actions.leaveRoom}
+          leaveRequest={leaveRequest}
         />
       ) : (
         <AppHeader
@@ -186,7 +289,7 @@ export default function App() {
               : game.screen === 'home' && !quiz.room
               ? () => {
                   sound.playClick();
-                  setGameMode('hub');
+                  navigateTo({ mode: 'hub' });
                 }
               : undefined
           }
@@ -211,12 +314,11 @@ export default function App() {
         reactions={game.reactions}
         onAcceptRoomInvite={(targetCode, inviteGameType) => {
           social.actions.dismissRoomInvite();
-          setModal(null);
           if (inviteGameType === 'quiz') {
-            setGameMode('quiz');
+            navigateTo({ mode: 'quiz' });
             quiz.actions.joinRoomByCode(targetCode);
           } else {
-            setGameMode('ludo');
+            navigateTo({ mode: 'ludo' });
             game.actions.joinRoom(targetCode);
           }
         }}
@@ -270,7 +372,7 @@ export default function App() {
               social={social}
               gameActions={game.actions}
               quizActions={quiz.actions}
-              onSelectGameMode={mode => setGameMode(mode)}
+              onSelectGameMode={mode => navigateTo({ mode })}
               onViewProfile={openProfile}
               onOpenAuth={open('auth')}
             />
@@ -298,7 +400,7 @@ export default function App() {
           currentUser={auth.currentUser}
           onBackToMenu={() => {
             sound.playClick();
-            setGameMode('hub');
+            navigateTo({ mode: 'hub' });
           }}
           onOpenAuth={open('auth')}
           onOpenShop={open('shop')}
@@ -320,11 +422,11 @@ export default function App() {
           groupBadgeCount={social.groupBadgeCount}
           onSelectGame={mode => {
             sound.playClick();
-            setGameMode(mode);
+            navigateTo({ mode });
           }}
           onBackToHub={() => {
             sound.playClick();
-            setGameMode('hub');
+            navigateTo({ mode: 'hub' });
           }}
           onOpenFriends={open('friends')}
           onOpenGroups={open('groups')}
@@ -332,7 +434,7 @@ export default function App() {
           onOpenLeaderboard={open('leaderboard')}
           onOpenMonsterQuiz={() => {
             sound.playClick();
-            setGameMode('quiz');
+            navigateTo({ mode: 'quiz' });
           }}
           onInstall={pwa.install}
         />
@@ -345,16 +447,14 @@ export default function App() {
         </footer>
       )}
 
-      {!inGame && !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby') && (
+      {showBottomNav && (
         <MobileBottomNav
           activeModal={modal}
           friendBadgeCount={social.friendBadgeCount}
           groupBadgeCount={social.groupBadgeCount}
           onSelectHome={() => {
-            close();
-            if (game.screen === 'home' && !quiz.room) {
-              setGameMode('hub');
-            }
+            setInitialChatFriendId('');
+            navigateTo(game.screen === 'home' && !quiz.room ? { mode: 'hub' } : { modal: null });
           }}
           onOpenFriends={open('friends')}
           onOpenGroups={open('groups')}
@@ -412,7 +512,7 @@ export default function App() {
             social={social}
             gameActions={game.actions}
             quizActions={quiz.actions}
-            onSelectGameMode={mode => setGameMode(mode)}
+            onSelectGameMode={mode => navigateTo({ mode })}
             onViewProfile={openProfile}
             onOpenAuth={open('auth')}
           />

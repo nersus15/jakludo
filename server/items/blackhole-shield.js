@@ -20,7 +20,8 @@ module.exports = {
       game.setMessage(`🛡️ Blackhole Shield melindungi bidak ${player.name}! Bidak aman!`);
       game.announce({
         title: 'PERISAI BLACKHOLE AKTIF!',
-        text: `Bidak milik ${player.name} terlindungi dan terselamatkan dari Black Hole!`
+        text: `Bidak milik ${player.name} terlindungi dan terselamatkan dari Black Hole!`,
+        pawn: { player, pawnIdx }
       });
       return true;
     }

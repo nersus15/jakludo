@@ -80,17 +80,17 @@ async function registerUser(prefix = 'qp') {
   return body;
 }
 
-test('Bank Soal & Katalog Monster: minimal 90 soal tervalidasi (62 umum & 32 matematika) dan 6 monster 100 HP', () => {
+test('Bank Soal & Katalog Monster: minimal 180 soal tervalidasi (120 umum & 60 matematika) dan 6 monster 100 HP', () => {
   assert.equal(QUIZ_MONSTERS.length, 6);
   for (const m of QUIZ_MONSTERS) {
     assert.equal(m.baseHp, 100);
     assert.ok(m.id && m.name && m.description);
   }
-  assert.ok(SEED_QUESTIONS.length >= 90, `Expected >=90 questions, got ${SEED_QUESTIONS.length}`);
+  assert.ok(SEED_QUESTIONS.length >= 180, `Expected >=180 questions, got ${SEED_QUESTIONS.length}`);
   const generalCount = SEED_QUESTIONS.filter(q => q.category === 'general').length;
   const mathCount = SEED_QUESTIONS.filter(q => q.category === 'math').length;
-  assert.ok(generalCount >= 60, `Expected >=60 general questions, got ${generalCount}`);
-  assert.ok(mathCount >= 30, `Expected >=30 math questions, got ${mathCount}`);
+  assert.ok(generalCount >= 120, `Expected >=120 general questions, got ${generalCount}`);
+  assert.ok(mathCount >= 60, `Expected >=60 math questions, got ${mathCount}`);
 
   for (const q of SEED_QUESTIONS) {
     const roundQ = buildRoundQuestionPayload(q, 1, 20, Date.now(), Date.now() + 15000);
@@ -363,9 +363,10 @@ test('Skenario 5, 6, 7, 8, 9, 10, 13, 15, 16: Full realtime match, soal identik,
 
   const finished = await finishedP;
   assert.equal(finished.winnerUserId, u1.user.id);
-  assert.equal(finished.rewardPoints, 30);
-  assert.equal(finished.winnerReward?.points, 30);
-  assert.equal(finished.winnerReward?.totalPoints, u1.user.points + 30);
+  assert.equal(finished.rewardPoints, quizEngine.WIN_REWARD_POINTS);
+  assert.equal(quizEngine.WIN_REWARD_POINTS, 10);
+  assert.equal(finished.winnerReward?.points, 10);
+  assert.equal(finished.winnerReward?.totalPoints, u1.user.points + 10);
   assert.equal(finished.endReason, 'knockout');
   const finalP2 = finished.players.find(p => p.userId === u2.user.id);
   assert.equal(finalP2.currentHp, 0);
@@ -524,3 +525,190 @@ test('Skenario 17: Pertandingan melawan bot berjalan otomatis hingga ronde dieva
   const botUserId = Object.keys(result.answers).find(id => id.startsWith('bot_'));
   assert.ok(botUserId, 'Bot harus tercatat pada hasil ronde');
 });
+
+// ---------- Anti-curang & aturan poin ----------
+
+test('Pemain tidak bisa mengeluarkan lawan dari room lewat userId palsu', async () => {
+  const u1 = await registerUser('host');
+  const u2 = await registerUser('korban');
+  const s1 = await connect();
+  const s2 = await connect();
+  const sAnon = await connect();
+
+  const createAck = await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' });
+  const code = createAck.code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+
+  // Socket tanpa login mencoba mengeluarkan korban
+  await emitAck(sAnon, 'quiz:room:leave', { code, userId: u2.user.id });
+  // Lawan yang login mencoba mengeluarkan korban: yang keluar hanya dirinya sendiri
+  await emitAck(s1, 'quiz:room:leave', { token: u1.token, code, userId: u2.user.id });
+
+  const room = quizEngine.quizRooms.get(code);
+  assert.ok(room, 'room tetap ada karena korban masih di dalam');
+  assert.deepEqual(room.players.map(p => p.userId), [u2.user.id]);
+});
+
+test('Menang karena lawan keluar (forfeit) di 1 vs 1 tidak memberi poin', async () => {
+  quizEngine.setTimings({ countdownMs: 30, questionDurationMs: 2000, roundTransitionMs: 40, maxRounds: 3 });
+  const u1 = await registerUser('bertahan');
+  const u2 = await registerUser('kabur');
+  const s1 = await connect();
+  const s2 = await connect();
+
+  const createAck = await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' });
+  const code = createAck.code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+  const startedP = once(s1, 'question.started');
+  await emitAck(s1, 'quiz:player:ready', { token: u1.token, code, ready: true });
+  await emitAck(s2, 'quiz:player:ready', { token: u2.token, code, ready: true });
+  await startedP;
+
+  const pointsBefore = db.getUserById(u1.user.id) && db.sanitizeUser(db.getUserById(u1.user.id)).points;
+  const finishedP = once(s1, 'game.finished');
+  await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
+  const finished = await finishedP;
+
+  assert.equal(finished.endReason, 'forfeit');
+  assert.equal(finished.winnerUserId, u1.user.id);
+  assert.equal(finished.rewardPoints, 0);
+  assert.equal(finished.winnerReward, null);
+  assert.equal(db.sanitizeUser(db.getUserById(u1.user.id)).points, pointsBefore);
+});
+
+test('Aturan poin bersama: minimal 2 pemain asli dan bukan forfeit', () => {
+  const { canAwardPoints } = require('../lib/rewards');
+  const human = id => ({ userId: id });
+  const bot = id => ({ userId: `bot_${id}`, isBot: true });
+  assert.equal(canAwardPoints([human('a'), bot('x')]), false, 'hanya melawan bot');
+  assert.equal(canAwardPoints([human('a'), bot('x'), bot('y')]), false);
+  assert.equal(canAwardPoints([human('a'), human('b')]), true);
+  assert.equal(canAwardPoints([human('a'), human('b'), bot('x')]), true, 'bot boleh ikut selama ada lawan asli');
+  assert.equal(canAwardPoints([human('a'), human('b')], { endReason: 'forfeit' }), false);
+  assert.equal(canAwardPoints([{ id: 'bot', isBot: true }, { id: 'p1' }, { id: 'p2' }]), true, 'format pemain Ludo');
+});
+
+test('Rotasi soal: soal yang sudah muncul jarang keluar lagi dan siklus di-reset setelah semua muncul', () => {
+  const quizStore = require('./store');
+  const general = () => quizStore.listQuestions({ category: 'general' });
+
+  // Tuntaskan siklus yang mungkin sedang berjalan dari test lain: soal terakhir memicu reset
+  for (const q of general().filter(q => !q.cycleSeen)) quizStore.markQuestionShown(q.id);
+  assert.ok(general().every(q => !q.cycleSeen), 'siklus di-reset setelah semua soal muncul');
+
+  // Semua soal umum sudah muncul kecuali 3 soal
+  const all = general();
+  const fresh = all.slice(0, 3).map(q => q.id);
+  for (const q of all.slice(3)) quizStore.markQuestionShown(q.id);
+
+  const N = 400;
+  let freshHits = 0;
+  for (let i = 0; i < N; i++) {
+    if (fresh.includes(quizStore.selectRandomUnusedQuestion(new Set(), 'general').id)) freshHits++;
+  }
+  // Tanpa rotasi peluangnya 3/n (~2%); dengan bobot 20:1 sekitar 33%
+  assert.ok(freshHits / N > 0.2, `soal yang belum muncul harus diutamakan, dapat ${freshHits}/${N}`);
+
+  // Soal yang sudah dipakai di pertandingan yang sama tetap tidak boleh keluar lagi
+  const onlyLeft = all[5].id;
+  const used = new Set(all.map(q => q.id).filter(id => id !== onlyLeft));
+  assert.equal(quizStore.selectRandomUnusedQuestion(used, 'general').id, onlyLeft);
+
+  // Begitu 3 soal sisanya muncul, semua soal kembali berpeluang sama
+  fresh.forEach(id => quizStore.markQuestionShown(id));
+  assert.ok(general().every(q => !q.cycleSeen));
+  assert.ok(general().every(q => q.shownCount >= 1));
+});
+
+test('Mode 3 pemain: pemain yang keluar duluan tetap tercatat kalah saat match selesai', async () => {
+  quizEngine.setTimings({ countdownMs: 30, questionDurationMs: 2000, roundTransitionMs: 40, maxRounds: 3 });
+  const quizStore = require('./store');
+  const [u1, u2, u3] = [await registerUser('tiga_a'), await registerUser('tiga_b'), await registerUser('tiga_c')];
+  const [s1, s2, s3] = [await connect(), await connect(), await connect()];
+
+  const code = (await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' })).code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+  await emitAck(s3, 'quiz:room:join', { token: u3.token, code, monsterId: 'terragon' });
+  const startedP = once(s1, 'question.started');
+  for (const [s, u] of [[s1, u1], [s2, u2], [s3, u3]]) {
+    await emitAck(s, 'quiz:player:ready', { token: u.token, code, ready: true });
+  }
+  await startedP;
+
+  // Pemain ketiga kabur: match masih lanjut antara dua pemain lain
+  await emitAck(s3, 'quiz:room:leave', { token: u3.token, code });
+  assert.equal(quizEngine.quizRooms.get(code).match.finished, false);
+
+  const finishedP = once(s1, 'game.finished');
+  await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
+  const finished = await finishedP;
+
+  assert.equal(finished.winnerUserId, u1.user.id);
+  const result = id => finished.players.find(p => p.userId === id)?.result;
+  assert.equal(result(u3.user.id), 'lose', 'pemain yang keluar duluan ikut tercatat');
+  assert.equal(result(u2.user.id), 'lose');
+  assert.equal(quizStore.getPlayerStats(u3.user.id).losses, 1);
+  assert.equal(quizStore.getPlayerStats(u3.user.id).matchesPlayed, 1);
+});
+
+test('Spam event kuis dari satu socket ditolak rate limiter', async () => {
+  const u = await registerUser('spam');
+  const s = await connect();
+  const results = await Promise.all(
+    Array.from({ length: 30 }, () => emitAck(s, 'quiz:answer:submit', { token: u.token, code: 'XXXXX', selectedIndex: 0 }))
+  );
+  const limited = results.filter(r => r?.error === 'Terlalu banyak aksi dalam waktu singkat.').length;
+  assert.equal(limited, 15, 'hanya 15 aksi per 3 detik yang diproses');
+  // Keluar room tetap bisa walau sedang kena batas
+  const leave = await emitAck(s, 'quiz:room:leave', { token: u.token });
+  assert.equal(leave.ok, true);
+});
+
+test('Stok hint lawan tidak dikirim ke pemain lain', async () => {
+  const u1 = await registerUser('hint_a');
+  const u2 = await registerUser('hint_b');
+  const s1 = await connect();
+  const s2 = await connect();
+  const code = (await emitAck(s1, 'quiz:room:create', { token: u1.token, monsterId: 'emberon' })).code;
+  await emitAck(s2, 'quiz:room:join', { token: u2.token, code, monsterId: 'aquaris' });
+
+  const state = quizEngine.serializeRoomForUser(quizEngine.quizRooms.get(code), u1.user.id);
+  const me = state.players.find(p => p.userId === u1.user.id);
+  const rival = state.players.find(p => p.userId === u2.user.id);
+  assert.equal(typeof me.hintCount, 'number');
+  assert.equal(rival.hintCount, null);
+  await emitAck(s1, 'quiz:room:leave', { token: u1.token, code });
+  await emitAck(s2, 'quiz:room:leave', { token: u2.token, code });
+});
+
+test('Server dimatikan: pemain kuis diberi tahu dan room dihapus', async () => {
+  const u = await registerUser('restart');
+  const s = await connect();
+  const code = (await emitAck(s, 'quiz:room:create', { token: u.token, monsterId: 'emberon' })).code;
+  const closedP = once(s, 'quiz:room:closed');
+  quizEngine.closeAllRoomsForShutdown();
+  const closed = await closedP;
+  assert.equal(closed.roomCode, code);
+  assert.match(closed.reason, /Server sedang diperbarui/);
+  assert.equal(quizEngine.quizRooms.has(code), false);
+  assert.equal(quizEngine.getActiveRoomForUser(u.user.id), null);
+});
+
+test('Soal yang temanya mirip tidak muncul di pertandingan yang sama', () => {
+  const quizStore = require('./store');
+  const { RELATED_QUESTION_GROUPS } = require('./questions');
+  const allIds = quizStore.listQuestions().map(q => q.id);
+  for (const group of RELATED_QUESTION_GROUPS) {
+    const [first, ...others] = group;
+    for (let i = 0; i < 200; i++) {
+      const picked = quizStore.selectRandomUnusedQuestion(new Set([first]), 'general');
+      assert.ok(!others.includes(picked.id), `${picked.id} segrup dengan ${first}`);
+    }
+  }
+  // Bila hanya tersisa soal segrup (semua kategori), soal itu tetap boleh dipakai daripada match berhenti
+  const [a, b] = RELATED_QUESTION_GROUPS[1];
+  const used = new Set(allIds.filter(id => id !== b));
+  assert.equal(used.has(a), true);
+  assert.equal(quizStore.selectRandomUnusedQuestion(used, 'general').id, b);
+});
+

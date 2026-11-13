@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
+import { useBackHandler } from '../backHandlers';
 import Icon from '../components/Icon';
 import VoiceNotePlayer, { formatDuration } from './VoiceNotePlayer';
 import {
@@ -484,8 +485,10 @@ function DirectChatView({ friend, currentUser, social, onBack, onViewProfile }) 
           <div className="group-chat__recorder" role="region" aria-label="Perekam pesan suara">
             <span className="recorder-indicator" aria-hidden="true" />
             <span className="recorder-timer">
-              Merekam suara: <strong>{formatDuration(recordElapsedMs)}</strong> /{' '}
-              {formatDuration(MAX_VOICE_DURATION_MS)}
+              <span className="recorder-timer__label">Merekam suara:</span>{' '}
+              <span className="recorder-timer__time">
+                <strong>{formatDuration(recordElapsedMs)}</strong> / {formatDuration(MAX_VOICE_DURATION_MS)}
+              </span>
             </span>
             <div className="recorder-actions">
               <button type="button" className="btn btn--ghost btn--sm" onClick={onCancelVoice}>
@@ -613,6 +616,7 @@ export default function FriendsModal({
   const [confirmRemoveId, setConfirmRemoveId] = useState('');
   const [activeFriendId, setActiveFriendId] = useState(initialChatFriendId || '');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  useBackHandler(isOpen && !!activeFriendId, () => setActiveFriendId(''));
 
   const avatarInputRef = useRef(null);
 
@@ -622,6 +626,8 @@ export default function FriendsModal({
     if (isOpen) {
       setFeedback(null);
       setConfirmRemoveId('');
+      // Muat ulang daftar teman & permintaan saat dibuka, jaga-jaga event socket sempat terlewat
+      if (currentUser) actions.reloadFriends?.();
       if (initialChatFriendId) {
         setActiveFriendId(initialChatFriendId);
       }
@@ -735,7 +741,7 @@ export default function FriendsModal({
     >
       {!currentUser ? (
         <div className="state-msg">
-          <p>Masuk atau daftar akun JakLudo dulu untuk memakai fitur pertemanan dan chat private.</p>
+          <p>Masuk atau daftar akun PlayGo dulu untuk memakai fitur pertemanan dan chat private.</p>
           <button
             type="button"
             className="btn btn--primary"

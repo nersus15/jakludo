@@ -46,6 +46,24 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
     errorTimerRef.current = setTimeout(() => setError(''), 5000);
   }, []);
 
+  // Room di server sudah tidak ada (ditutup atau server restart): keluar dari layar room yang basi
+  const roomCodeRef = useRef('');
+  roomCodeRef.current = room?.code || '';
+  const dropStaleRoom = useCallback(
+    reason => {
+      storage.remove(QUIZ_ROOM_KEY);
+      setRoom(null);
+      setSearching(false);
+      setRoundResult(null);
+      setMatchResult(null);
+      setDamagePopup(null);
+      setNotice('');
+      setSlotAnim({ 0: 'idle', 1: 'idle', 2: 'idle' });
+      showError(reason);
+    },
+    [showError]
+  );
+
   const syncServerClock = useCallback(serverNow => {
     if (typeof serverNow === 'number' && Number.isFinite(serverNow)) {
       serverOffsetRef.current = serverNow - Date.now();
@@ -90,7 +108,10 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
       const token = authToken || storage.get('token');
       if (!savedCode || !token) return;
       socket.emit('quiz:room:join', { code: savedCode, token }, res => {
-        if (!res?.ok) {
+        if (res?.ok) return;
+        if (roomCodeRef.current === savedCode) {
+          dropStaleRoom('Room kuis sudah tidak tersedia (mungkin server baru diperbarui). Pertandingan itu tidak dihitung.');
+        } else {
           storage.remove(QUIZ_ROOM_KEY);
         }
       });
@@ -98,7 +119,17 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
     socket.on('connect', tryRejoin);
     if (socket.connected) tryRejoin();
     return () => socket.off('connect', tryRejoin);
-  }, [socket, authToken]);
+  }, [socket, authToken, dropStaleRoom]);
+
+  useEffect(() => {
+    if (!socket) return undefined;
+    const onRoomClosed = payload => {
+      if (payload?.roomCode && roomCodeRef.current && payload.roomCode !== roomCodeRef.current) return;
+      dropStaleRoom(payload?.reason || 'Room kuis ditutup.');
+    };
+    socket.on('quiz:room:closed', onRoomClosed);
+    return () => socket.off('quiz:room:closed', onRoomClosed);
+  }, [socket, dropStaleRoom]);
 
   // Timer visual 15 detik pertanyaan & countdown 3 detik sebelum pertandingan dimulai
   useEffect(() => {

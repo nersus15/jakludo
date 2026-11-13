@@ -18,6 +18,8 @@ body {
   font: 400 var(--fs-md) / 1.5 var(--font-body);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Fredoka hanya dimuat sampai 700: bobot 800/900 dipakai apa adanya (700), bukan bold palsu yang buram */
+  font-synthesis-weight: none;
 }
 
 h1,

@@ -9,6 +9,7 @@ import {
   useSocialChatReply
 } from '../social/ChatReplyParts';
 import { sound } from '../sound';
+import { useBackHandler } from '../backHandlers';
 import {
   compressImage,
   isAvatarUrl,
@@ -524,8 +525,10 @@ function GroupChatTab({ groupId, currentUser, social, onJoinMatch, onViewProfile
         <div className="group-chat__recorder" role="region" aria-label="Perekam pesan suara">
           <span className="recorder-indicator" aria-hidden="true" />
           <span className="recorder-timer">
-            Merekam suara: <strong>{formatDuration(recordElapsedMs)}</strong> /{' '}
-            {formatDuration(MAX_VOICE_DURATION_MS)}
+            <span className="recorder-timer__label">Merekam suara:</span>{' '}
+            <span className="recorder-timer__time">
+              <strong>{formatDuration(recordElapsedMs)}</strong> / {formatDuration(MAX_VOICE_DURATION_MS)}
+            </span>
           </span>
           <div className="recorder-actions">
             <button type="button" className="btn btn--ghost btn--sm" onClick={onCancelVoice}>
@@ -1354,6 +1357,7 @@ export default function GroupsScreen({
     setGroupDetail(null);
     setFeedback(typeof notice === 'string' && notice ? { type: 'success', text: notice } : null);
   };
+  useBackHandler(isOpen && !!activeGroupId, () => backToList());
 
   const handleCreateGroup = async e => {
     e.preventDefault();
@@ -1469,7 +1473,7 @@ export default function GroupsScreen({
     >
       {!currentUser ? (
         <div className="state-msg">
-          <p>Masuk atau daftar akun JakLudo dulu untuk bergabung ke grup dan chat bersama teman.</p>
+          <p>Masuk atau daftar akun PlayGo dulu untuk bergabung ke grup dan chat bersama teman.</p>
           <button
             type="button"
             className="btn btn--primary"
@@ -1502,7 +1506,8 @@ export default function GroupsScreen({
             </div>
             <button type="button" className="btn btn--primary btn--sm" onClick={handleCreateGroupMatch}>
               <Icon name="dice" size={16} />
-              <span>Buat match grup</span>
+              <span className="group-detail__match-label">Buat match grup</span>
+              <span className="group-detail__match-label--short">Match</span>
             </button>
           </div>
 

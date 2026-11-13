@@ -51,7 +51,7 @@
 
 @media (max-width: 767px) {
   .modal-backdrop {
-    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+    padding-bottom: var(--bottom-nav-space);
   }
 
   .modal-backdrop--sheet {
@@ -62,7 +62,7 @@
   }
 
   .modal {
-    max-height: calc(100dvh - 108px - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - var(--bottom-nav-space) - 16px);
   }
 
   .modal--sheet {
@@ -208,14 +208,14 @@
   min-width: 0;
 }
 
-.feature-page__body .group-chat__messages,
-.feature-page__body .dm-chat__messages {
+.feature-page__body .group-chat__messages {
   max-height: 56dvh;
 }
 
 @media (max-width: 767px) {
+  /* Ruang untuk menu bawah sudah diberikan .app--bottom-nav (layout.css) */
   .feature-page {
-    padding: var(--space-2) var(--gutter) calc(76px + env(safe-area-inset-bottom, 0px));
+    padding: var(--space-2) var(--gutter) var(--space-2);
     gap: var(--space-2);
   }
 
@@ -241,28 +241,36 @@
     padding: var(--space-3);
   }
 
-  /* Chat grup & private dalam mode halaman penuh HP:
-     sesuaikan tinggi pas dengan viewport tanpa scroll luar yang berantakan,
-     diberi margin-bottom agar input chat selalu berada persis di atas sticky navigation bar */
+  /* Chat grup & private dalam mode halaman penuh HP: tinggi dikunci pas layar supaya yang scroll
+     daftar pesan, bukan halaman. flex: none wajib: dengan flex: 1 tinggi halaman ikut panjang isi
+     chat. Nilai ini cadangan untuk browser tanpa :has() (header ~62px); ruang menu bawah dari .app. */
   .feature-page.groups-modal--chat,
   .feature-page.friends-modal--chat {
-    height: calc(100dvh - 56px - 60px - env(safe-area-inset-bottom, 0px));
-    max-height: calc(100dvh - 56px - 60px - env(safe-area-inset-bottom, 0px));
+    flex: none;
+    height: calc(100dvh - 62px - var(--bottom-nav-space));
     min-height: 0;
     padding: var(--space-2) var(--gutter) var(--space-1);
-    margin-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
     gap: 0;
     overflow: hidden;
-    transition: height 0.2s ease-out, margin-bottom 0.2s ease-out;
   }
 
-  /* Saat input chat difokuskan di HP (keyboard virtual aktif),
-     perluas tinggi chat room hingga menyentuh batas keyboard tanpa terpotong */
+  /* Saat input chat difokuskan di HP (keyboard virtual aktif), menu bawah tersembunyi:
+     chat room melebar sampai batas keyboard tanpa terpotong */
   body:has(.group-chat__composer input:focus) .feature-page.groups-modal--chat,
   body:has(.group-chat__composer input:focus) .feature-page.friends-modal--chat {
-    height: calc(100dvh - 56px);
-    max-height: calc(100dvh - 56px);
-    margin-bottom: 0;
+    height: calc(100dvh - 62px);
+  }
+
+  /* Browser modern: app setinggi layar, halaman chat mengisi sisa di bawah header (tinggi header bebas) */
+  .app:has(> .feature-page.groups-modal--chat),
+  .app:has(> .feature-page.friends-modal--chat) {
+    height: 100dvh;
+  }
+
+  .app:has(> .feature-page.groups-modal--chat) > .feature-page,
+  .app:has(> .feature-page.friends-modal--chat) > .feature-page {
+    flex: 1 1 0;
+    height: auto;
   }
 
   /* Sembunyikan header terluar saat berada di dalam obrolan grup / chat private aktif,

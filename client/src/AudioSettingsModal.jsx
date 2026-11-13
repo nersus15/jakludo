@@ -7,7 +7,7 @@ const PERMISSION_LABEL = { granted: 'Diizinkan', denied: 'Diblokir', default: 'B
 const NOTIF_MESSAGES = {
   denied: 'Notifikasi diblokir browser. Klik ikon gembok/pengaturan situs di samping alamat web, ubah Notifikasi menjadi "Izinkan", lalu muat ulang halaman.',
   default: 'Izin notifikasi belum diberikan.',
-  unsupported: 'Browser ini tidak mendukung notifikasi. Di iPhone/iPad, pasang JakLudo ke layar utama terlebih dahulu (iOS 16.4+).'
+  unsupported: 'Browser ini tidak mendukung notifikasi. Di iPhone/iPad, pasang PlayGo ke layar utama terlebih dahulu (iOS 16.4+).'
 };
 
 function VolumeControl({ id, title, description, percent, muted, onVolume, onToggleMute, extra }) {
@@ -56,7 +56,7 @@ export default function AudioSettingsModal({ isOpen, onClose }) {
       setNotifStatus({ ok: false, text: NOTIF_MESSAGES[permission] || NOTIF_MESSAGES.denied });
       return;
     }
-    const res = await notify('🔔 Tes notifikasi JakLudo', {
+    const res = await notify('🔔 Tes notifikasi PlayGo', {
       body: 'Notifikasi berhasil! Kamu akan diberi tahu saat giliranmu dan saat bidak diinjak.',
       tag: 'jakludo-test',
       force: true

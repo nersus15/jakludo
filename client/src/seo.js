@@ -19,7 +19,7 @@ const SEO_CONFIGS = {
   quiz: {
     title: 'Monster Quiz Battle (Duel Kuis RPG 2–3 Pemain) · PlayGo Multiplayer',
     description:
-      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +30 poin setiap menang!',
+      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +10 poin setiap menang!',
     image: '/playgo-logo.jpg',
     query: '?game=monster-quiz'
   },
@@ -64,6 +64,12 @@ export function getInitialGameModeFromUrl() {
   return 'hub';
 }
 
+// URL halaman untuk mode game tertentu (dipakai riwayat navigasi agar tombol Back browser bekerja)
+export function gameModeUrl(gameMode = 'hub') {
+  const cfg = SEO_CONFIGS[gameMode] || SEO_CONFIGS.hub;
+  return `${window.location.pathname}${cfg.query || ''}${window.location.hash || ''}`;
+}
+
 export function applySeo({ gameMode = 'hub', modal = null, roomCode = null }) {
   if (typeof document === 'undefined') return;
 
@@ -92,7 +98,7 @@ export function applySeo({ gameMode = 'hub', modal = null, roomCode = null }) {
       currentSearch !== targetSearch
     ) {
       const nextUrl = `${window.location.pathname}${targetSearch}${window.location.hash || ''}`;
-      window.history.replaceState(null, '', nextUrl);
+      window.history.replaceState(window.history.state, '', nextUrl);
     }
     const canonicalUrl = `${window.location.origin}${window.location.pathname}${targetSearch}`;
     setMetaTag('link[rel="canonical"]', 'href', canonicalUrl);

@@ -199,6 +199,11 @@ sudo certbot --nginx -d domainkamu.com
 ```
 Certbot akan otomatis mengamankan domain kamu dengan SSL/TLS (HTTPS).
 
+### Isi PUBLIC_URL
+Set `PUBLIC_URL` ke alamat publik situs (mis. `PUBLIC_URL=https://playgo.domainkamu.com`, tanpa garis miring di akhir). Nilai ini dipakai untuk canonical, `og:url`, gambar share, sitemap, dan robots.txt. Tanpa `PUBLIC_URL`, server menebak alamat dari header `Host` yang divalidasi, tapi untuk SEO yang konsisten sebaiknya selalu diisi.
+
+Admin bank soal Monster Quiz diatur lewat `QUIZ_ADMIN_USERNAMES` (username dipisah koma) dan/atau `QUIZ_ADMIN_KEY`. Kalau `QUIZ_ADMIN_USERNAMES` kosong, username `admin` otomatis menjadi admin bank soal.
+
 ### D. Aktifkan TRUST_PROXY
 Karena semua request kini datang dari Nginx, set `TRUST_PROXY=1` agar batas percobaan login dihitung per IP pemain (bukan IP Nginx). Buat file `.env` di folder proyek:
 ```bash

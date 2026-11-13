@@ -24,14 +24,16 @@ module.exports = {
   },
 
   use(ctx) {
-    const { player, target, game } = ctx;
+    const { player, target, game, room } = ctx;
+    const fromVal = room.pawns[target.player.id][target.pawnIdx];
     game.sendPawnHome(target.player, target.pawnIdx);
     game.recordCapture(target.player, { isForceReturn: true });
     game.addHistory(`⚡ FORCE RETURN! ${player.name} memulangkan bidak ${target.pawnIdx + 1} milik ${target.player.name} ke markas!`);
     game.setMessage(`⚡ Force Return! ${player.name} mengeliminasi bidak ${target.player.name}! Silakan lempar dadu.`);
     game.announce({
       title: 'FORCE RETURN DIEKSEKUSI!',
-      text: `${player.name} melancarkan eliminasi langsung terhadap bidak ${target.player.name}!`
+      text: `${player.name} melancarkan eliminasi langsung terhadap bidak ${target.player.name}!`,
+      pawn: { player: target.player, pawnIdx: target.pawnIdx, val: fromVal }
     });
   }
 };

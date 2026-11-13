@@ -5,5 +5,5 @@ Allow: /?game=monster-quiz
 Disallow: /api/
 Disallow: /socket.io/
 
-Sitemap: /sitemap.xml
+# Sitemap disajikan dinamis oleh server (/sitemap.xml dengan URL absolut)
 

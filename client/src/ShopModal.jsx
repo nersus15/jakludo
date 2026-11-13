@@ -480,7 +480,7 @@ export default function ShopModal({
         <h3 id="earn-title">Cara dapat poin PlayGo</h3>
         <ul>
           <li>Top up instan: <strong>100 diamonds = Rp 50.000</strong>, <strong>300 diamonds = Rp 150.000</strong>, <strong>550 diamonds = Rp 500.000</strong></li>
-          <li>Menang <strong>Monster Quiz Battle</strong>: <strong>+30 poin</strong></li>
+          <li>Menang <strong>Monster Quiz Battle</strong>: <strong>+10 poin</strong> (tidak dapat poin kalau menang karena lawan keluar)</li>
           <li>Peringkat 1 <strong>JakLudo</strong>: <strong>+30 poin</strong></li>
           <li>Peringkat 2 <strong>JakLudo</strong>: <strong>+20 poin</strong> (main 4 orang) atau <strong>+15</strong> (main 3 orang)</li>
           <li>Peringkat 3 <strong>JakLudo</strong> (main 4 orang): <strong>+15 poin</strong></li>

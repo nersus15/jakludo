@@ -583,7 +583,7 @@ export default function PlayerProfileModal({
                   <strong className="profile-stat__value">
                     <Icon name="diamond" size={16} /> {profile.points ?? 0}
                   </strong>
-                  <span className="profile-stat__sub muted">Poin JakLudo</span>
+                  <span className="profile-stat__sub muted">Poin PlayGo</span>
                 </div>
               </div>
 

@@ -14,6 +14,7 @@ const {
   migrateLegacyJsonToPostgres,
   readSqliteDatabase
 } = require('./migrate');
+const { canAwardPoints } = require('./lib/rewards');
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -985,9 +986,10 @@ function ensureGlobalLeaderboardRow(client, user) {
 // Return { [playerId]: { points, dailyBonus } } untuk ditampilkan di layar hasil.
 function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() }) {
   const awards = {};
-  if (!players || players.length === 0) return awards;
+  // Aturan bersama semua game: minimal 2 pemain asli (menang hanya melawan bot tidak dapat poin),
+  // lihat server/lib/rewards.js
+  if (!canAwardPoints(players)) return awards;
   const humans = players.filter(p => !p.isBot);
-  if (humans.length < 2) return awards; // menang melawan bot tidak memberi poin
   const today = todayWib(now);
 
   const order = ranking || [winnerPlayerId, ...players.map(p => p.id).filter(id => id !== winnerPlayerId)];
@@ -1134,7 +1136,7 @@ function consumeUserItem({ userId, itemId }) {
   return true;
 }
 
-// Tambah poin PlayGo ke saldo pemain (mis. hadiah +30 poin menang Monster Quiz Battle)
+// Tambah poin PlayGo ke saldo pemain (mis. hadiah +10 poin menang Monster Quiz Battle)
 function awardUserPoints(userId, deltaPoints = 0) {
   const amount = Math.floor(Number(deltaPoints) || 0);
   if (!userId || amount <= 0) return null;

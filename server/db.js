@@ -315,6 +315,10 @@ async function hydrateFromPostgres(activePool) {
     state.rooms.set(r.code, { code: r.code, state: parsed, updatedAt: Number(r.updated_at) });
   }
   for (const r of topupRes.rows) {
+    let details = r.payment_details;
+    if (typeof details === 'string') {
+      try { details = JSON.parse(details); } catch {}
+    }
     state.topupOrders.set(r.order_id, {
       orderId: r.order_id,
       userId: r.user_id,
@@ -324,6 +328,7 @@ async function hydrateFromPostgres(activePool) {
       status: r.status,
       snapToken: r.snap_token,
       paymentType: r.payment_type,
+      paymentDetails: details || null,
       createdAt: r.created_at,
       updatedAt: r.updated_at
     });
@@ -1167,7 +1172,7 @@ function awardUserPoints(userId, deltaPoints = 0) {
 // TOPUP DIAMONDS / MIDTRANS ORDERS
 // ==========================================
 
-async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmount, snapToken = null }) {
+async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmount, snapToken = null, paymentType = null, paymentDetails = null }) {
   const now = new Date().toISOString();
   const order = {
     orderId,
@@ -1177,7 +1182,8 @@ async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmo
     grossAmount: Number(grossAmount),
     status: 'pending',
     snapToken,
-    paymentType: null,
+    paymentType,
+    paymentDetails: paymentDetails || null,
     createdAt: now,
     updatedAt: now
   };
@@ -1185,14 +1191,17 @@ async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmo
   persistLocalFallback();
 
   if (pool && !closed) {
+    const detailsJson = paymentDetails ? JSON.stringify(paymentDetails) : null;
     await execPg(
-      `INSERT INTO topup_orders (order_id, user_id, package_id, diamonds, gross_amount, status, snap_token, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO topup_orders (order_id, user_id, package_id, diamonds, gross_amount, status, snap_token, payment_type, payment_details, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (order_id) DO UPDATE SET
          status = EXCLUDED.status,
          snap_token = EXCLUDED.snap_token,
+         payment_type = EXCLUDED.payment_type,
+         payment_details = EXCLUDED.payment_details,
          updated_at = EXCLUDED.updated_at`,
-      [orderId, userId, packageId, diamonds, grossAmount, 'pending', snapToken, now, now]
+      [orderId, userId, packageId, diamonds, grossAmount, 'pending', snapToken, paymentType, detailsJson, now, now]
     );
   }
   return order;
@@ -1207,6 +1216,10 @@ async function getTopupOrder(orderId) {
       const res = await pool.query('SELECT * FROM topup_orders WHERE order_id = $1', [orderId]);
       if (res.rows && res.rows.length > 0) {
         const r = res.rows[0];
+        let details = r.payment_details;
+        if (typeof details === 'string') {
+          try { details = JSON.parse(details); } catch {}
+        }
         order = {
           orderId: r.order_id,
           userId: r.user_id,
@@ -1216,6 +1229,7 @@ async function getTopupOrder(orderId) {
           status: r.status,
           snapToken: r.snap_token,
           paymentType: r.payment_type,
+          paymentDetails: details || null,
           createdAt: r.created_at,
           updatedAt: r.updated_at
         };

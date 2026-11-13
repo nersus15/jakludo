@@ -13,8 +13,9 @@ const quizEngine = require('../quiz/engine');
 const social = require('../social/store');
 const {
   DIAMOND_PACKAGES,
+  PAYMENT_METHODS,
   getMidtransConfig,
-  createSnapTransaction,
+  chargeTransaction,
   verifySignature,
   checkMidtransStatus
 } = require('../lib/midtrans');
@@ -219,7 +220,7 @@ function createApiRouter() {
   });
 
   // ==========================================
-  // TOPUP DIAMONDS (MIDTRANS)
+  // TOPUP DIAMONDS (MIDTRANS CORE API)
   // ==========================================
 
   api.get('/topup/config', (req, res) => {
@@ -227,18 +228,18 @@ function createApiRouter() {
     res.json({
       success: true,
       packages: Object.values(DIAMOND_PACKAGES),
-      clientKey: config.clientKey,
+      paymentMethods: PAYMENT_METHODS,
       isProduction: config.isProduction,
-      isConfigured: config.isConfigured,
-      snapJsUrl: config.snapJsUrl
+      isConfigured: config.isConfigured
     });
   });
 
-  api.post('/topup/create', asyncRoute(async (req, res) => {
+  // Buat transaksi pembayaran langsung menggunakan Midtrans Core API (Charge API)
+  api.post(['/topup/charge', '/topup/create'], asyncRoute(async (req, res) => {
     const user = requireUser(req, res, 'Silakan login terlebih dahulu untuk melakukan topup diamonds.');
     if (!user) return;
 
-    const { packageId } = req.body || {};
+    const { packageId, methodId } = req.body || {};
     const pkg = DIAMOND_PACKAGES[packageId];
     if (!pkg) {
       return res.status(400).json({ success: false, error: 'Paket diamond tidak valid.' });
@@ -247,30 +248,48 @@ function createApiRouter() {
     const orderId = `TOPUP-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
     try {
-      const snapRes = await createSnapTransaction({ orderId, pkg, user });
+      const chargeRes = await chargeTransaction({
+        orderId,
+        pkg,
+        user,
+        methodId: methodId || 'qris'
+      });
+
       await db.createTopupOrder({
         orderId,
         userId: user.id,
         packageId: pkg.id,
         diamonds: pkg.diamonds,
         grossAmount: pkg.price,
-        snapToken: snapRes.token
+        paymentType: chargeRes.paymentType,
+        paymentDetails: chargeRes
       });
 
       res.json({
         success: true,
         orderId,
         package: pkg,
-        snapToken: snapRes.token,
-        redirectUrl: snapRes.redirectUrl,
-        clientKey: snapRes.clientKey,
-        snapJsUrl: snapRes.snapJsUrl,
-        isSimulation: snapRes.isSimulation
+        payment: chargeRes,
+        // Backward-compat aliases
+        snapToken: chargeRes.transactionId,
+        isSimulation: chargeRes.isSimulation || false
       });
     } catch (err) {
-      console.error('[TOPUP CREATE ERROR]', err.message);
-      res.status(500).json({ success: false, error: err.message || 'Gagal membuat transaksi pembayaran.' });
+      console.error('[TOPUP CHARGE ERROR]', err.message);
+      res.status(500).json({ success: false, error: err.message || 'Gagal memproses pembayaran Midtrans Core API.' });
     }
+  }));
+
+  // Ambil detail pembayaran order yang sedang aktif
+  api.get('/topup/order/:orderId', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+
+    const order = await db.getTopupOrder(req.params.orderId);
+    if (!order || order.userId !== user.id) {
+      return res.status(404).json({ success: false, error: 'Order tidak ditemukan.' });
+    }
+    res.json({ success: true, order });
   }));
 
   // Webhook notifikasi Midtrans
@@ -306,7 +325,7 @@ function createApiRouter() {
     res.json({ status: 'OK' });
   }));
 
-  // Verifikasi status order oleh client (misal setelah callback Midtrans Snap popup)
+  // Verifikasi status order oleh client (polling berkala selama pembayaran aktif)
   api.post('/topup/verify', asyncRoute(async (req, res) => {
     const user = requireUser(req, res);
     if (!user) return;
@@ -326,7 +345,7 @@ function createApiRouter() {
       return res.json({ success: true, status: 'success', user: withKing(freshUser), diamonds: order.diamonds });
     }
 
-    // Jika belum tercatat sukses di db lokal, coba polling ke Midtrans jika terkonfigurasi
+    // Coba polling status ke Midtrans API secara realtime
     try {
       const midtransStatus = await checkMidtransStatus(orderId);
       if (midtransStatus) {

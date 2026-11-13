@@ -771,13 +771,15 @@ test('Update profil: nama, username, email, dan password', async () => {
   assert.equal(loginBody.user.id, user.id);
 });
 
-test('topup diamonds dengan midtrans (config, create, simulate, points award)', async () => {
+test('topup diamonds dengan midtrans core api (config, charge, verify, simulate, points award)', async () => {
   // 1. GET /api/topup/config
   const cfgRes = await fetch(`${url}/api/topup/config`);
   assert.equal(cfgRes.status, 200);
   const cfg = await cfgRes.json();
   assert.equal(cfg.success, true);
   assert.equal(cfg.packages.length, 3);
+  assert.ok(Array.isArray(cfg.paymentMethods));
+  assert.ok(cfg.paymentMethods.length >= 5);
 
   const p100 = cfg.packages.find(p => p.diamonds === 100);
   const p300 = cfg.packages.find(p => p.diamonds === 300);
@@ -791,26 +793,26 @@ test('topup diamonds dengan midtrans (config, create, simulate, points award)', 
   assert.equal(p550.price, 500000, '550 diamonds = Rp 500.000');
 
   // 2. Register user untuk topup
-  const topupUser = `topup_${Date.now()}`;
+  const topupUser = 'tp_' + Math.random().toString(36).slice(2, 8);
   const reg = await register(topupUser);
   const token = reg.token;
   const initialPoints = reg.user.points; // default starter points (200)
 
-  // 3. Create topup order untuk paket 300 diamonds
-  const createRes = await fetch(`${url}/api/topup/create`, {
+  // 3. Charge topup order untuk paket 300 diamonds via BCA Virtual Account (Core API)
+  const chargeRes = await fetch(`${url}/api/topup/charge`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_300' })
+    body: JSON.stringify({ packageId: 'diamond_300', methodId: 'bca_va' })
   });
-  assert.equal(createRes.status, 200);
-  const createBody = await createRes.json();
-  assert.equal(createBody.success, true);
-  assert.ok(createBody.orderId);
-  assert.ok(createBody.snapToken);
-  assert.equal(createBody.package.diamonds, 300);
+  assert.equal(chargeRes.status, 200);
+  const chargeBody = await chargeRes.json();
+  assert.equal(chargeBody.success, true);
+  assert.ok(chargeBody.orderId);
+  assert.ok(chargeBody.payment);
+  assert.equal(chargeBody.package.diamonds, 300);
 
   // 4. Simulasi pembayaran topup (simulate)
   const simRes = await fetch(`${url}/api/topup/simulate`, {
@@ -819,7 +821,7 @@ test('topup diamonds dengan midtrans (config, create, simulate, points award)', 
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ orderId: createBody.orderId })
+    body: JSON.stringify({ orderId: chargeBody.orderId })
   });
   assert.equal(simRes.status, 200);
   const simBody = await simRes.json();
@@ -834,7 +836,7 @@ test('topup diamonds dengan midtrans (config, create, simulate, points award)', 
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ orderId: createBody.orderId })
+    body: JSON.stringify({ orderId: chargeBody.orderId })
   });
   assert.equal(verifyRes.status, 200);
   const verifyBody = await verifyRes.json();
@@ -842,7 +844,20 @@ test('topup diamonds dengan midtrans (config, create, simulate, points award)', 
   assert.equal(verifyBody.status, 'success');
   assert.equal(verifyBody.user.points, initialPoints + 300);
 
-  // 6. Test paket 550 diamonds (Paket Sultan)
+  // 6. Test Charge QRIS untuk paket 100 diamonds
+  const qrisChargeRes = await fetch(`${url}/api/topup/charge`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ packageId: 'diamond_100', methodId: 'qris' })
+  });
+  const qrisBody = await qrisChargeRes.json();
+  assert.equal(qrisBody.success, true);
+  assert.ok(qrisBody.payment.qrCodeUrl || qrisBody.payment.qrString);
+
+  // 7. Test paket 550 diamonds (Paket Sultan)
   const sultanRes = await fetch(`${url}/api/topup/create`, {
     method: 'POST',
     headers: {

@@ -1,4 +1,4 @@
-// Integrasi Midtrans Payment Gateway untuk Topup Diamonds / Poin PlayGo
+// Integrasi Midtrans Payment Gateway (Core API / Charge API) untuk Topup Diamonds / Poin PlayGo
 const crypto = require('crypto');
 const { loadDotEnv } = require('../migrate');
 
@@ -35,6 +35,58 @@ const DIAMOND_PACKAGES = {
   }
 };
 
+const PAYMENT_METHODS = [
+  {
+    id: 'qris',
+    category: 'qris',
+    name: 'QRIS (Semua E-Wallet & M-Banking)',
+    description: 'Scan langsung via GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin, dll.',
+    icon: 'qr',
+    badge: 'Instan'
+  },
+  {
+    id: 'bca_va',
+    category: 'bank_transfer',
+    bank: 'bca',
+    name: 'BCA Virtual Account',
+    description: 'Transfer otomatis 24 jam via BCA Mobile, myBCA, KlikBCA, atau ATM BCA.',
+    icon: 'bank',
+    badge: 'Populer'
+  },
+  {
+    id: 'bni_va',
+    category: 'bank_transfer',
+    bank: 'bni',
+    name: 'BNI Virtual Account',
+    description: 'Transfer via BNI Mobile Banking, Internet Banking, atau ATM BNI.',
+    icon: 'bank'
+  },
+  {
+    id: 'bri_va',
+    category: 'bank_transfer',
+    bank: 'bri',
+    name: 'BRI Virtual Account (BRIVA)',
+    description: 'Transfer via BRImo, Internet Banking BRI, atau ATM BRI.',
+    icon: 'bank'
+  },
+  {
+    id: 'mandiri_bill',
+    category: 'echannel',
+    bank: 'mandiri',
+    name: 'Mandiri Bill',
+    description: 'Pembayaran tagihan via Livin by Mandiri (kode perusahaan + kode bayar).',
+    icon: 'bank'
+  },
+  {
+    id: 'permata_va',
+    category: 'bank_transfer',
+    bank: 'permata',
+    name: 'Permata Virtual Account',
+    description: 'Transfer via PermataMobile X atau ATM bersama/ALTO/Prima.',
+    icon: 'bank'
+  }
+];
+
 function getMidtransConfig() {
   loadDotEnv(true);
   const serverKey = (process.env.MIDTRANS_SERVER_KEY || '').trim();
@@ -43,13 +95,9 @@ function getMidtransConfig() {
     process.env.MIDTRANS_IS_PRODUCTION === '1' ||
     process.env.MIDTRANS_IS_PRODUCTION === 'true';
 
-  const snapApiUrl = isProduction
-    ? 'https://app.midtrans.com/snap/v1/transactions'
-    : 'https://app.sandbox.midtrans.com/snap/v1/transactions';
-
-  const snapJsUrl = isProduction
-    ? 'https://app.midtrans.com/snap/snap.js'
-    : 'https://app.sandbox.midtrans.com/snap/snap.js';
+  const chargeUrl = isProduction
+    ? 'https://api.midtrans.com/v2/charge'
+    : 'https://api.sandbox.midtrans.com/v2/charge';
 
   const statusApiBase = isProduction
     ? 'https://api.midtrans.com/v2'
@@ -59,32 +107,42 @@ function getMidtransConfig() {
     serverKey,
     clientKey,
     isProduction,
-    isConfigured: Boolean(serverKey && clientKey),
-    snapApiUrl,
-    snapJsUrl,
+    isConfigured: Boolean(serverKey),
+    chargeUrl,
     statusApiBase
   };
 }
 
-async function createSnapTransaction({ orderId, pkg, user }) {
+// Midtrans Core API Charge
+async function chargeTransaction({ orderId, pkg, user, methodId = 'qris' }) {
   const config = getMidtransConfig();
 
-  // Mode simulasi HANYA diizinkan pada unit test otomatis (NODE_ENV=test)
+  // Mode mock HANYA diizinkan pada unit test otomatis (NODE_ENV=test)
   if (!config.serverKey) {
     if (process.env.NODE_ENV === 'test') {
+      const isVa = methodId.includes('va') || methodId.includes('bill');
       return {
         success: true,
-        token: `sim_snap_${orderId}`,
-        redirectUrl: '#simulated-payment',
+        orderId,
+        transactionId: `mock_tx_${orderId}`,
+        paymentType: isVa ? 'bank_transfer' : 'qris',
+        grossAmount: pkg.price,
+        status: 'pending',
         isSimulation: true,
-        clientKey: config.clientKey || 'SB-Mid-client-mock',
-        snapJsUrl: config.snapJsUrl
+        qrCodeUrl: 'https://api.sandbox.midtrans.com/v2/qris/mock/qr-code',
+        qrString: '000201010212mockqris',
+        vaNumber: isVa ? '123456789012' : null,
+        bank: isVa ? 'bca' : null,
+        billKey: methodId === 'mandiri_bill' ? '385843904150' : null,
+        billerCode: methodId === 'mandiri_bill' ? '70012' : null,
+        expiryTime: new Date(Date.now() + 15 * 60 * 1000).toISOString()
       };
     }
-    throw new Error('Sistem pembayaran Midtrans belum dikonfigurasi di server. Pastikan MIDTRANS_SERVER_KEY dan MIDTRANS_CLIENT_KEY telah diisi di file .env server production.');
+    throw new Error('Sistem pembayaran Midtrans belum dikonfigurasi di server. Pastikan MIDTRANS_SERVER_KEY telah diisi di file .env.');
   }
 
-  const authHeader = 'Basic ' + Buffer.from(config.serverKey + ':').toString('base64');
+  const selectedMethod = PAYMENT_METHODS.find(m => m.id === methodId) || PAYMENT_METHODS[0];
+
   const payload = {
     transaction_details: {
       order_id: orderId,
@@ -95,7 +153,7 @@ async function createSnapTransaction({ orderId, pkg, user }) {
         id: pkg.id,
         price: pkg.price,
         quantity: 1,
-        name: `${pkg.name} (${pkg.diamonds} Poin PlayGo)`
+        name: `${pkg.name} (${pkg.diamonds} Diamonds)`
       }
     ],
     customer_details: {
@@ -104,7 +162,26 @@ async function createSnapTransaction({ orderId, pkg, user }) {
     }
   };
 
-  const res = await fetch(config.snapApiUrl, {
+  if (selectedMethod.id === 'qris') {
+    payload.payment_type = 'qris';
+    payload.qris = { acquirer: 'gopay' };
+  } else if (selectedMethod.id === 'mandiri_bill') {
+    payload.payment_type = 'echannel';
+    payload.echannel = {
+      bill_info1: 'Topup Diamonds',
+      bill_info2: `${pkg.diamonds} Poin PlayGo`
+    };
+  } else if (selectedMethod.bank === 'permata') {
+    payload.payment_type = 'permata';
+  } else {
+    payload.payment_type = 'bank_transfer';
+    payload.bank_transfer = {
+      bank: selectedMethod.bank || 'bca'
+    };
+  }
+
+  const authHeader = 'Basic ' + Buffer.from(config.serverKey + ':').toString('base64');
+  const res = await fetch(config.chargeUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -115,18 +192,45 @@ async function createSnapTransaction({ orderId, pkg, user }) {
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.token) {
-    const errorMsg = data?.error_messages?.join(', ') || data?.message || `Midtrans API Error (${res.status})`;
+  if (!res.ok || (data.status_code && !data.status_code.startsWith('20'))) {
+    const errorMsg = data?.error_messages?.join(', ') || data?.status_message || `Midtrans Core API Error (${res.status})`;
     throw new Error(errorMsg);
   }
 
+  // Ekstrak detail pembayaran dari respon Core API
+  const qrCodeUrl =
+    data.actions?.find(a => a.name === 'generate-qr-code')?.url ||
+    data.actions?.find(a => a.name === 'generate-qr-code-v2')?.url ||
+    null;
+
+  const vaNumber =
+    data.va_numbers?.[0]?.va_number ||
+    data.permata_va_number ||
+    null;
+
+  const bank =
+    data.va_numbers?.[0]?.bank ||
+    (data.permata_va_number ? 'permata' : selectedMethod.bank || null);
+
+  const billKey = data.bill_key || null;
+  const billerCode = data.biller_code || null;
+
   return {
     success: true,
-    token: data.token,
-    redirectUrl: data.redirect_url,
-    isSimulation: false,
-    clientKey: config.clientKey,
-    snapJsUrl: config.snapJsUrl
+    orderId,
+    transactionId: data.transaction_id,
+    paymentType: data.payment_type,
+    methodId: selectedMethod.id,
+    methodName: selectedMethod.name,
+    grossAmount: Number(data.gross_amount || pkg.price),
+    status: data.transaction_status || 'pending',
+    expiryTime: data.expiry_time || null,
+    qrCodeUrl,
+    qrString: data.qr_string || null,
+    vaNumber,
+    bank,
+    billKey,
+    billerCode
   };
 }
 
@@ -158,9 +262,10 @@ async function checkMidtransStatus(orderId) {
 
 module.exports = {
   DIAMOND_PACKAGES,
+  PAYMENT_METHODS,
   getMidtransConfig,
-  createSnapTransaction,
+  chargeTransaction,
+  createSnapTransaction: chargeTransaction, // Alias untuk backward compatibility
   verifySignature,
   checkMidtransStatus
 };
-

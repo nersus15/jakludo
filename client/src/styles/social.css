@@ -1272,6 +1272,99 @@
   gap: var(--space-2);
 }
 
+.profile-edit-section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--ink-line);
+}
+
+.profile-edit-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.profile-edit-section__title {
+  margin: 0;
+  font: 700 var(--fs-md) var(--font-display);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.profile-edit-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.field__with-prefix {
+  display: flex;
+  align-items: center;
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.field__with-prefix:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.field__prefix {
+  padding-left: var(--space-3);
+  font-weight: 700;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.field__with-prefix .input {
+  border: 0;
+  background: transparent;
+}
+
+.field__with-prefix .input:focus-visible {
+  outline: none;
+}
+
+.profile-password-box {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px dashed var(--ink-line);
+}
+
+.profile-password-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  width: 100%;
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  text-align: left;
+}
+
+.profile-password-header:hover {
+  color: var(--brand);
+}
+
+.profile-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 /* ---------- Highlight Stepper (Onboarding Tour Fitur Sosial) ---------- */
 
 .tour-overlay {

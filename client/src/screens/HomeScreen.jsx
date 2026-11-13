@@ -28,69 +28,19 @@ function ActiveRoomCard({ room, onJoin }) {
   );
 }
 
-function PlatformLinks({
-  friendBadgeCount,
-  groupBadgeCount,
-  isInstalled,
-  onOpenFriends,
-  onOpenGroups,
-  onOpenLeaderboard,
-  onInstall
-}) {
+function PlatformLinks({ isInstalled, onInstall }) {
+  if (isInstalled || !onInstall) return null;
   return (
     <div className="home__links">
-      {onOpenFriends && (
-        <button type="button" className="link-card card" data-tour="friends" onClick={onOpenFriends}>
-          <span className="link-card__icon" aria-hidden="true">
-            <Icon name="friends" size={24} />
-          </span>
-          <span>
-            <strong className="link-card__head">
-              Teman
-              {friendBadgeCount > 0 && (
-                <span className="badge badge--brand">{friendBadgeCount} baru</span>
-              )}
-            </strong>
-            <span className="muted">Tambah teman dan lihat siapa yang online di PlayGo</span>
-          </span>
-        </button>
-      )}
-      {onOpenGroups && (
-        <button type="button" className="link-card card" data-tour="groups" onClick={onOpenGroups}>
-          <span className="link-card__icon" aria-hidden="true">
-            <Icon name="chat" size={24} />
-          </span>
-          <span>
-            <strong className="link-card__head">
-              Grup &amp; Chat
-              {groupBadgeCount > 0 && (
-                <span className="badge badge--brand">{groupBadgeCount} undangan</span>
-              )}
-            </strong>
-            <span className="muted">Obrolan grup, foto, voice note, dan Match Grup</span>
-          </span>
-        </button>
-      )}
-      <button type="button" className="link-card card" data-tour="leaderboard" onClick={onOpenLeaderboard}>
+      <button type="button" className="link-card card" onClick={onInstall}>
         <span className="link-card__icon" aria-hidden="true">
-          <Icon name="trophy" size={24} />
+          <Icon name="install" size={24} />
         </span>
         <span>
-          <strong>Peringkat pemain</strong>
-          <span className="muted">Lihat peringkat pemain terbaik di PlayGo</span>
+          <strong>Pasang di layar utama</strong>
+          <span className="muted">Buka PlayGo layar penuh tanpa bilah browser</span>
         </span>
       </button>
-      {!isInstalled && (
-        <button type="button" className="link-card card" onClick={onInstall}>
-          <span className="link-card__icon" aria-hidden="true">
-            <Icon name="install" size={24} />
-          </span>
-          <span>
-            <strong>Pasang di layar utama</strong>
-            <span className="muted">Buka PlayGo layar penuh tanpa bilah browser</span>
-          </span>
-        </button>
-      )}
     </div>
   );
 }
@@ -211,12 +161,7 @@ export default function HomeScreen({
           </div>
 
           <PlatformLinks
-            friendBadgeCount={friendBadgeCount}
-            groupBadgeCount={groupBadgeCount}
             isInstalled={isInstalled}
-            onOpenFriends={onOpenFriends}
-            onOpenGroups={onOpenGroups}
-            onOpenLeaderboard={onOpenLeaderboard}
             onInstall={onInstall}
           />
         </section>
@@ -384,18 +329,14 @@ export default function HomeScreen({
 
       {error && <p className="alert alert--error" role="alert">{error}</p>}
 
-      {/* Fitur Sosial, Grup, & Peringkat PlayGo */}
-      <section aria-label="Fitur Komunitas PlayGo">
-        <PlatformLinks
-          friendBadgeCount={friendBadgeCount}
-          groupBadgeCount={groupBadgeCount}
-          isInstalled={isInstalled}
-          onOpenFriends={onOpenFriends}
-          onOpenGroups={onOpenGroups}
-          onOpenLeaderboard={onOpenLeaderboard}
-          onInstall={onInstall}
-        />
-      </section>
+      {!isInstalled && onInstall && (
+        <section aria-label="Instalasi Aplikasi PlayGo">
+          <PlatformLinks
+            isInstalled={isInstalled}
+            onInstall={onInstall}
+          />
+        </section>
+      )}
     </main>
   );
 }

@@ -215,7 +215,7 @@
 
 @media (max-width: 767px) {
   .feature-page {
-    padding: var(--space-2) var(--gutter) var(--space-2);
+    padding: var(--space-2) var(--gutter) calc(76px + env(safe-area-inset-bottom, 0px));
     gap: var(--space-2);
   }
 
@@ -242,18 +242,31 @@
   }
 
   /* Chat grup & private dalam mode halaman penuh HP:
-     sesuaikan tinggi pas dengan viewport tanpa scroll luar yang berantakan */
+     sesuaikan tinggi pas dengan viewport tanpa scroll luar yang berantakan,
+     diberi margin-bottom agar input chat selalu berada persis di atas sticky navigation bar */
   .feature-page.groups-modal--chat,
   .feature-page.friends-modal--chat {
-    height: calc(100dvh - 56px - 84px - env(safe-area-inset-bottom));
+    height: calc(100dvh - 56px - 60px - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 56px - 60px - env(safe-area-inset-bottom, 0px));
     min-height: 0;
-    padding: var(--space-2) var(--gutter) 0;
+    padding: var(--space-2) var(--gutter) var(--space-1);
+    margin-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
     gap: 0;
     overflow: hidden;
+    transition: height 0.2s ease-out, margin-bottom 0.2s ease-out;
+  }
+
+  /* Saat input chat difokuskan di HP (keyboard virtual aktif),
+     perluas tinggi chat room hingga menyentuh batas keyboard tanpa terpotong */
+  body:has(.group-chat__composer input:focus) .feature-page.groups-modal--chat,
+  body:has(.group-chat__composer input:focus) .feature-page.friends-modal--chat {
+    height: calc(100dvh - 56px);
+    max-height: calc(100dvh - 56px);
+    margin-bottom: 0;
   }
 
   /* Sembunyikan header terluar saat berada di dalam obrolan grup / chat private aktif,
-     karena bilah detail (group-detail__bar / group-detail__top) sudah menyediakan
+     karena bilah detail (group-detail__bar / dm-chat__bar) sudah menyediakan
      navigasi kembali, avatar, judul, dan status yang lengkap dan ringkas */
   .feature-page.groups-modal--detail .feature-page__header,
   .feature-page.groups-modal--chat .feature-page__header,
@@ -267,18 +280,20 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: var(--space-3);
+    padding: var(--space-2);
     overflow: hidden;
   }
 
   .feature-page.groups-modal--chat .group-detail,
   .feature-page.friends-modal--chat .group-detail,
   .feature-page.groups-modal--chat .group-chat,
-  .feature-page.friends-modal--chat .group-chat {
+  .feature-page.friends-modal--chat .group-chat,
+  .feature-page.friends-modal--chat .dm-chat {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
+    gap: var(--space-2);
   }
 
   .feature-page.groups-modal--chat .group-chat__messages,
@@ -288,6 +303,14 @@
     max-height: none;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  .feature-page.groups-modal--chat .group-chat__composer,
+  .feature-page.friends-modal--chat .group-chat__composer {
+    flex-shrink: 0;
+    margin-top: auto;
+    padding-top: 4px;
+    padding-bottom: 2px;
   }
 }
 

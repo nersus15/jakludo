@@ -12,6 +12,82 @@
   background: var(--surface-2);
 }
 
+/* ---------- Google Auth ---------- */
+
+.google-auth-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.google-gis-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.btn--google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--ink-line);
+  box-shadow: var(--lift-1);
+  font-weight: 700;
+  font-size: var(--fs-md);
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.btn--google:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn--google:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: none;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.google-help-card {
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: 1px dashed var(--ink-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.google-help-card code {
+  font-family: monospace;
+  font-size: 0.85em;
+  background: var(--surface-3);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 .tabs__tab {
   min-height: 40px;
   border: 0;
@@ -100,6 +176,111 @@
 
 .shop__feedback {
   margin-bottom: var(--space-4);
+}
+
+.shop__filter-tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.shop__group {
+  margin-bottom: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.shop__group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border-left: 4px solid var(--brand);
+}
+
+.shop__group-header--quiz {
+  border-left-color: #3b82f6;
+}
+
+.shop__group-header--topup {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.12), var(--surface-2));
+}
+
+.shop-item--topup {
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  background: linear-gradient(180deg, var(--surface-1), var(--surface-2));
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shop-item--topup:hover {
+  border-color: #8b5cf6;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.15);
+}
+
+.shop-item--topup-popular {
+  border-color: #a855f7;
+  position: relative;
+}
+
+.badge--sultan {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  font-weight: 700;
+}
+
+.badge--popular {
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  color: #fff;
+  font-weight: 700;
+}
+
+.topup-card__diamonds {
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  color: #8b5cf6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.topup-card__price {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.shop__midtrans-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin-top: var(--space-2);
+}
+
+.shop__group-title {
+  margin: 0;
+  font: 700 var(--fs-md) var(--font-display);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.shop__group-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin: 2px 0 0;
 }
 
 .shop__items {

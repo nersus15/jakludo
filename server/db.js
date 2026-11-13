@@ -51,12 +51,15 @@ if (!fs.existsSync(DATA_DIR)) {
 // ==========================================
 
 const state = {
-  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, createdAt }
+  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, googleId, createdAt }
   usersByUsername: new Map(), // lower(username) -> id
+  usersByGoogleId: new Map(), // googleId -> id
+  usersByEmail: new Map(),    // lower(email) -> id
   userItems: new Map(),       // userId -> { [itemId]: quantity }
   sessions: new Map(),        // tokenHash -> { tokenHash, userId, createdAt, expiresAt }
   leaderboard: new Map(),     // userId -> { userId, username, name, avatar, wins, matchesPlayed, points, authType }
-  rooms: new Map()            // code -> { code, state, updatedAt }
+  rooms: new Map(),           // code -> { code, state, updatedAt }
+  topupOrders: new Map()      // orderId -> { orderId, userId, packageId, diamonds, grossAmount, status, snapToken, paymentType, createdAt, updatedAt }
 };
 
 let pool = null;
@@ -126,10 +129,17 @@ function setUserInState(u) {
     authType: u.authType || u.auth_type || 'password',
     avatar: u.avatar || null,
     email: u.email || null,
+    googleId: u.googleId || u.google_id || null,
     createdAt: u.createdAt || u.created_at || new Date().toISOString()
   };
   state.usersById.set(row.id, row);
   state.usersByUsername.set(row.username.toLowerCase(), row.id);
+  if (row.googleId) {
+    state.usersByGoogleId.set(String(row.googleId), row.id);
+  }
+  if (row.email) {
+    state.usersByEmail.set(String(row.email).toLowerCase(), row.id);
+  }
 }
 
 function setItemInState(userId, itemId, quantity) {
@@ -265,13 +275,15 @@ async function hydrateFromPostgres(activePool) {
   state.sessions.clear();
   state.leaderboard.clear();
   state.rooms.clear();
+  state.topupOrders.clear();
 
-  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes] = await Promise.all([
+  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes, topupRes] = await Promise.all([
     activePool.query('SELECT * FROM users'),
     activePool.query('SELECT user_id, item_id, quantity FROM user_items WHERE quantity > 0'),
     activePool.query('SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE expires_at > $1', [Date.now()]),
     activePool.query('SELECT * FROM leaderboard'),
-    activePool.query('SELECT code, state, updated_at FROM rooms')
+    activePool.query('SELECT code, state, updated_at FROM rooms'),
+    activePool.query('SELECT * FROM topup_orders ORDER BY created_at DESC LIMIT 500').catch(() => ({ rows: [] }))
   ]);
 
   for (const r of usersRes.rows) setUserInState(r);
@@ -300,6 +312,20 @@ async function hydrateFromPostgres(activePool) {
   for (const r of roomsRes.rows) {
     const parsed = typeof r.state === 'string' ? JSON.parse(r.state) : r.state;
     state.rooms.set(r.code, { code: r.code, state: parsed, updatedAt: Number(r.updated_at) });
+  }
+  for (const r of topupRes.rows) {
+    state.topupOrders.set(r.order_id, {
+      orderId: r.order_id,
+      userId: r.user_id,
+      packageId: r.package_id,
+      diamonds: Number(r.diamonds),
+      grossAmount: Number(r.gross_amount),
+      status: r.status,
+      snapToken: r.snap_token,
+      paymentType: r.payment_type,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    });
   }
 }
 
@@ -368,6 +394,7 @@ function buildUserObject(row) {
     authType: row.authType,
     avatar: row.avatar,
     email: row.email || undefined,
+    googleId: row.googleId || undefined,
     createdAt: row.createdAt,
     inventory: getUserItems(row.id)
   };
@@ -412,6 +439,18 @@ function findUserById(id) {
 function findUserByUsername(username) {
   if (!username) return null;
   const id = state.usersByUsername.get(String(username).toLowerCase());
+  return id ? findUserById(id) : null;
+}
+
+function findUserByGoogleId(googleId) {
+  if (!googleId) return null;
+  const id = state.usersByGoogleId.get(String(googleId));
+  return id ? findUserById(id) : null;
+}
+
+function findUserByEmail(email) {
+  if (!email) return null;
+  const id = state.usersByEmail.get(String(email).toLowerCase());
   return id ? findUserById(id) : null;
 }
 
@@ -565,6 +604,120 @@ async function loginUser({ username, password }) {
   return { user: sanitizeUser(user), token: createSession(user.id) };
 }
 
+async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
+  if (!googleId && !email) {
+    return { error: 'Identitas akun Google tidak lengkap.' };
+  }
+
+  // 1. Cek apakah user sudah pernah terdaftar dengan Google ID ini
+  if (googleId) {
+    const existingByGoogleId = findUserByGoogleId(googleId);
+    if (existingByGoogleId) {
+      return { user: sanitizeUser(existingByGoogleId), token: createSession(existingByGoogleId.id) };
+    }
+  }
+
+  // 2. Cek apakah ada akun yang terdaftar dengan email yang sama (link akun)
+  if (email) {
+    const existingByEmail = findUserByEmail(email);
+    if (existingByEmail) {
+      if (googleId && !existingByEmail.googleId) {
+        existingByEmail.googleId = String(googleId);
+        state.usersByGoogleId.set(String(googleId), existingByEmail.id);
+        if (pool && !closed) {
+          await execPg(
+            'UPDATE users SET google_id = $1 WHERE id = $2',
+            [String(googleId), existingByEmail.id]
+          );
+        }
+        persistLocalFallback();
+      }
+      return { user: sanitizeUser(existingByEmail), token: createSession(existingByEmail.id) };
+    }
+  }
+
+  // 3. User baru: buat username yang unik
+  const rawBase = (email ? email.split('@')[0] : '') || (name || 'player');
+  let cleanUsername = rawBase.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 15);
+  if (cleanUsername.length < 3) cleanUsername = 'player_' + crypto.randomInt(100, 999);
+
+  let finalUsername = cleanUsername;
+  let counter = 1;
+  while (findUserByUsername(finalUsername)) {
+    const suffix = String(counter);
+    finalUsername = cleanUsername.slice(0, 20 - suffix.length) + suffix;
+    counter++;
+  }
+
+  const displayName = (typeof name === 'string' ? name.trim().slice(0, 18) : '') || finalUsername;
+  const id = 'user_' + crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const userAvatar = (typeof avatar === 'string' && avatar.trim()) ? avatar.trim() : '🎯';
+  const userEmail = (typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : null;
+  const userGoogleId = googleId ? String(googleId) : null;
+
+  if (pool && !closed) {
+    try {
+      await execPgTransaction(async client => {
+        await client.query(
+          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, email, google_id, created_at)
+           VALUES ($1, $2, $3, NULL, 'google', $4, $5, $6, $7)`,
+          [id, finalUsername, displayName, userAvatar, userEmail, userGoogleId, createdAt]
+        );
+        await client.query(
+          `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
+           VALUES ($1, $2, $3, $4, 0, 0, $5, 'google')
+           ON CONFLICT (user_id) DO NOTHING`,
+          [id, finalUsername, displayName, userAvatar, STARTER_POINTS]
+        );
+      });
+    } catch (err) {
+      if (String(err.code) === '23505' || String(err.message).includes('unique')) {
+        if (userGoogleId && findUserByGoogleId(userGoogleId)) {
+          const u = findUserByGoogleId(userGoogleId);
+          return { user: sanitizeUser(u), token: createSession(u.id) };
+        }
+        if (userEmail && findUserByEmail(userEmail)) {
+          const u = findUserByEmail(userEmail);
+          return { user: sanitizeUser(u), token: createSession(u.id) };
+        }
+      }
+      throw err;
+    }
+  }
+
+  setUserInState({
+    id,
+    username: finalUsername,
+    name: displayName,
+    passwordHash: null,
+    authType: 'google',
+    avatar: userAvatar,
+    email: userEmail,
+    googleId: userGoogleId,
+    createdAt
+  });
+
+  state.leaderboard.set(id, {
+    userId: id,
+    username: finalUsername,
+    name: displayName,
+    avatar: userAvatar,
+    wins: 0,
+    matchesPlayed: 0,
+    points: STARTER_POINTS,
+    authType: 'google'
+  });
+
+  persistLocalFallback();
+
+  return {
+    user: sanitizeUser(findUserById(id)),
+    token: createSession(id),
+    isNewUser: true
+  };
+}
+
 // ==========================================
 // PROFIL USER
 // ==========================================
@@ -599,6 +752,138 @@ function updateUserAvatar(userId, avatarUrl) {
   });
 
   return sanitizeUser(findUserById(userId));
+}
+
+function updateUserEmail(userId, email) {
+  const row = state.usersById.get(userId);
+  if (!row) return null;
+  const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+  row.email = cleanEmail;
+  if (cleanEmail) {
+    state.usersByEmail.set(cleanEmail, userId);
+  }
+  persistLocalFallback();
+
+  execPg('UPDATE users SET email = $1 WHERE id = $2', [cleanEmail, userId]);
+  return sanitizeUser(findUserById(userId));
+}
+
+async function updateUserProfile(userId, { name, username, email, currentPassword, newPassword } = {}) {
+  const row = state.usersById.get(userId);
+  if (!row) return { error: 'Pemain tidak ditemukan.' };
+
+  let nextName = row.name;
+  if (name !== undefined) {
+    if (typeof name !== 'string') return { error: 'Format nama tidak valid.' };
+    const cleanName = name.trim().slice(0, 30);
+    if (!cleanName) return { error: 'Nama tampilan tidak boleh kosong.' };
+    nextName = cleanName;
+  }
+
+  let nextUsername = row.username;
+  if (username !== undefined) {
+    const userValid = validateUsername(username);
+    if (!userValid.valid) return { error: userValid.message };
+    const cleanUsername = userValid.cleanUsername;
+    if (cleanUsername.toLowerCase() !== row.username.toLowerCase()) {
+      const existing = findUserByUsername(cleanUsername);
+      if (existing && existing.id !== userId) {
+        return { error: 'Username sudah digunakan oleh akun lain.' };
+      }
+      nextUsername = cleanUsername;
+    }
+  }
+
+  let nextEmail = row.email || null;
+  if (email !== undefined) {
+    if (email === null || email === '') {
+      nextEmail = null;
+    } else {
+      if (typeof email !== 'string') return { error: 'Format email tidak valid.' };
+      const cleanEmail = email.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return { error: 'Format email tidak valid.' };
+      }
+      const existing = findUserByEmail(cleanEmail);
+      if (existing && existing.id !== userId) {
+        return { error: 'Email sudah digunakan oleh akun lain.' };
+      }
+      nextEmail = cleanEmail;
+    }
+  }
+
+  let nextPasswordHash = row.passwordHash;
+  if (newPassword) {
+    if (row.passwordHash) {
+      if (!currentPassword) {
+        return { error: 'Password saat ini wajib diisi untuk mengubah password.' };
+      }
+      const match = await verifyPassword(currentPassword, row.passwordHash);
+      if (!match) {
+        return { error: 'Password saat ini tidak sesuai.' };
+      }
+    }
+    const passValid = validatePassword(newPassword);
+    if (!passValid.valid) return { error: passValid.message };
+    nextPasswordHash = await hashPassword(newPassword);
+  }
+
+  // Update PostgreSQL jika aktif
+  if (pool && !closed) {
+    try {
+      await execPgTransaction(async client => {
+        await client.query(
+          `UPDATE users
+           SET name = $1, username = $2, email = $3, password_hash = $4
+           WHERE id = $5`,
+          [nextName, nextUsername, nextEmail, nextPasswordHash, userId]
+        );
+        await client.query(
+          `UPDATE leaderboard
+           SET name = $1, username = $2
+           WHERE user_id = $3`,
+          [nextName, nextUsername, userId]
+        );
+      });
+    } catch (err) {
+      if (String(err.code) === '23505' || String(err.message).includes('unique')) {
+        return { error: 'Username atau email sudah digunakan oleh akun lain.' };
+      }
+      throw err;
+    }
+  }
+
+  // Update in-memory state
+  const prevUsername = row.username;
+  const prevEmail = row.email;
+
+  if (prevUsername.toLowerCase() !== nextUsername.toLowerCase()) {
+    state.usersByUsername.delete(prevUsername.toLowerCase());
+    state.usersByUsername.set(nextUsername.toLowerCase(), userId);
+  }
+
+  if (prevEmail && (!nextEmail || prevEmail.toLowerCase() !== nextEmail.toLowerCase())) {
+    state.usersByEmail.delete(prevEmail.toLowerCase());
+  }
+  if (nextEmail) {
+    state.usersByEmail.set(nextEmail.toLowerCase(), userId);
+  }
+
+  row.name = nextName;
+  row.username = nextUsername;
+  row.email = nextEmail;
+  row.passwordHash = nextPasswordHash;
+
+  const lb = state.leaderboard.get(userId);
+  if (lb) {
+    lb.name = nextName;
+    lb.username = nextUsername;
+  }
+
+  persistLocalFallback();
+
+  return { success: true, user: sanitizeUser(findUserById(userId)) };
 }
 
 // ==========================================
@@ -876,6 +1161,103 @@ function awardUserPoints(userId, deltaPoints = 0) {
   };
 }
 
+// ==========================================
+// TOPUP DIAMONDS / MIDTRANS ORDERS
+// ==========================================
+
+async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmount, snapToken = null }) {
+  const now = new Date().toISOString();
+  const order = {
+    orderId,
+    userId,
+    packageId,
+    diamonds: Number(diamonds),
+    grossAmount: Number(grossAmount),
+    status: 'pending',
+    snapToken,
+    paymentType: null,
+    createdAt: now,
+    updatedAt: now
+  };
+  state.topupOrders.set(orderId, order);
+  persistLocalFallback();
+
+  if (pool && !closed) {
+    await execPg(
+      `INSERT INTO topup_orders (order_id, user_id, package_id, diamonds, gross_amount, status, snap_token, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (order_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         snap_token = EXCLUDED.snap_token,
+         updated_at = EXCLUDED.updated_at`,
+      [orderId, userId, packageId, diamonds, grossAmount, 'pending', snapToken, now, now]
+    );
+  }
+  return order;
+}
+
+async function getTopupOrder(orderId) {
+  if (!orderId) return null;
+  let order = state.topupOrders.get(orderId);
+  if (order) return order;
+  if (pool && !closed) {
+    try {
+      const res = await pool.query('SELECT * FROM topup_orders WHERE order_id = $1', [orderId]);
+      if (res.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        order = {
+          orderId: r.order_id,
+          userId: r.user_id,
+          packageId: r.package_id,
+          diamonds: Number(r.diamonds),
+          grossAmount: Number(r.gross_amount),
+          status: r.status,
+          snapToken: r.snap_token,
+          paymentType: r.payment_type,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at
+        };
+        state.topupOrders.set(orderId, order);
+        return order;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function completeTopupOrder(orderId, paymentType = 'midtrans') {
+  const order = await getTopupOrder(orderId);
+  if (!order) return { error: 'Order tidak ditemukan' };
+  if (order.status === 'success') {
+    const user = findUserById(order.userId);
+    return { success: true, alreadyCompleted: true, order, user: sanitizeUser(user) };
+  }
+
+  const now = new Date().toISOString();
+  order.status = 'success';
+  order.paymentType = paymentType || order.paymentType || 'midtrans';
+  order.updatedAt = now;
+  state.topupOrders.set(orderId, order);
+  persistLocalFallback();
+
+  if (pool && !closed) {
+    await execPg(
+      `UPDATE topup_orders
+       SET status = 'success', payment_type = $1, updated_at = $2
+       WHERE order_id = $3`,
+      [order.paymentType, now, orderId]
+    );
+  }
+
+  const awardResult = awardUserPoints(order.userId, order.diamonds);
+  return {
+    success: true,
+    order,
+    diamondsAwarded: order.diamonds,
+    user: awardResult ? awardResult.user : sanitizeUser(findUserById(order.userId))
+  };
+}
+
 
 // ==========================================
 // SNAPSHOT ROOM
@@ -948,6 +1330,9 @@ module.exports = {
   verifyPassword,
   registerUser,
   loginUser,
+  loginOrRegisterGoogleUser,
+  findUserByGoogleId,
+  findUserByEmail,
   getUserByToken,
   getUserById: findUserById,
   deleteSession,
@@ -959,10 +1344,15 @@ module.exports = {
   checkIsLudoKing,
   sanitizeUser,
   updateUserAvatar,
+  updateUserEmail,
+  updateUserProfile,
   getUserItems,
   purchaseItem,
   consumeUserItem,
   awardUserPoints,
+  createTopupOrder,
+  getTopupOrder,
+  completeTopupOrder,
   saveRoom,
   deleteRoom,
   loadRooms,

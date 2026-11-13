@@ -18,9 +18,9 @@ const DEFAULT_DATA_DIR = process.env.JAKLUDO_DATA_DIR || path.join(__dirname, 'd
 // Kunci advisory lock khusus JakLudo agar migrasi paralel antar container aman
 const MIGRATION_LOCK_ID = 74656231;
 
-function loadDotEnv() {
+function loadDotEnv(force = false) {
   const envFile = path.join(__dirname, '../.env');
-  if (typeof process.loadEnvFile === 'function') {
+  if (!force && typeof process.loadEnvFile === 'function') {
     try {
       process.loadEnvFile(envFile);
       return;
@@ -38,7 +38,9 @@ function loadDotEnv() {
       if (eq === -1) continue;
       const key = trimmed.slice(0, eq).trim();
       const val = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
-      if (key && process.env[key] === undefined) process.env[key] = val;
+      if (key && (force || process.env[key] === undefined || process.env[key] === '')) {
+        process.env[key] = val;
+      }
     }
   } catch {
     // Abaikan jika .env tidak ada

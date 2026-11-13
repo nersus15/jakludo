@@ -346,7 +346,9 @@ test('room dan data pemain tetap ada setelah server restart', async () => {
   }).then(r => r.json());
 
   let srv = await start();
-  const a = await reg(srv.url, 'tahan_restart');
+  const restartUser = 'tahan_' + Date.now().toString(36).slice(-6);
+  const a = await reg(srv.url, restartUser);
+  assert.ok(a.token, 'Token pendaftaran harus tersedia: ' + JSON.stringify(a));
   const host = await client(srv.url);
   host.emit('room:create', { token: a.token });
   const { code } = await once(host, 'room:joined');
@@ -569,4 +571,296 @@ test('6 tiga kali berturut-turut: giliran hangus dan bidak tidak jalan', async (
     crypto.randomInt = original;
     clearTimeout(room.turnTimer);
   }
+});
+
+test('Google Auth: GET /api/auth/google/config mengembalikan status konfigurasi', async () => {
+  const res = await fetch(`${url}/api/auth/google/config`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.success, true);
+  assert.equal(typeof body.enabled, 'boolean');
+  assert.equal(typeof body.clientId, 'string');
+});
+
+test('Google Auth: POST /api/auth/google menolak jika tanpa kredensial', async () => {
+  const res = await fetch(`${url}/api/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.success, false);
+});
+
+test('Google Auth: pendaftaran user baru via Google ID Token simulasi', async () => {
+  const googleId = 'gid_' + Date.now();
+  const mockToken = 'mock_google_token_' + Buffer.from(JSON.stringify({
+    sub: googleId,
+    email: `google_${Date.now()}@gmail.com`,
+    name: 'Budi Google',
+    picture: 'https://example.com/budi.jpg'
+  })).toString('base64');
+
+  const res = await fetch(`${url}/api/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential: mockToken })
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.success, true);
+  assert.ok(body.token);
+  assert.equal(body.user.name, 'Budi Google');
+  assert.equal(body.user.authType, 'google');
+  assert.equal(body.isNewUser, true);
+
+  // Verifikasi sesi aktif
+  const meRes = await fetch(`${url}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${body.token}` }
+  });
+  assert.equal(meRes.status, 200);
+  const meBody = await meRes.json();
+  assert.equal(meBody.user.id, body.user.id);
+  assert.equal(meBody.user.authType, 'google');
+
+  // Login ulang dengan kredensial yang sama mengembalikan akun yang sama (bukan akun ganda)
+  const reLoginRes = await fetch(`${url}/api/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential: mockToken })
+  });
+  assert.equal(reLoginRes.status, 200);
+  const reLoginBody = await reLoginRes.json();
+  assert.equal(reLoginBody.user.id, body.user.id);
+  assert.equal(reLoginBody.isNewUser, false);
+});
+
+test('Google Auth: linking akun saat email Google cocok dengan akun terdaftar', async () => {
+  const sharedEmail = `link_${Date.now()}@gmail.com`;
+  // Daftarkan dulu akun biasa
+  const regRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: `linkuser_${Date.now().toString(36)}`.slice(0, 20),
+      password: 'Password#123',
+      name: 'User Akun Biasa'
+    })
+  });
+  const regBody = await regRes.json();
+  assert.equal(regRes.status, 200);
+
+  // Set email pada akun tersebut di database
+  db.updateUserEmail(regBody.user.id, sharedEmail);
+
+  // Login via Google dengan email yang sama
+  const googleId = 'gid_link_' + Date.now();
+  const mockToken = 'mock_google_token_' + Buffer.from(JSON.stringify({
+    sub: googleId,
+    email: sharedEmail,
+    name: 'User Akun Biasa (Google)'
+  })).toString('base64');
+
+  const gRes = await fetch(`${url}/api/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential: mockToken })
+  });
+  assert.equal(gRes.status, 200);
+  const gBody = await gRes.json();
+  // Harus tertaut ke akun yang sudah ada
+  assert.equal(gBody.user.id, regBody.user.id);
+});
+
+test('Update profil: nama, username, email, dan password', async () => {
+  const ts = Date.now().toString(36);
+  const origUsername = `up_${ts}`.slice(0, 18);
+  const newUsername = `up2_${ts}`.slice(0, 18);
+  const oldPassword = 'OldPassword#123';
+  const newPassword = 'NewPassword#456';
+  const testEmail = `user_${ts}@example.com`;
+
+  // 1. Daftarkan user
+  const regRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: origUsername,
+      password: oldPassword,
+      name: 'Nama Awal'
+    })
+  });
+  assert.equal(regRes.status, 200);
+  const { user, token } = await regRes.json();
+
+  // 2. Update nama dan username
+  const updateRes1 = await fetch(`${url}/api/auth/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      name: 'Nama Baru Super',
+      username: newUsername,
+      email: testEmail
+    })
+  });
+  assert.equal(updateRes1.status, 200);
+  const body1 = await updateRes1.json();
+  assert.equal(body1.success, true);
+  assert.equal(body1.user.name, 'Nama Baru Super');
+  assert.equal(body1.user.username, newUsername);
+  assert.equal(body1.user.email, testEmail);
+
+  // 3. Verifikasi melalui GET /api/auth/me
+  const meRes = await fetch(`${url}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const meBody = await meRes.json();
+  assert.equal(meBody.user.name, 'Nama Baru Super');
+  assert.equal(meBody.user.username, newUsername);
+  assert.equal(meBody.user.email, testEmail);
+
+  // 4. Update password dengan password lama yang salah -> harus ditolak
+  const badPassRes = await fetch(`${url}/api/auth/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      currentPassword: 'WrongPassword',
+      newPassword: newPassword
+    })
+  });
+  assert.equal(badPassRes.status, 400);
+
+  // 5. Update password dengan password lama yang benar -> harus berhasil
+  const goodPassRes = await fetch(`${url}/api/auth/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      currentPassword: oldPassword,
+      newPassword: newPassword
+    })
+  });
+  assert.equal(goodPassRes.status, 200);
+
+  // 6. Coba login dengan password lama -> harus gagal
+  const failLogin = await fetch(`${url}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: newUsername, password: oldPassword })
+  });
+  assert.equal(failLogin.status, 400);
+
+  // 7. Coba login dengan password baru dan username baru -> harus berhasil!
+  const successLogin = await fetch(`${url}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: newUsername, password: newPassword })
+  });
+  assert.equal(successLogin.status, 200);
+  const loginBody = await successLogin.json();
+  assert.equal(loginBody.user.id, user.id);
+});
+
+test('topup diamonds dengan midtrans (config, create, simulate, points award)', async () => {
+  // 1. GET /api/topup/config
+  const cfgRes = await fetch(`${url}/api/topup/config`);
+  assert.equal(cfgRes.status, 200);
+  const cfg = await cfgRes.json();
+  assert.equal(cfg.success, true);
+  assert.equal(cfg.packages.length, 3);
+
+  const p100 = cfg.packages.find(p => p.diamonds === 100);
+  const p300 = cfg.packages.find(p => p.diamonds === 300);
+  const p550 = cfg.packages.find(p => p.diamonds === 550);
+
+  assert.ok(p100, 'Paket 100 diamond harus ada');
+  assert.equal(p100.price, 50000, '100 diamonds = Rp 50.000');
+  assert.ok(p300, 'Paket 300 diamond harus ada');
+  assert.equal(p300.price, 150000, '300 diamonds = Rp 150.000');
+  assert.ok(p550, 'Paket 550 diamond harus ada');
+  assert.equal(p550.price, 500000, '550 diamonds = Rp 500.000');
+
+  // 2. Register user untuk topup
+  const topupUser = `topup_${Date.now()}`;
+  const reg = await register(topupUser);
+  const token = reg.token;
+  const initialPoints = reg.user.points; // default starter points (200)
+
+  // 3. Create topup order untuk paket 300 diamonds
+  const createRes = await fetch(`${url}/api/topup/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ packageId: 'diamond_300' })
+  });
+  assert.equal(createRes.status, 200);
+  const createBody = await createRes.json();
+  assert.equal(createBody.success, true);
+  assert.ok(createBody.orderId);
+  assert.ok(createBody.snapToken);
+  assert.equal(createBody.package.diamonds, 300);
+
+  // 4. Simulasi pembayaran topup (simulate)
+  const simRes = await fetch(`${url}/api/topup/simulate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ orderId: createBody.orderId })
+  });
+  assert.equal(simRes.status, 200);
+  const simBody = await simRes.json();
+  assert.equal(simBody.success, true);
+  assert.equal(simBody.diamondsAwarded, 300);
+  assert.equal(simBody.user.points, initialPoints + 300);
+
+  // 5. Cek verify endpoint
+  const verifyRes = await fetch(`${url}/api/topup/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ orderId: createBody.orderId })
+  });
+  assert.equal(verifyRes.status, 200);
+  const verifyBody = await verifyRes.json();
+  assert.equal(verifyBody.success, true);
+  assert.equal(verifyBody.status, 'success');
+  assert.equal(verifyBody.user.points, initialPoints + 300);
+
+  // 6. Test paket 550 diamonds (Paket Sultan)
+  const sultanRes = await fetch(`${url}/api/topup/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ packageId: 'diamond_550' })
+  });
+  const sultanBody = await sultanRes.json();
+  assert.equal(sultanBody.success, true);
+
+  const simSultanRes = await fetch(`${url}/api/topup/simulate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ orderId: sultanBody.orderId })
+  });
+  const simSultanBody = await simSultanRes.json();
+  assert.equal(simSultanBody.user.points, initialPoints + 300 + 550);
 });

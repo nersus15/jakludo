@@ -69,16 +69,19 @@ function getMidtransConfig() {
 async function createSnapTransaction({ orderId, pkg, user }) {
   const config = getMidtransConfig();
 
-  // Jika kunci server Midtrans belum diset di .env atau dalam environment uji, aktifkan mode simulasi otomatis
+  // Mode simulasi HANYA diizinkan pada unit test otomatis (NODE_ENV=test)
   if (!config.serverKey) {
-    return {
-      success: true,
-      token: `sim_snap_${orderId}`,
-      redirectUrl: '#simulated-payment',
-      isSimulation: true,
-      clientKey: config.clientKey || 'SB-Mid-client-mock',
-      snapJsUrl: config.snapJsUrl
-    };
+    if (process.env.NODE_ENV === 'test') {
+      return {
+        success: true,
+        token: `sim_snap_${orderId}`,
+        redirectUrl: '#simulated-payment',
+        isSimulation: true,
+        clientKey: config.clientKey || 'SB-Mid-client-mock',
+        snapJsUrl: config.snapJsUrl
+      };
+    }
+    throw new Error('Sistem pembayaran Midtrans belum dikonfigurasi di server. Pastikan MIDTRANS_SERVER_KEY dan MIDTRANS_CLIENT_KEY telah diisi di file .env server production.');
   }
 
   const authHeader = 'Basic ' + Buffer.from(config.serverKey + ':').toString('base64');

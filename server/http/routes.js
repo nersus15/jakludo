@@ -351,8 +351,12 @@ function createApiRouter() {
     res.json({ success: true, status: order.status, message: 'Transaksi masih menunggu pembayaran.' });
   }));
 
-  // Simulasi pembayaran (berguna saat pengujian lokal atau jika kunci server Midtrans belum diset)
+  // Simulasi pembayaran (HANYA aktif pada mode pengujian internal NODE_ENV === 'test')
   api.post('/topup/simulate', asyncRoute(async (req, res) => {
+    if (process.env.NODE_ENV !== 'test') {
+      return res.status(403).json({ success: false, error: 'Simulasi pembayaran dinonaktifkan di environment ini.' });
+    }
+
     const user = requireUser(req, res);
     if (!user) return;
 

@@ -256,27 +256,7 @@ export default function ShopModal({
         throw new Error(data.error || 'Gagal memulai transaksi top up.');
       }
 
-      if (data.isSimulation) {
-        // Mode simulasi otomatis saat kunci Midtrans belum diset di .env
-        const simRes = await fetch('/api/topup/simulate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ orderId: data.orderId })
-        });
-        const simData = await simRes.json().catch(() => ({}));
-        if (!simRes.ok || !simData.success) {
-          throw new Error(simData.error || 'Simulasi pembayaran gagal.');
-        }
-        sound.playShopPurchase();
-        setFeedback({
-          type: 'success',
-          message: `Top up ${pkg.diamonds} Diamonds berhasil! Saldo baru: ${simData.user?.points ?? (points + pkg.diamonds)} Diamonds.`
-        });
-        if (simData.user) onUpdateUser?.(simData.user);
-        return;
-      }
-
-      // Pembayaran Midtrans Snap
+      // Pembayaran resmi Midtrans Snap
       await loadMidtransSnap(data.snapJsUrl, data.clientKey);
       if (!window.snap) {
         throw new Error('Midtrans Snap tidak dapat dimuat di browser.');

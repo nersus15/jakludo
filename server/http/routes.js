@@ -240,7 +240,12 @@ function createApiRouter() {
     if (!user) return;
 
     const { packageId, methodId } = req.body || {};
-    const pkg = DIAMOND_PACKAGES[packageId];
+    const LEGACY_PACKAGES = {
+      diamond_100: { id: 'diamond_100', name: '100 Diamond', diamonds: 100, price: 50000, formattedPrice: 'Rp 50.000', subtitle: 'Paket lama', description: 'Paket lama', badge: null, icon: 'diamond' },
+      diamond_300: { id: 'diamond_300', name: '300 Diamond', diamonds: 300, price: 150000, formattedPrice: 'Rp 150.000', subtitle: 'Paket lama', description: 'Paket lama', badge: null, icon: 'diamond' },
+      diamond_550: { id: 'diamond_550', name: '550 Diamond', diamonds: 550, price: 500000, formattedPrice: 'Rp 500.000', subtitle: 'Paket lama', description: 'Paket lama', badge: null, icon: 'crown' }
+    };
+    const pkg = DIAMOND_PACKAGES[packageId] || LEGACY_PACKAGES[packageId];
     if (!pkg) {
       return res.status(400).json({ success: false, error: 'Paket diamond tidak valid.' });
     }

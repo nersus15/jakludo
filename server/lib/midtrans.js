@@ -3,35 +3,71 @@ const crypto = require('crypto');
 const { loadDotEnv } = require('../migrate');
 
 const DIAMOND_PACKAGES = {
-  diamond_100: {
-    id: 'diamond_100',
-    name: '100 Diamonds',
-    diamonds: 100,
+  diamond_50: {
+    id: 'diamond_50',
+    name: '50 Diamond',
+    diamonds: 50,
+    price: 5000,
+    formattedPrice: 'Rp 5.000',
+    subtitle: 'Paket pemula',
+    description: 'Paket pemula',
+    badge: null,
+    icon: 'diamond'
+  },
+  diamond_120: {
+    id: 'diamond_120',
+    name: '120 Diamond',
+    diamonds: 120,
+    price: 10000,
+    formattedPrice: 'Rp 10.000',
+    subtitle: 'Paket hemat',
+    description: 'Paket hemat',
+    badge: 'Populer',
+    icon: 'diamond'
+  },
+  diamond_260: {
+    id: 'diamond_260',
+    name: '260 Diamond',
+    diamonds: 260,
+    price: 20000,
+    formattedPrice: 'Rp 20.000',
+    subtitle: 'Paket reguler',
+    description: 'Paket reguler',
+    badge: null,
+    icon: 'diamond'
+  },
+  diamond_700: {
+    id: 'diamond_700',
+    name: '700 Diamond',
+    diamonds: 700,
     price: 50000,
     formattedPrice: 'Rp 50.000',
-    badge: 'Starter',
-    icon: 'diamond',
-    description: '100 Diamonds (Poin PlayGo) untuk membeli perlengkapan permainan.'
+    subtitle: 'Paket premium',
+    description: 'Paket premium',
+    badge: 'Bonus 100',
+    icon: 'diamond'
   },
-  diamond_300: {
-    id: 'diamond_300',
-    name: '300 Diamonds',
-    diamonds: 300,
-    price: 150000,
-    formattedPrice: 'Rp 150.000',
-    badge: 'Paling Populer',
-    icon: 'diamond',
-    description: '300 Diamonds (Poin PlayGo) untuk perisai, force return & hint kuis.'
+  diamond_1500: {
+    id: 'diamond_1500',
+    name: '1.500 Diamond',
+    diamonds: 1500,
+    price: 100000,
+    formattedPrice: 'Rp 100.000',
+    subtitle: 'Paket besar',
+    description: 'Paket besar',
+    badge: 'Bonus 250',
+    icon: 'crown'
   },
-  diamond_550: {
-    id: 'diamond_550',
-    name: '550 Diamonds',
-    diamonds: 550,
-    price: 500000,
-    formattedPrice: 'Rp 500.000',
-    badge: 'Paket Sultan',
-    icon: 'crown',
-    description: '550 Diamonds (Poin PlayGo) paket terbesar untuk pemain setia PlayGo.'
+  diamond_3250: {
+    id: 'diamond_3250',
+    name: '3.250 Diamond',
+    diamonds: 3250,
+    price: 200000,
+    formattedPrice: 'Rp 200.000',
+    subtitle: 'Paket sultan',
+    description: 'Paket sultan',
+    badge: 'Bonus 750',
+    icon: 'crown'
   }
 };
 

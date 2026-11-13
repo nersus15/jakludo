@@ -777,20 +777,33 @@ test('topup diamonds dengan midtrans core api (config, charge, verify, simulate,
   assert.equal(cfgRes.status, 200);
   const cfg = await cfgRes.json();
   assert.equal(cfg.success, true);
-  assert.equal(cfg.packages.length, 3);
+  assert.equal(cfg.packages.length, 6);
   assert.ok(Array.isArray(cfg.paymentMethods));
   assert.ok(cfg.paymentMethods.length >= 5);
 
-  const p100 = cfg.packages.find(p => p.diamonds === 100);
-  const p300 = cfg.packages.find(p => p.diamonds === 300);
-  const p550 = cfg.packages.find(p => p.diamonds === 550);
+  const p50 = cfg.packages.find(p => p.diamonds === 50);
+  const p120 = cfg.packages.find(p => p.diamonds === 120);
+  const p260 = cfg.packages.find(p => p.diamonds === 260);
+  const p700 = cfg.packages.find(p => p.diamonds === 700);
+  const p1500 = cfg.packages.find(p => p.diamonds === 1500);
+  const p3250 = cfg.packages.find(p => p.diamonds === 3250);
 
-  assert.ok(p100, 'Paket 100 diamond harus ada');
-  assert.equal(p100.price, 50000, '100 diamonds = Rp 50.000');
-  assert.ok(p300, 'Paket 300 diamond harus ada');
-  assert.equal(p300.price, 150000, '300 diamonds = Rp 150.000');
-  assert.ok(p550, 'Paket 550 diamond harus ada');
-  assert.equal(p550.price, 500000, '550 diamonds = Rp 500.000');
+  assert.ok(p50, 'Paket 50 diamond harus ada');
+  assert.equal(p50.price, 5000, '50 diamonds = Rp 5.000');
+  assert.ok(p120, 'Paket 120 diamond harus ada');
+  assert.equal(p120.price, 10000, '120 diamonds = Rp 10.000');
+  assert.equal(p120.badge, 'Populer');
+  assert.ok(p260, 'Paket 260 diamond harus ada');
+  assert.equal(p260.price, 20000, '260 diamonds = Rp 20.000');
+  assert.ok(p700, 'Paket 700 diamond harus ada');
+  assert.equal(p700.price, 50000, '700 diamonds = Rp 50.000');
+  assert.equal(p700.badge, 'Bonus 100');
+  assert.ok(p1500, 'Paket 1.500 diamond harus ada');
+  assert.equal(p1500.price, 100000, '1.500 diamonds = Rp 100.000');
+  assert.equal(p1500.badge, 'Bonus 250');
+  assert.ok(p3250, 'Paket 3.250 diamond harus ada');
+  assert.equal(p3250.price, 200000, '3.250 diamonds = Rp 200.000');
+  assert.equal(p3250.badge, 'Bonus 750');
 
   // 2. Register user untuk topup
   const topupUser = 'tp_' + Math.random().toString(36).slice(2, 8);
@@ -798,21 +811,21 @@ test('topup diamonds dengan midtrans core api (config, charge, verify, simulate,
   const token = reg.token;
   const initialPoints = reg.user.points; // default starter points (200)
 
-  // 3. Charge topup order untuk paket 300 diamonds via BCA Virtual Account (Core API)
+  // 3. Charge topup order untuk paket 120 diamonds via BCA Virtual Account (Core API)
   const chargeRes = await fetch(`${url}/api/topup/charge`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_300', methodId: 'bca_va' })
+    body: JSON.stringify({ packageId: 'diamond_120', methodId: 'bca_va' })
   });
   assert.equal(chargeRes.status, 200);
   const chargeBody = await chargeRes.json();
   assert.equal(chargeBody.success, true);
   assert.ok(chargeBody.orderId);
   assert.ok(chargeBody.payment);
-  assert.equal(chargeBody.package.diamonds, 300);
+  assert.equal(chargeBody.package.diamonds, 120);
 
   // 4. Simulasi pembayaran topup (simulate)
   const simRes = await fetch(`${url}/api/topup/simulate`, {
@@ -826,8 +839,8 @@ test('topup diamonds dengan midtrans core api (config, charge, verify, simulate,
   assert.equal(simRes.status, 200);
   const simBody = await simRes.json();
   assert.equal(simBody.success, true);
-  assert.equal(simBody.diamondsAwarded, 300);
-  assert.equal(simBody.user.points, initialPoints + 300);
+  assert.equal(simBody.diamondsAwarded, 120);
+  assert.equal(simBody.user.points, initialPoints + 120);
 
   // 5. Cek verify endpoint
   const verifyRes = await fetch(`${url}/api/topup/verify`, {
@@ -842,29 +855,29 @@ test('topup diamonds dengan midtrans core api (config, charge, verify, simulate,
   const verifyBody = await verifyRes.json();
   assert.equal(verifyBody.success, true);
   assert.equal(verifyBody.status, 'success');
-  assert.equal(verifyBody.user.points, initialPoints + 300);
+  assert.equal(verifyBody.user.points, initialPoints + 120);
 
-  // 6. Test Charge QRIS untuk paket 100 diamonds
+  // 6. Test Charge QRIS untuk paket 50 diamonds
   const qrisChargeRes = await fetch(`${url}/api/topup/charge`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_100', methodId: 'qris' })
+    body: JSON.stringify({ packageId: 'diamond_50', methodId: 'qris' })
   });
   const qrisBody = await qrisChargeRes.json();
   assert.equal(qrisBody.success, true);
   assert.ok(qrisBody.payment.qrCodeUrl || qrisBody.payment.qrString);
 
-  // 7. Test paket 550 diamonds (Paket Sultan)
+  // 7. Test paket 3.250 diamonds (Paket Sultan)
   const sultanRes = await fetch(`${url}/api/topup/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_550' })
+    body: JSON.stringify({ packageId: 'diamond_3250' })
   });
   const sultanBody = await sultanRes.json();
   assert.equal(sultanBody.success, true);
@@ -878,5 +891,6 @@ test('topup diamonds dengan midtrans core api (config, charge, verify, simulate,
     body: JSON.stringify({ orderId: sultanBody.orderId })
   });
   const simSultanBody = await simSultanRes.json();
-  assert.equal(simSultanBody.user.points, initialPoints + 300 + 550);
+  assert.equal(simSultanBody.diamondsAwarded, 3250);
+  assert.equal(simSultanBody.user.points, initialPoints + 120 + 3250);
 });

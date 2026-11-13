@@ -2,6 +2,7 @@ import React from 'react';
 import Icon from '../components/Icon';
 import jakludoLogo from '../assets/jakludo-logo.webp';
 import monsterQuizLogo from '../assets/monster-quiz-logo.webp';
+import { isAvatarUrl } from '../social/media';
 
 const COLORS = ['red', 'green', 'yellow', 'blue'];
 
@@ -28,19 +29,176 @@ function ActiveRoomCard({ room, onJoin }) {
   );
 }
 
-function PlatformLinks({ isInstalled, onInstall }) {
-  if (isInstalled || !onInstall) return null;
+function GlobalLeaderboardSection({ onOpenLeaderboard }) {
+  const [tab, setTab] = React.useState('ludo');
+  const [ludoList, setLudoList] = React.useState([]);
+  const [quizList, setQuizList] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetch('/api/leaderboard').then(r => r.json()).catch(() => ({})),
+      fetch('/api/quiz/leaderboard').then(r => r.json()).catch(() => ({}))
+    ]).then(([ludoData, quizData]) => {
+      if (!active) return;
+      if (ludoData?.success) setLudoList(ludoData.leaderboard || []);
+      if (quizData?.success) setQuizList(quizData.leaderboard || []);
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const isQuiz = tab === 'quiz';
+  const list = isQuiz ? quizList : ludoList;
+  const topList = list.slice(0, 5);
+
+  return (
+    <section className="home__leaderboard card" aria-label="Peringkat Global PlayGo">
+      <div className="home__leaderboard-header">
+        <div className="home__leaderboard-title">
+          <span
+            className="link-card__icon"
+            aria-hidden="true"
+            style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}
+          >
+            <Icon name="trophy" size={24} />
+          </span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 'var(--fs-lg)' }}>Peringkat Global PlayGo</h3>
+            <p className="muted" style={{ margin: '2px 0 0', fontSize: 'var(--fs-xs)' }}>
+              Pemain terbaik dengan kemenangan dan poin terbanyak
+            </p>
+          </div>
+        </div>
+
+        <div className="home__leaderboard-actions">
+          <div className="tabs" role="tablist" style={{ margin: 0 }}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!isQuiz}
+              className="tabs__tab"
+              onClick={() => setTab('ludo')}
+            >
+              <Icon name="pawn" size={14} />
+              <span>JakLudo</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isQuiz}
+              className="tabs__tab"
+              onClick={() => setTab('quiz')}
+            >
+              <Icon name="swords" size={14} />
+              <span>Monster Quiz</span>
+            </button>
+          </div>
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={onOpenLeaderboard}
+            >
+              Buka Penuh
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="state-msg" style={{ padding: 'var(--space-4) 0' }}>
+          <span className="spinner" aria-hidden="true" /> Memuat peringkat global...
+        </p>
+      ) : topList.length === 0 ? (
+        <p className="muted" style={{ textAlign: 'center', padding: 'var(--space-4) 0' }}>
+          Belum ada data peringkat. Jadilah pemenang pertama!
+        </p>
+      ) : (
+        <ol className="lb-list" style={{ marginTop: 'var(--space-2)' }}>
+          {topList.map(player => (
+            <li key={player.userId || player.id} className={`lb-row ${player.rank === 1 ? 'is-top' : ''}`}>
+              <span className="lb-row__rank">
+                {player.rank === 1 ? '🥇' : player.rank === 2 ? '🥈' : player.rank === 3 ? '🥉' : `#${player.rank}`}
+              </span>
+              <span className="lb-avatar">
+                {player.avatar && isAvatarUrl(player.avatar) ? (
+                  <img src={player.avatar} alt="" width="36" height="36" className="lb-avatar" />
+                ) : (
+                  player.name?.slice(0, 1).toUpperCase() || '🎯'
+                )}
+              </span>
+              <div className="lb-row__who">
+                <strong>{player.name}</strong>
+                <span className="muted">@{player.username}</span>
+              </div>
+              <div className="lb-row__stats">
+                {isQuiz ? (
+                  <>
+                    <span><strong>{player.wins}</strong> menang</span>
+                    <span className="muted">({player.winRate || 0}%)</span>
+                  </>
+                ) : (
+                  <>
+                    <span><strong>{player.wins}</strong> menang</span>
+                    <span className="lb-row__points">
+                      <Icon name="diamond" size={14} /> {player.points}
+                    </span>
+                  </>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {onOpenLeaderboard && (
+        <div className="home__leaderboard-footer">
+          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>
+            Diperbarui realtime setiap pertandingan selesai
+          </span>
+          <button
+            type="button"
+            className="btn btn--link"
+            style={{ fontSize: 'var(--fs-xs)', padding: 0 }}
+            onClick={onOpenLeaderboard}
+          >
+            Lihat Peringkat Lengkap (Top 100) →
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PlatformLinks({ onOpenLeaderboard, isInstalled, onInstall }) {
+  const showInstall = !isInstalled && onInstall;
+  if (!onOpenLeaderboard && !showInstall) return null;
   return (
     <div className="home__links">
-      <button type="button" className="link-card card" onClick={onInstall}>
-        <span className="link-card__icon" aria-hidden="true">
-          <Icon name="install" size={24} />
-        </span>
-        <span>
-          <strong>Pasang di layar utama</strong>
-          <span className="muted">Buka PlayGo layar penuh tanpa bilah browser</span>
-        </span>
-      </button>
+      {onOpenLeaderboard && (
+        <button type="button" className="link-card card" data-tour="leaderboard" onClick={onOpenLeaderboard}>
+          <span className="link-card__icon" aria-hidden="true">
+            <Icon name="trophy" size={24} />
+          </span>
+          <span>
+            <strong>Peringkat pemain</strong>
+            <span className="muted">Lihat peringkat pemain terbaik di PlayGo</span>
+          </span>
+        </button>
+      )}
+      {showInstall && (
+        <button type="button" className="link-card card" onClick={onInstall}>
+          <span className="link-card__icon" aria-hidden="true">
+            <Icon name="install" size={24} />
+          </span>
+          <span>
+            <strong>Pasang di layar utama</strong>
+            <span className="muted">Buka PlayGo layar penuh tanpa bilah browser</span>
+          </span>
+        </button>
+      )}
     </div>
   );
 }
@@ -161,6 +319,7 @@ export default function HomeScreen({
           </div>
 
           <PlatformLinks
+            onOpenLeaderboard={onOpenLeaderboard}
             isInstalled={isInstalled}
             onInstall={onInstall}
           />
@@ -329,14 +488,16 @@ export default function HomeScreen({
 
       {error && <p className="alert alert--error" role="alert">{error}</p>}
 
-      {!isInstalled && onInstall && (
-        <section aria-label="Instalasi Aplikasi PlayGo">
-          <PlatformLinks
-            isInstalled={isInstalled}
-            onInstall={onInstall}
-          />
-        </section>
-      )}
+      {/* Papan Peringkat Global PlayGo */}
+      <GlobalLeaderboardSection onOpenLeaderboard={onOpenLeaderboard} />
+
+      <section aria-label="Akses Peringkat & PWA">
+        <PlatformLinks
+          onOpenLeaderboard={onOpenLeaderboard}
+          isInstalled={isInstalled}
+          onInstall={onInstall}
+        />
+      </section>
     </main>
   );
 }

@@ -38,8 +38,13 @@ function loadDotEnv(force = false) {
       if (eq === -1) continue;
       const key = trimmed.slice(0, eq).trim();
       const val = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
-      if (key && (force || process.env[key] === undefined || process.env[key] === '')) {
-        process.env[key] = val;
+      if (key) {
+        // Jangan timpa variabel jika di file kosong namun process.env sudah diisi oleh Docker/environment
+        if (val || process.env[key] === undefined) {
+          if (force || process.env[key] === undefined || process.env[key] === '') {
+            process.env[key] = val;
+          }
+        }
       }
     }
   } catch {

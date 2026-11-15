@@ -276,9 +276,15 @@ function recordCompletedMatch(room) {
     const isWinner = room.winnerPlayerId === p.id || (room.winnerUserId && room.winnerUserId === p.user_id);
     const result = isWinner ? 'win' : 'loss';
 
-    // Hadiah Coins kompetitif hanya diberikan saat menang melawan manusia
+    const finishReason = String(room.finishReason || '');
+    const isForfeitEarly =
+      (finishReason === 'opponent_left' || finishReason === 'disconnect_forfeit' || finishReason === 'afk_timeout_3') &&
+      totalTurns < 6 &&
+      (room.moveLog?.length || 0) < 6;
+
+    // Hadiah Coins kompetitif hanya diberikan saat menang melawan manusia dan bukan forfeit instan
     let rewardCoins = 0;
-    if (isWinner && opponentType === 'human') {
+    if (isWinner && opponentType === 'human' && !isForfeitEarly) {
       rewardCoins = HUMAN_WIN_REWARD_COINS;
       db.awardUserPoints(p.user_id, rewardCoins);
     }

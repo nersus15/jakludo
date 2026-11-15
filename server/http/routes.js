@@ -20,6 +20,7 @@ const recaptcha = require('../lib/recaptcha');
 
 const loginLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: 20 });
 const registerLimiter = createLimiter({ windowMs: 60 * 60 * 1000, max: Number(process.env.REGISTER_RATE_LIMIT || 30) });
+const googleAuthLimiter = createLimiter({ windowMs: 10 * 60 * 1000, max: Number(process.env.GOOGLE_AUTH_RATE_LIMIT || 30) });
 
 function bearerToken(req) {
   return String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
@@ -99,6 +100,9 @@ function createApiRouter() {
   });
 
   api.post('/auth/google', asyncRoute(async (req, res) => {
+    if (!googleAuthLimiter(req.ip)) {
+      return res.status(429).json({ success: false, error: 'Terlalu banyak percobaan login Google. Coba lagi nanti.' });
+    }
     loadDotEnv(true);
     const { credential, code, redirectUri, testUser } = req.body || {};
 
@@ -372,8 +376,8 @@ function createApiRouter() {
     const resultCode = String(notif.resultCode || '');
     if (resultCode === '00') {
       const paidAmount = Number(notif.amount);
-      if (!isNaN(paidAmount) && paidAmount > 0 && paidAmount !== Number(order.grossAmount)) {
-        console.warn('[DUITKU NOTIFICATION] Amount mismatch for order', orderId, 'expected', order.grossAmount, 'got', paidAmount);
+      if (!Number.isFinite(paidAmount) || paidAmount <= 0 || paidAmount !== Number(order.grossAmount)) {
+        console.warn('[DUITKU NOTIFICATION] Amount mismatch for order', orderId, 'expected', order.grossAmount, 'got', notif.amount);
         return res.status(400).send('Bad Parameter: amount mismatch');
       }
       const paymentMethod = notif.paymentMethod || notif.payment_method || 'duitku';
@@ -415,6 +419,13 @@ function createApiRouter() {
           duitkuStatus.resultCode === '00';
 
         if (isDuitkuSuccess) {
+          if (duitkuStatus.amount !== undefined && duitkuStatus.amount !== null && String(duitkuStatus.amount).trim() !== '') {
+            const gwAmount = Number(duitkuStatus.amount);
+            if (!Number.isFinite(gwAmount) || gwAmount <= 0 || gwAmount !== Number(order.grossAmount)) {
+              console.warn('[TOPUP VERIFY DUITKU AMOUNT MISMATCH]', orderId, 'expected', order.grossAmount, 'got', duitkuStatus.amount);
+              return res.status(400).json({ success: false, error: 'Nominal pembayaran tidak sesuai dengan pesanan.' });
+            }
+          }
           const completed = await db.completeTopupOrder(orderId, 'duitku');
           return res.json({
             success: true,

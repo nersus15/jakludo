@@ -686,15 +686,27 @@ function finalizeMatchRecord({
   const blackUser = resolveUserOrBot(match.blackPlayerId, match.blackRatingBefore);
   const wProf = ensureProfile(match.whitePlayerId);
   const bProf = ensureProfile(match.blackPlayerId);
+  const whiteBefore = wProf ? wProf.rating : match.whiteRatingBefore;
+  const blackBefore = bProf ? bProf.rating : match.blackRatingBefore;
+  const moves = state.movesByMatch.get(matchId) || [];
 
-  const elo = calculateEloChanges(
-    wProf ? wProf.rating : match.whiteRatingBefore,
-    bProf ? bProf.rating : match.blackRatingBefore,
-    result
-  );
+  const isBotMatch = isBotUserId(match.whitePlayerId) || isBotUserId(match.blackPlayerId) || match.matchType === 'bot';
+  const isEarlyAbort = (terminationReason === 'resigned' || terminationReason === 'abandonment') && moves.length < 4;
+  const isCompetitiveMatch = !isBotMatch && !isEarlyAbort;
 
-  // Update profil White
-  if (wProf) {
+  const elo = isCompetitiveMatch
+    ? calculateEloChanges(whiteBefore, blackBefore, result)
+    : {
+        whiteBefore,
+        blackBefore,
+        whiteAfter: whiteBefore,
+        blackAfter: blackBefore,
+        whiteChange: 0,
+        blackChange: 0
+      };
+
+  // Update profil White & Black hanya untuk pertandingan kompetitif manusia (bukan bot / resign instan)
+  if (isCompetitiveMatch && wProf) {
     wProf.rating = elo.whiteAfter;
     if (wProf.rating > wProf.highestRating) wProf.highestRating = wProf.rating;
     wProf.totalGames += 1;
@@ -711,8 +723,7 @@ function finalizeMatchRecord({
     wProf.updatedAt = now;
   }
 
-  // Update profil Black
-  if (bProf) {
+  if (isCompetitiveMatch && bProf) {
     bProf.rating = elo.blackAfter;
     if (bProf.rating > bProf.highestRating) bProf.highestRating = bProf.rating;
     bProf.totalGames += 1;
@@ -728,8 +739,6 @@ function finalizeMatchRecord({
     }
     bProf.updatedAt = now;
   }
-
-  const moves = state.movesByMatch.get(matchId) || [];
 
   match.status = 'completed';
   match.result = result;
@@ -748,7 +757,7 @@ function finalizeMatchRecord({
   match.updatedAt = now;
   match.pgn = generatePgn({ match, whiteUser, blackUser, moves });
 
-  if (wProf) {
+  if (isCompetitiveMatch && wProf) {
     state.ratingHistories.unshift({
       userId: match.whitePlayerId,
       matchId,
@@ -758,7 +767,7 @@ function finalizeMatchRecord({
       createdAt: now
     });
   }
-  if (bProf) {
+  if (isCompetitiveMatch && bProf) {
     state.ratingHistories.unshift({
       userId: match.blackPlayerId,
       matchId,
@@ -769,18 +778,20 @@ function finalizeMatchRecord({
     });
   }
 
-  // Berikan hadiah Coins PlayGo untuk pemenang manusia
+  // Hadiah Coins PlayGo hanya untuk pertandingan kompetitif antar-manusia dan bukan resign/abandonment instan
   let rewardCoins = 0;
-  if (winnerUserId && !isBotUserId(winnerUserId)) {
-    rewardCoins = WIN_REWARD_COINS;
-    db.awardUserPoints(winnerUserId, WIN_REWARD_COINS);
-  } else if (result === '1/2-1/2' && moves.length >= 6) {
-    rewardCoins = DRAW_REWARD_COINS;
-    if (match.whitePlayerId && !isBotUserId(match.whitePlayerId)) {
-      db.awardUserPoints(match.whitePlayerId, DRAW_REWARD_COINS);
-    }
-    if (match.blackPlayerId && !isBotUserId(match.blackPlayerId)) {
-      db.awardUserPoints(match.blackPlayerId, DRAW_REWARD_COINS);
+  if (isCompetitiveMatch) {
+    if (winnerUserId && !isBotUserId(winnerUserId)) {
+      rewardCoins = WIN_REWARD_COINS;
+      db.awardUserPoints(winnerUserId, WIN_REWARD_COINS);
+    } else if (result === '1/2-1/2' && moves.length >= 6) {
+      rewardCoins = DRAW_REWARD_COINS;
+      if (match.whitePlayerId && !isBotUserId(match.whitePlayerId)) {
+        db.awardUserPoints(match.whitePlayerId, DRAW_REWARD_COINS);
+      }
+      if (match.blackPlayerId && !isBotUserId(match.blackPlayerId)) {
+        db.awardUserPoints(match.blackPlayerId, DRAW_REWARD_COINS);
+      }
     }
   }
   match.rewardCoins = rewardCoins;
@@ -828,7 +839,7 @@ function finalizeMatchRecord({
       ]
     );
 
-    if (wProf) {
+    if (isCompetitiveMatch && wProf) {
       await client.query(
         `INSERT INTO chess_profiles (user_id, rating, highest_rating, total_games, wins, losses, draws, current_streak, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
@@ -850,7 +861,7 @@ function finalizeMatchRecord({
       );
     }
 
-    if (bProf) {
+    if (isCompetitiveMatch && bProf) {
       await client.query(
         `INSERT INTO chess_profiles (user_id, rating, highest_rating, total_games, wins, losses, draws, current_streak, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)

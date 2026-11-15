@@ -15,6 +15,8 @@ const { EMOJIS, MAX_CHATS } = require('../game/config');
 
 const chatLimiter = createLimiter({ windowMs: 5000, max: 5 });
 const reactionLimiter = createLimiter({ windowMs: 5000, max: 8 });
+const ludoActionLimiter = createLimiter({ windowMs: 3000, max: 25 });
+const ludoPlayLimiter = createLimiter({ windowMs: 3000, max: 35 });
 const quizActionLimiter = createLimiter({ windowMs: 3000, max: 12 });
 // Aksi selama bermain (jawab, siap, hint, pilih monster, dll.). Pemain normal hanya 1–3 aksi per ronde
 // 15 detik; batas ini cukup longgar untuk itu tapi memotong spam event dari klien nakal.
@@ -77,8 +79,14 @@ function registerSocketHandlers(io) {
       if (typeof callback === 'function') callback(clientTimestamp);
     });
 
-    on(socket, 'room:create', payload => lobby.createRoom(socket, payload));
-    on(socket, 'room:join', payload => lobby.joinRoom(socket, payload.code, payload));
+    on(socket, 'room:create', payload => {
+      if (!ludoActionLimiter(socket.id)) return socket.emit('room:error', 'Terlalu banyak permintaan. Coba lagi sebentar.');
+      lobby.createRoom(socket, payload);
+    });
+    on(socket, 'room:join', payload => {
+      if (!ludoActionLimiter(socket.id)) return socket.emit('room:error', 'Terlalu banyak permintaan. Coba lagi sebentar.');
+      lobby.joinRoom(socket, payload.code, payload);
+    });
     on(socket, 'leaderboard:get', () => socket.emit('leaderboard:update', db.getLeaderboard()));
 
     // Identifikasi sesi user pada koneksi Socket.IO untuk fitur teman, chat grup, & undangan room
@@ -262,11 +270,21 @@ function registerSocketHandlers(io) {
       callback({ active: true, started: r.started, isOut: !!player.isOut, winner: r.winner, code: r.code });
     });
 
-    on(socket, 'room:update_settings', payload => lobby.updateSettings(currentRoom(), socket.id, payload));
-    on(socket, 'room:add_bot', () => lobby.addBot(currentRoom(), socket.id));
-    on(socket, 'room:remove_bot', () => lobby.removeBot(currentRoom(), socket.id));
+    on(socket, 'room:update_settings', payload => {
+      if (!ludoActionLimiter(socket.id)) return;
+      lobby.updateSettings(currentRoom(), socket.id, payload);
+    });
+    on(socket, 'room:add_bot', () => {
+      if (!ludoActionLimiter(socket.id)) return;
+      lobby.addBot(currentRoom(), socket.id);
+    });
+    on(socket, 'room:remove_bot', () => {
+      if (!ludoActionLimiter(socket.id)) return;
+      lobby.removeBot(currentRoom(), socket.id);
+    });
 
     on(socket, 'game:start', () => {
+      if (!ludoActionLimiter(socket.id)) return;
       const r = currentRoom();
       if (!r || r.host !== socket.id || r.started || r.players.length < 2) return;
       engine.startGame(r);
@@ -277,6 +295,7 @@ function registerSocketHandlers(io) {
     });
 
     on(socket, 'game:restart', () => {
+      if (!ludoActionLimiter(socket.id)) return;
       const r = currentRoom();
       if (!r || r.host !== socket.id || !r.started || !r.winner) return;
       const error = engine.restartGame(r);
@@ -288,22 +307,32 @@ function registerSocketHandlers(io) {
     });
 
     on(socket, 'game:roll', () => {
+      if (!ludoPlayLimiter(socket.id)) return;
       const r = currentRoom();
       if (r) engine.handleRoll(r, socket.id);
     });
 
     on(socket, 'game:move', ({ pawn }) => {
+      if (!ludoPlayLimiter(socket.id)) return;
       const r = currentRoom();
       if (r) engine.handleMove(r, socket.id, pawn);
     });
 
-    on(socket, 'game:shield_decision', payload => engine.decideShield(socket, currentRoom(), { use: payload?.use === true }));
+    on(socket, 'game:shield_decision', payload => {
+      if (!ludoPlayLimiter(socket.id)) return;
+      engine.decideShield(socket, currentRoom(), { use: payload?.use === true });
+    });
 
     // Satu event untuk semua item aktif: { itemId, target }
-    on(socket, 'game:use_item', ({ itemId, target }) => engine.useItem(socket, currentRoom(), { itemId, target }));
+    on(socket, 'game:use_item', ({ itemId, target }) => {
+      if (!ludoPlayLimiter(socket.id)) return;
+      engine.useItem(socket, currentRoom(), { itemId, target });
+    });
     // Kompatibilitas klien lama yang masih terbuka saat deploy. Hapus setelah semua klien diperbarui.
-    on(socket, 'game:use_force_return', payload =>
-      engine.useItem(socket, currentRoom(), { itemId: 'forceReturn', target: readTarget(payload) }));
+    on(socket, 'game:use_force_return', payload => {
+      if (!ludoPlayLimiter(socket.id)) return;
+      engine.useItem(socket, currentRoom(), { itemId: 'forceReturn', target: readTarget(payload) });
+    });
 
     on(socket, 'game:reaction', ({ emoji }) => {
       const r = currentRoom();

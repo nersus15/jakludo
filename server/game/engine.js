@@ -67,7 +67,7 @@ function restartGame(r) {
   return null;
 }
 
-function declareWinner(room, winnerPlayer) {
+function declareWinner(room, winnerPlayer, { endReason = null } = {}) {
   if (!room || room.winner) return;
   clearRoomTimers(room);
   room.winner = winnerPlayer.id;
@@ -78,7 +78,7 @@ function declareWinner(room, winnerPlayer) {
 
   // Poin sama untuk permainan biasa dan grup (leaderboard grup diambil dari leaderboard yang sama)
   const ranking = rankPlayers(room, winnerPlayer.id);
-  const awards = db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking });
+  const awards = db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking, endReason });
   // Peringkat resmi + poin yang didapat, ditampilkan di layar hasil
   room.matchResult = { ranking, awards };
   room.players.forEach(p => {
@@ -138,7 +138,7 @@ function shiftBlackHolesEachRound(room, activeCount) {
 }
 
 // Jadwalkan aksi berikutnya untuk pemain yang sedang mendapat giliran
-function triggerTurn(room) {
+function triggerTurn(room, { preserveClock = false } = {}) {
   if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
   // Permainan berhenti sampai pemilik perisai memutuskan (timer dipasang ulang setelah server restart)
   if (room.pendingShield) {
@@ -147,6 +147,10 @@ function triggerTurn(room) {
   }
   const currentPlayer = room.players[room.turn];
   if (!currentPlayer) return;
+
+  const existingEndsAt = preserveClock && room.turnClock && room.turnClock.playerId === currentPlayer.id
+    ? room.turnClock.endsAt
+    : null;
 
   if (room.botTimeout) clearTimeout(room.botTimeout);
   if (room.turnTimer) clearTimeout(room.turnTimer);
@@ -170,8 +174,11 @@ function triggerTurn(room) {
     return;
   }
 
-  // Pemain manusia: online -> batas waktu 15 detik, terputus -> tunggu sebentar agar sempat tersambung ulang
-  const delay = currentPlayer.connected ? TURN_TIMEOUT_MS : DISCONNECTED_TURN_DELAY_MS;
+  // Pemain manusia: online -> batas waktu 15 detik (atau lanjutkan sisa timer saat reconnect), terputus -> 8 detik
+  const remainingExisting = existingEndsAt ? existingEndsAt - Date.now() : 0;
+  const delay = currentPlayer.connected
+    ? (remainingExisting > 0 ? Math.max(2000, Math.min(TURN_TIMEOUT_MS, remainingExisting)) : TURN_TIMEOUT_MS)
+    : DISCONNECTED_TURN_DELAY_MS;
   room.turnTimer = roomTimeout(room, () => {
     if (room.players[room.turn]?.id === currentPlayer.id) executeAutoPlay(room, currentPlayer);
   }, delay);

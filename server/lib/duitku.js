@@ -324,6 +324,9 @@ async function createInvoice({
   const paymentAmount = Math.trunc(unitPrice);
   const signature = md5(`${config.merchantCode}${orderId}${paymentAmount}${config.apiKey}`);
 
+  const configuredBaseUrl = String(process.env.PUBLIC_URL || process.env.APP_URL || '').trim().replace(/\/+$/, '');
+  const sanitizedHost = String(host || '').replace(/[^a-zA-Z0-9.:-]/g, '');
+
   let callbackUrl = '';
   if (config.callbackUrl) {
     try {
@@ -335,15 +338,21 @@ async function createInvoice({
       callbackUrl = config.callbackUrl;
     }
   }
-  if (!callbackUrl && host) {
-    const proto = host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
-    callbackUrl = `${proto}://${host}${callbackPath}`;
+  if (!callbackUrl && configuredBaseUrl) {
+    callbackUrl = `${configuredBaseUrl}${callbackPath}`;
+  }
+  if (!callbackUrl && sanitizedHost) {
+    const proto = sanitizedHost.includes('localhost') || sanitizedHost.startsWith('127.0.0.1') ? 'http' : 'https';
+    callbackUrl = `${proto}://${sanitizedHost}${callbackPath}`;
   }
 
   let returnUrl = returnUrlOverride || config.returnUrl;
-  if (!returnUrl && host) {
-    const proto = host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
-    returnUrl = `${proto}://${host}`;
+  if (!returnUrl && configuredBaseUrl) {
+    returnUrl = configuredBaseUrl;
+  }
+  if (!returnUrl && sanitizedHost) {
+    const proto = sanitizedHost.includes('localhost') || sanitizedHost.startsWith('127.0.0.1') ? 'http' : 'https';
+    returnUrl = `${proto}://${sanitizedHost}`;
   }
 
   const cleanUsername = String(user?.username || 'player').replace(/[^a-zA-Z0-9._-]/g, '') || 'player';

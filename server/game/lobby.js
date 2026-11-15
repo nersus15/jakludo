@@ -164,7 +164,9 @@ function rejoinPlayer(socket, room, player, user) {
   player.id = socket.id;
   player.connected = true;
   player.disconnectedAt = null;
-  player.autoPlayCount = 0;
+  if (room.turnClock && room.turnClock.playerId === oldSocketId) {
+    room.turnClock.playerId = socket.id;
+  }
   store.cancelLobbyRemoval(room, player);
   if (user) {
     const economyStore = require('../economy/store');
@@ -204,7 +206,9 @@ function rejoinPlayer(socket, room, player, user) {
   });
   emitRoom(room);
 
-  if (room.started && room.players[room.turn]?.id === socket.id) engine.triggerTurn(room);
+  if (room.started && room.players[room.turn]?.id === socket.id) {
+    engine.triggerTurn(room, { preserveClock: true });
+  }
 }
 
 function addBot(room, hostSocketId) {
@@ -300,7 +304,7 @@ function handleDeparture(socket, r, { intentional }) {
     if (!r.winner && wasActive) {
       const activeRemaining = r.players.filter(p => !p.isOut);
       if (activeRemaining.length === 1) {
-        engine.declareWinner(r, activeRemaining[0]);
+        engine.declareWinner(r, activeRemaining[0], { endReason: 'forfeit' });
       } else if (r.players[r.turn]?.id === departing.id) {
         engine.advanceTurn(r);
       }

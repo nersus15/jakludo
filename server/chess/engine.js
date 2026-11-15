@@ -1702,7 +1702,8 @@ function requestRematch(socket, payload = {}) {
   // Jika kedua pemain setuju rematch, buat match baru dengan ID baru dan tukar warna bidak
   if (room.players.every(p => m.rematchRequests.has(p.userId))) {
     const oldMatch = m;
-    const newMatch = startMatchInRoom(room, { matchType: 'rematch', swapColors: true });
+    const hasBotOpponent = room.players.some(p => p.isBot);
+    const newMatch = startMatchInRoom(room, { matchType: hasBotOpponent ? 'bot' : 'rematch', swapColors: true });
     if (oldMatch && newMatch) {
       oldMatch.nextMatchId = newMatch.id;
     }

@@ -3,6 +3,7 @@ const express = require('express');
 const db = require('../db');
 const economy = require('./store');
 const duitku = require('../lib/duitku');
+const { createLimiter } = require('../lib/limiter');
 
 function bearerToken(req) {
   return (
@@ -37,21 +38,14 @@ function requireAdmin(req, res) {
 }
 
 function createSimpleLimiter({ max = 25, windowMs = 60 * 1000 } = {}) {
-  const buckets = new Map();
+  const allow = createLimiter({ windowMs, max });
   return (req, res, next) => {
     if (process.env.NODE_ENV === 'test' && process.env.ENABLE_RATE_LIMIT_IN_TEST !== '1') {
       return next();
     }
-    const key = req.headers.authorization || req.ip || 'anon';
-    const now = Date.now();
-    const b = buckets.get(key) || { count: 0, resetAt: now + windowMs };
-    if (now > b.resetAt) {
-      b.count = 0;
-      b.resetAt = now + windowMs;
-    }
-    b.count += 1;
-    buckets.set(key, b);
-    if (b.count > max) {
+    const user = resolveUser(req);
+    const key = user?.id ? `u:${user.id}` : `ip:${req.ip || 'anon'}`;
+    if (!allow(key)) {
       return res.status(429).json({ success: false, error: 'Terlalu banyak permintaan. Coba lagi sebentar.' });
     }
     next();

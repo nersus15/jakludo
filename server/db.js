@@ -1322,11 +1322,11 @@ function ensureGlobalLeaderboardRow(client, user) {
 // ranking: id pemain dari peringkat 1 ke bawah (lihat rankPlayers). Tanpa ranking, pemenang dianggap
 // peringkat 1 dan sisanya mengikuti urutan players.
 // Return { [playerId]: { points, dailyBonus } } untuk ditampilkan di layar hasil.
-function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() }) {
+function recordMatchResult({ winnerPlayerId, players, ranking, endReason = null, now = Date.now() }) {
   const awards = {};
   // Aturan bersama semua game: minimal 2 pemain asli (menang hanya melawan bot tidak dapat poin),
-  // lihat server/lib/rewards.js
-  if (!canAwardPoints(players)) return awards;
+  // dan tidak berlaku jika pertandingan berakhir karena forfeit instan (lihat server/lib/rewards.js).
+  if (!canAwardPoints(players, { endReason })) return awards;
   const humans = players.filter(p => !p.isBot);
   const today = todayWib(now);
 
@@ -1336,11 +1336,11 @@ function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() 
     const user = p.userId ? findUserById(p.userId) : null;
     if (!user) continue;
     const entry = ensureLeaderboardEntry(user);
-    const won = p.id === winnerPlayerId;
+    const won = p.id === winnerPlayerId && !p.left;
     const deltaWins = won ? 1 : 0;
-    const points = rankPoints(players.length, order.indexOf(p.id));
+    const points = p.left ? 0 : rankPoints(players.length, order.indexOf(p.id));
     // Pemain yang OUT/menyerah tidak dihitung "main" untuk bonus harian
-    const dailyBonus = !p.isOut && entry.lastDailyBonus !== today ? DAILY_BONUS_POINTS : 0;
+    const dailyBonus = !p.isOut && !p.left && entry.lastDailyBonus !== today ? DAILY_BONUS_POINTS : 0;
     if (dailyBonus) entry.lastDailyBonus = today;
     const deltaPoints = points + dailyBonus;
     entry.matchesPlayed += 1;
@@ -1501,46 +1501,81 @@ async function getShopItemById(id) {
   return item && item.isActive ? item : null;
 }
 
-// Beli item toko: harga item diverifikasi langsung dari database untuk mencegah manipulasi
-async function purchaseItem({ userId, itemId }) {
-  const user = findUserById(userId);
-  if (!user) return { error: 'Pengguna tidak ditemukan.' };
+const purchaseLocks = new Map();
 
-  const item = await getShopItemById(itemId);
-  if (!item || !item.isActive) {
-    return { error: 'Item toko tidak valid atau sudah tidak dijual.' };
-  }
+function withPurchaseLock(userId, fn) {
+  const prev = purchaseLocks.get(userId) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  const tail = next.catch(() => {});
+  purchaseLocks.set(userId, tail);
+  tail.finally(() => {
+    if (purchaseLocks.get(userId) === tail) {
+      purchaseLocks.delete(userId);
+    }
+  });
+  return next;
+}
 
-  const price = Number(item.price);
-  const entry = ensureLeaderboardEntry(user);
-  if (entry.points < price) {
-    return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${entry.points} poin.` };
-  }
+// Beli item toko: harga item diverifikasi langsung dari database dengan per-user lock untuk mencegah race condition
+function purchaseItem({ userId, itemId }) {
+  return withPurchaseLock(userId, async () => {
+    const user = findUserById(userId);
+    if (!user) return { error: 'Pengguna tidak ditemukan.' };
 
-  entry.points -= price;
-  const currentQty = getUserItems(user.id)[itemId] || 0;
-  setItemInState(user.id, itemId, currentQty + 1);
-  persistLocalFallback();
+    const item = await getShopItemById(itemId);
+    if (!item || !item.isActive) {
+      return { error: 'Item toko tidak valid atau sudah tidak dijual.' };
+    }
 
-  if (pool && !closed) {
-    await execPgTransaction(async client => {
-      await ensureGlobalLeaderboardRow(client, user);
-      const updateRes = await client.query(
-        'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
-        [price, user.id]
-      );
-      if (updateRes.rowCount === 0) {
-        throw new Error('Poin tidak mencukupi saat proses transaksi database.');
+    const price = Number(item.price);
+    if (!Number.isFinite(price) || price <= 0) {
+      return { error: 'Harga item toko tidak valid.' };
+    }
+
+    const entry = ensureLeaderboardEntry(user);
+    if (entry.points < price) {
+      return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${entry.points} poin.` };
+    }
+
+    let pgPointsAfter = null;
+    let pgQtyAfter = null;
+    if (pool && !closed) {
+      let txErr = null;
+      await execPgTransaction(async client => {
+        try {
+          await ensureGlobalLeaderboardRow(client, user);
+          const updateRes = await client.query(
+            'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1 RETURNING points',
+            [price, user.id]
+          );
+          if (updateRes.rowCount === 0) {
+            throw new Error('Poin tidak mencukupi saat proses transaksi database.');
+          }
+          pgPointsAfter = Number(updateRes.rows[0].points);
+          const itemRes = await client.query(
+            `INSERT INTO user_items (user_id, item_id, quantity) VALUES ($1, $2, 1)
+             ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = user_items.quantity + 1
+             RETURNING quantity`,
+            [user.id, itemId]
+          );
+          pgQtyAfter = Number(itemRes.rows[0]?.quantity);
+        } catch (err) {
+          txErr = err;
+          throw err;
+        }
+      });
+      if (txErr) {
+        return { error: txErr.message || 'Gagal memproses pembelian item di database.' };
       }
-      await client.query(
-        `INSERT INTO user_items (user_id, item_id, quantity) VALUES ($1, $2, 1)
-         ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = user_items.quantity + 1`,
-        [user.id, itemId]
-      );
-    });
-  }
+    }
 
-  return { success: true, item, user: sanitizeUser(findUserById(user.id)) };
+    entry.points = pgPointsAfter !== null ? pgPointsAfter : entry.points - price;
+    const currentQty = getUserItems(user.id)[itemId] || 0;
+    setItemInState(user.id, itemId, pgQtyAfter !== null ? pgQtyAfter : currentQty + 1);
+    persistLocalFallback();
+
+    return { success: true, item, user: sanitizeUser(findUserById(user.id)) };
+  });
 }
 
 function consumeUserItem({ userId, itemId }) {

@@ -6,27 +6,27 @@ const { Chess } = require('chess.js');
 const BOT_PROFILES = {
   easy: {
     id: 'bot_chess_easy',
-    username: 'bot_pion',
-    name: 'Bot Pion (AI Pemula)',
-    avatar: '🤖',
+    username: 'dimas_07',
+    name: 'dimas_07',
+    avatar: '1',
     rating: 950,
     difficulty: 'easy',
     isBot: true
   },
   medium: {
     id: 'bot_chess_medium',
-    username: 'bot_ksatria',
-    name: 'Bot Ksatria (AI Menengah)',
-    avatar: '🤖',
+    username: 'rizky_p',
+    name: 'rizky_p',
+    avatar: '2',
     rating: 1200,
     difficulty: 'medium',
     isBot: true
   },
   hard: {
     id: 'bot_chess_hard',
-    username: 'bot_grandmaster',
-    name: 'Bot Grandmaster (AI Master)',
-    avatar: '🤖',
+    username: 'hendra.gm',
+    name: 'hendra.gm',
+    avatar: '3',
     rating: 1550,
     difficulty: 'hard',
     isBot: true
@@ -34,11 +34,16 @@ const BOT_PROFILES = {
 };
 
 const QUICK_MATCH_BOT_NAMES = [
-  { id: 'bot_chess_raka', username: 'raka_ai', name: 'Raka Pratama (Bot)', avatar: '🤖' },
-  { id: 'bot_chess_dewi', username: 'dewi_ai', name: 'Dewi Kartika (Bot)', avatar: '🤖' },
-  { id: 'bot_chess_bima', username: 'bima_ai', name: 'Bima Sakti (Bot)', avatar: '🤖' },
-  { id: 'bot_chess_citra', username: 'citra_ai', name: 'Citra Kirana (Bot)', avatar: '🤖' },
-  { id: 'bot_chess_arya', username: 'arya_ai', name: 'Arya Wijaya (Bot)', avatar: '🤖' }
+  { id: 'bot_chess_raka', username: 'raka_p', name: 'raka_p', avatar: '1' },
+  { id: 'bot_chess_dewi', username: 'dewi.k', name: 'dewi.k', avatar: '2' },
+  { id: 'bot_chess_bima', username: 'bima_sakti', name: 'bima_sakti', avatar: '3' },
+  { id: 'bot_chess_citra', username: 'citra_m', name: 'citra_m', avatar: '4' },
+  { id: 'bot_chess_arya', username: 'arya.wjy', name: 'arya.wjy', avatar: '5' },
+  { id: 'bot_chess_nadia', username: 'nadia_putri', name: 'nadia_putri', avatar: '6' },
+  { id: 'bot_chess_fajar', username: 'fajar_id', name: 'fajar_id', avatar: '1' },
+  { id: 'bot_chess_kevin', username: 'kevin_k', name: 'kevin_k', avatar: '2' },
+  { id: 'bot_chess_alya', username: 'alya.r', name: 'alya.r', avatar: '3' },
+  { id: 'bot_chess_reza', username: 'reza_xd', name: 'reza_xd', avatar: '4' }
 ];
 
 function isBotUserId(userId) {

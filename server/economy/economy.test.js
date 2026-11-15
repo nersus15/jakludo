@@ -1,0 +1,543 @@
+// Automated tests untuk Dual Currency (Coins + Diamonds), Konversi Coins->Diamonds,
+// Duitku Top-Up (Webhook & Idempotency), JakLudo Skin Shop & Equip Sync, serta Admin Economy Dashboard.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'playgo-econ-test-'));
+process.env.JAKLUDO_DATA_DIR = dataDir;
+process.env.NODE_ENV = 'test';
+
+const { io: ioClient } = require('socket.io-client');
+const { server, rooms, shutdown } = require('../index');
+const db = require('../db');
+const duitku = require('../lib/duitku');
+
+let url;
+const clients = [];
+
+test.before(async () => {
+  await new Promise(resolve => server.listen(0, resolve));
+  url = `http://localhost:${server.address().port}`;
+});
+
+test.after(async () => {
+  clients.forEach(c => c.close());
+  shutdown();
+  await new Promise(resolve => server.close(resolve));
+  fs.rmSync(dataDir, { recursive: true, force: true });
+});
+
+async function registerUser(username) {
+  const res = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password: 'Rahasia#123', name: username })
+  });
+  const data = await res.json();
+  assert.equal(res.status, 200, `Registrasi ${username} gagal: ${JSON.stringify(data)}`);
+  return data;
+}
+
+async function apiJson(route, { method = 'GET', token = '', body = undefined } = {}) {
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(`${url}${route}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+function signCallback({ merchantCode, amount, merchantOrderId, apiKey }) {
+  return duitku.md5(`${merchantCode}${amount}${merchantOrderId}${apiKey}`);
+}
+
+function connectSocket(token) {
+  const c = ioClient(url, {
+    forceNew: true,
+    transports: ['websocket'],
+    auth: token ? { token } : undefined
+  });
+  clients.push(c);
+  return new Promise(resolve => c.on('connect', () => resolve(c)));
+}
+
+test('Coins & Diamonds: konversi valid, batas min/max, saldo kurang, input tidak valid, idempotency, & proteksi race condition', async () => {
+  const aliceAuth = await registerUser('econ_alice');
+  const aliceId = aliceAuth.user.id;
+  const aliceToken = aliceAuth.token;
+
+  // Beri tambahan +9.800 Coins sehingga total menjadi 10.000 Coins (200 starter + 9800)
+  db.awardUserPoints(aliceId, 9800);
+
+  const walletBefore = await apiJson('/api/economy/wallet', { token: aliceToken });
+  assert.equal(walletBefore.status, 200);
+  assert.equal(walletBefore.data.wallet.coins, 10000);
+  assert.equal(walletBefore.data.wallet.diamonds, 0);
+
+  // Konversi valid 20 Diamonds (biaya = 2.000 Coins, abaikan nilai palsu dari klien jika ada)
+  const convRes = await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token: aliceToken,
+    body: {
+      diamonds: 20,
+      coinsRequired: 1, // manipulasi klien harus diabaikan
+      idempotencyKey: 'conv-alice-1'
+    }
+  });
+  assert.equal(convRes.status, 200);
+  assert.equal(convRes.data.wallet.coins, 8000);
+  assert.equal(convRes.data.wallet.diamonds, 20);
+  assert.equal(convRes.data.conversion.coinsSpent, 2000);
+  assert.equal(convRes.data.conversion.diamondsReceived, 20);
+
+  // Replay dengan idempotencyKey sama tidak mendebit Coins atau menambah Diamonds lagi
+  const convReplay = await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token: aliceToken,
+    body: { diamonds: 20, idempotencyKey: 'conv-alice-1' }
+  });
+  assert.equal(convReplay.status, 200);
+  assert.equal(convReplay.data.idempotentReplay, true);
+  assert.equal(convReplay.data.wallet.coins, 8000);
+  assert.equal(convReplay.data.wallet.diamonds, 20);
+
+  // Tolak batas min (<10) dan batas max (>50), desimal, nol, negatif
+  for (const invalidVal of [9, 51, 10.5, 0, -5, 'abc']) {
+    const r = await apiJson('/api/economy/convert', {
+      method: 'POST',
+      token: aliceToken,
+      body: { diamonds: invalidVal }
+    });
+    assert.equal(r.status, 400, `Harusnya menolak jumlah konversi: ${invalidVal}`);
+  }
+
+  // Tolak saldo Coins tidak cukup
+  const poorAuth = await registerUser('econ_poor');
+  const poorRes = await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token: poorAuth.token,
+    body: { diamonds: 10 }
+  });
+  assert.equal(poorRes.status, 400);
+  assert.equal(db.getUserPoints(poorAuth.user.id), 200);
+
+  // Race-condition test: bob punya 2.000 Coins pas; kirim 2 request konversi 20 Diamonds paralel
+  const bobAuth = await registerUser('econ_race_bob');
+  db.awardUserPoints(bobAuth.user.id, 1800); // 200 starter + 1800 = 2000 Coins
+  const [r1, r2] = await Promise.all([
+    apiJson('/api/economy/convert', { method: 'POST', token: bobAuth.token, body: { diamonds: 20 } }),
+    apiJson('/api/economy/convert', { method: 'POST', token: bobAuth.token, body: { diamonds: 20 } })
+  ]);
+  const statuses = [r1.status, r2.status].sort();
+  assert.deepEqual(statuses, [200, 400]);
+  const bobWallet = await apiJson('/api/economy/wallet', { token: bobAuth.token });
+  assert.equal(bobWallet.data.wallet.coins, 0);
+  assert.equal(bobWallet.data.wallet.diamonds, 20);
+});
+
+test('Duitku Diamond Top-Up: verifikasi signature ketat, amount mismatch, order tidak ditemukan, idempotency callback, & status gagal/expired/cancelled', async () => {
+  const userAuth = await registerUser('econ_duitku');
+  const token = userAuth.token;
+
+  const pkgRes = await apiJson('/api/economy/packages', { token });
+  assert.equal(pkgRes.status, 200);
+  assert.equal(pkgRes.data.packages.length >= 4, true);
+  assert.equal(Array.isArray(pkgRes.data.paymentMethods) && pkgRes.data.paymentMethods.length > 0, true);
+  const popularPkg = pkgRes.data.packages.find(p => p.id === 'pkg_popular');
+  assert.equal(popularPkg.diamonds, 25);
+  assert.equal(popularPkg.priceIdr, 10000);
+
+  const pmRes = await apiJson('/api/economy/payment-methods?amount=10000');
+  assert.equal(pmRes.status, 200);
+  assert.deepEqual(
+    pmRes.data.methods.map(m => m.code),
+    ['SP', 'M2', 'BC', 'I1', 'SA', 'DA']
+  );
+
+  // Pastikan DUITKU_* kosong saat create agar tidak melakukan panggilan jaringan keluar pada test
+  delete process.env.DUITKU_MERCHANT_CODE;
+  delete process.env.DUITKU_API_KEY;
+
+  const createRes = await apiJson('/api/economy/topup/create', {
+    method: 'POST',
+    token,
+    body: { packageId: 'pkg_popular', paymentMethod: 'SP', amountIdr: 1, diamonds: 99999 }
+  });
+  assert.equal(createRes.status, 200);
+  const order = createRes.data.order;
+  const inv = createRes.data.invoice;
+  assert.equal(order.status, 'PENDING');
+  assert.equal(order.amountIdr, 10000);
+  assert.equal(order.totalDiamonds, 25);
+  assert.equal(inv.popJsUrl, undefined);
+  assert.equal(inv.paymentMethod, 'SP');
+  assert.ok(inv.qrString);
+  assert.ok(inv.qrCodeUrl);
+
+  const vaRes = await apiJson('/api/economy/topup/create', {
+    method: 'POST',
+    token,
+    body: { packageId: 'pkg_starter', paymentMethod: 'BC' }
+  });
+  assert.equal(vaRes.status, 200);
+  assert.equal(vaRes.data.invoice.paymentMethod, 'BC');
+  assert.ok(vaRes.data.invoice.vaNumber);
+
+  // Aktifkan kunci Duitku untuk menguji verifikasi signature kriptografi MD5 sungguhan pada webhook
+  const MERCHANT = 'DTEST99';
+  const API_KEY = 'secret_key_for_duitku_test';
+  process.env.DUITKU_MERCHANT_CODE = MERCHANT;
+  process.env.DUITKU_API_KEY = API_KEY;
+
+  try {
+    // 1. Tolak signature tidak valid
+    const badSig = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '10000',
+        merchantOrderId: order.id,
+        resultCode: '00',
+        signature: 'deadbeef0000'
+      }
+    });
+    assert.equal(badSig.status, 400);
+
+    // 2. Tolak merchantCode salah meskipun signature dihitung pakai merchant palsu
+    const wrongMerchant = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: 'DWRONG',
+        amount: '10000',
+        merchantOrderId: order.id,
+        resultCode: '00',
+        signature: signCallback({ merchantCode: 'DWRONG', amount: '10000', merchantOrderId: order.id, apiKey: API_KEY })
+      }
+    });
+    assert.equal(wrongMerchant.status, 400);
+
+    // 3. Tolak nominal tidak sesuai
+    const wrongAmt = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '5000',
+        merchantOrderId: order.id,
+        resultCode: '00',
+        signature: signCallback({ merchantCode: MERCHANT, amount: '5000', merchantOrderId: order.id, apiKey: API_KEY })
+      }
+    });
+    assert.equal(wrongAmt.status, 400);
+
+    // 4. Tolak order tidak dikenal (404)
+    const unknownOrd = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '10000',
+        merchantOrderId: 'PGD_UNKNOWN_999',
+        resultCode: '00',
+        signature: signCallback({ merchantCode: MERCHANT, amount: '10000', merchantOrderId: 'PGD_UNKNOWN_999', apiKey: API_KEY })
+      }
+    });
+    assert.equal(unknownOrd.status, 404);
+
+    // 5. Status PENDING (01) tidak mengkredit Diamonds
+    const pendCb = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '10000',
+        merchantOrderId: order.id,
+        resultCode: '01',
+        signature: signCallback({ merchantCode: MERCHANT, amount: '10000', merchantOrderId: order.id, apiKey: API_KEY })
+      }
+    });
+    assert.equal(pendCb.status, 200);
+    assert.equal(pendCb.data.status, 'PENDING');
+    let w = await apiJson('/api/economy/wallet', { token });
+    assert.equal(w.data.wallet.diamonds, 0);
+
+    // 6. Callback PAID valid (00) mengkredit Diamonds sekali, replay duplikat bersifat idempoten
+    const validPayload = {
+      merchantCode: MERCHANT,
+      amount: '10000',
+      merchantOrderId: order.id,
+      resultCode: '00',
+      reference: 'DUITKU_REF_OK_1',
+      signature: signCallback({ merchantCode: MERCHANT, amount: '10000', merchantOrderId: order.id, apiKey: API_KEY })
+    };
+    const [cb1, cb2, cb3] = await Promise.all([
+      apiJson('/api/economy/topup/callback', { method: 'POST', body: validPayload }),
+      apiJson('/api/economy/topup/callback', { method: 'POST', body: validPayload }),
+      apiJson('/api/economy/topup/callback', { method: 'POST', body: validPayload })
+    ]);
+    assert.equal(cb1.status, 200);
+    assert.equal(cb2.status, 200);
+    assert.equal(cb3.status, 200);
+
+    w = await apiJson('/api/economy/wallet', { token });
+    assert.equal(w.data.wallet.diamonds, 25);
+    assert.equal(w.data.wallet.totalPurchased, 25);
+
+    // 7. Uji order FAILED, EXPIRED, CANCELLED tidak mengkredit Diamonds
+    delete process.env.DUITKU_MERCHANT_CODE;
+    delete process.env.DUITKU_API_KEY;
+    const ordFail = (await apiJson('/api/economy/topup/create', { method: 'POST', token, body: { packageId: 'pkg_starter' } })).data.order;
+    const ordExp = (await apiJson('/api/economy/topup/create', { method: 'POST', token, body: { packageId: 'pkg_starter' } })).data.order;
+    const ordCancel = (await apiJson('/api/economy/topup/create', { method: 'POST', token, body: { packageId: 'pkg_starter' } })).data.order;
+    process.env.DUITKU_MERCHANT_CODE = MERCHANT;
+    process.env.DUITKU_API_KEY = API_KEY;
+
+    const failCb = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '5000',
+        merchantOrderId: ordFail.id,
+        resultCode: '02',
+        statusMessage: 'FAILED',
+        signature: signCallback({ merchantCode: MERCHANT, amount: '5000', merchantOrderId: ordFail.id, apiKey: API_KEY })
+      }
+    });
+    assert.equal(failCb.data.status, 'FAILED');
+
+    const expCb = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '5000',
+        merchantOrderId: ordExp.id,
+        resultCode: '02',
+        statusMessage: 'EXPIRED',
+        signature: signCallback({ merchantCode: MERCHANT, amount: '5000', merchantOrderId: ordExp.id, apiKey: API_KEY })
+      }
+    });
+    assert.equal(expCb.data.status, 'EXPIRED');
+
+    const cancelRes = await apiJson('/api/economy/topup/cancel', {
+      method: 'POST',
+      token,
+      body: { orderId: ordCancel.id }
+    });
+    assert.equal(cancelRes.status, 200);
+    assert.equal(cancelRes.data.order.status, 'CANCELLED');
+
+    // Callback telat '00' untuk order CANCELLED harus diabaikan
+    const latePaid = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      body: {
+        merchantCode: MERCHANT,
+        amount: '5000',
+        merchantOrderId: ordCancel.id,
+        resultCode: '00',
+        signature: signCallback({ merchantCode: MERCHANT, amount: '5000', merchantOrderId: ordCancel.id, apiKey: API_KEY })
+      }
+    });
+    assert.equal(latePaid.data.ignored, true);
+
+    w = await apiJson('/api/economy/wallet', { token });
+    assert.equal(w.data.wallet.diamonds, 25);
+
+    // 8. Delegasi callback /api/topup/notification untuk order PGD_*
+    const notifHttpRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        merchantCode: MERCHANT,
+        amount: String(vaRes.data.order.amountIdr),
+        merchantOrderId: vaRes.data.order.id,
+        resultCode: '00',
+        reference: 'DUITKU_VA_REF_1',
+        signature: signCallback({
+          merchantCode: MERCHANT,
+          amount: String(vaRes.data.order.amountIdr),
+          merchantOrderId: vaRes.data.order.id,
+          apiKey: API_KEY
+        })
+      })
+    });
+    assert.equal(notifHttpRes.status, 200);
+    assert.equal(await notifHttpRes.text(), 'OK');
+    w = await apiJson('/api/economy/wallet', { token });
+    assert.equal(w.data.wallet.diamonds, 35);
+  } finally {
+    delete process.env.DUITKU_MERCHANT_CODE;
+    delete process.env.DUITKU_API_KEY;
+  }
+});
+
+test('JakLudo Skin Shop & Integrasi Bidak: beli skin, validasi kepemilikan, equip/unequip, dan sinkronisasi live di room JakLudo', async () => {
+  const playerAuth = await registerUser('econ_skinner');
+  const token = playerAuth.token;
+
+  // Konversi 20 Diamonds dari Coins (2.000 Coins)
+  db.awardUserPoints(playerAuth.user.id, 3000);
+  await apiJson('/api/economy/convert', { method: 'POST', token, body: { diamonds: 20 } });
+
+  const catalogRes = await apiJson('/api/economy/skins', { token });
+  assert.equal(catalogRes.status, 200);
+  assert.equal(catalogRes.data.skins.length >= 7, true);
+
+  // Gagal equip skin yang belum dimiliki
+  const unownedEquip = await apiJson('/api/economy/skins/equip', {
+    method: 'POST',
+    token,
+    body: { skinId: 'ruby_crystal' }
+  });
+  assert.equal(unownedEquip.status, 403);
+
+  // Gagal beli Legendary Diamond (50 💎) karena saldo hanya 20 💎
+  const tooExpensive = await apiJson('/api/economy/skins/purchase', {
+    method: 'POST',
+    token,
+    body: { skinId: 'legendary_diamond' }
+  });
+  assert.equal(tooExpensive.status, 400);
+
+  // Beli Ruby Crystal (15 💎) sukses -> sisa 5 💎
+  const buyRes = await apiJson('/api/economy/skins/purchase', {
+    method: 'POST',
+    token,
+    body: { skinId: 'ruby_crystal' }
+  });
+  assert.equal(buyRes.status, 200);
+  assert.equal(buyRes.data.wallet.diamonds, 5);
+  assert.equal(buyRes.data.skin.owned, true);
+
+  // Beli ulang skin yang sudah dimiliki -> ditolak (409)
+  const dupBuy = await apiJson('/api/economy/skins/purchase', {
+    method: 'POST',
+    token,
+    body: { skinId: 'ruby_crystal' }
+  });
+  assert.equal(dupBuy.status, 409);
+
+  // Equip skin Ruby Crystal -> tersimpan di profil & muncul di room JakLudo saat join
+  const eqRes = await apiJson('/api/economy/skins/equip', {
+    method: 'POST',
+    token,
+    body: { skinId: 'ruby_crystal' }
+  });
+  assert.equal(eqRes.status, 200);
+  assert.equal(eqRes.data.equippedSkinId, 'ruby_crystal');
+
+  const socket = await connectSocket(token);
+  const joinedPromise = new Promise(resolve => socket.once('room:joined', resolve));
+  const updatePromise = new Promise(resolve => socket.once('room:update', resolve));
+  socket.emit('room:create', { name: 'Skinner', token });
+  const joined = await joinedPromise;
+  const firstUpdate = await updatePromise;
+
+  assert.equal(firstUpdate.players[0].equippedSkin?.id, 'ruby_crystal');
+  assert.equal(rooms.get(joined.code).players[0].equippedSkin?.id, 'ruby_crystal');
+
+  // Lepas skin saat masih di room -> socket room:update langsung menyinkronkan null
+  const unequipUpdatePromise = new Promise(resolve => socket.once('room:update', resolve));
+  const uneqRes = await apiJson('/api/economy/skins/equip', {
+    method: 'POST',
+    token,
+    body: { skinId: null }
+  });
+  assert.equal(uneqRes.status, 200);
+  const afterUneqUpdate = await unequipUpdatePromise;
+  assert.equal(afterUneqUpdate.players[0].equippedSkin, null);
+});
+
+test('Admin Economy Dashboard & Keamanan: RBAC, kurs dinamis, CRUD paket/skin, & audit adjustment', async () => {
+  const regularAuth = await registerUser('econ_regular_user');
+  const adminAuth = await registerUser('econ_admin_user');
+  await db.setUserRole(adminAuth.user.id, 'admin');
+
+  // Non-admin dan unauthenticated wajib ditolak
+  const unauthAdmin = await apiJson('/api/admin/economy/overview');
+  assert.equal(unauthAdmin.status, 401);
+  const forbiddenAdmin = await apiJson('/api/admin/economy/overview', { token: regularAuth.token });
+  assert.equal(forbiddenAdmin.status, 403);
+
+  // Admin dapat melihat overview
+  const adminOverview = await apiJson('/api/admin/economy/overview', { token: adminAuth.token });
+  assert.equal(adminOverview.status, 200);
+  assert.ok(adminOverview.data.summary);
+
+  // Admin mengubah kurs menjadi 50 Coins = 1 Diamond, min 5, max 25
+  const updSettings = await apiJson('/api/admin/economy/settings', {
+    method: 'PUT',
+    token: adminAuth.token,
+    body: { coinsPerDiamond: 50, minConvertDiamonds: 5, maxConvertDiamonds: 25, conversionEnabled: true }
+  });
+  assert.equal(updSettings.status, 200);
+  assert.equal(updSettings.data.settings.coinsPerDiamond, 50);
+
+  // Pemain reguler menguji kurs baru (200 starter Coins cukup untuk 4? Tidak, min 5 = 250 Coins; beri +100 Coins)
+  db.awardUserPoints(regularAuth.user.id, 100); // 300 Coins
+  const convNewRate = await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token: regularAuth.token,
+    body: { diamonds: 5 }
+  });
+  assert.equal(convNewRate.status, 200);
+  assert.equal(convNewRate.data.wallet.coins, 50);
+  assert.equal(convNewRate.data.wallet.diamonds, 5);
+
+  // Admin menambah paket Diamond & mengedit skin Ludo (harga wajib 10–50 Diamonds)
+  const addPkg = await apiJson('/api/admin/economy/packages', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { id: 'pkg_vip', name: 'VIP Promo', diamonds: 80, bonusDiamonds: 10, priceIdr: 35000, badge: 'VIP', isActive: true }
+  });
+  assert.equal(addPkg.status, 200);
+  assert.equal(addPkg.data.package.totalDiamonds, 90);
+
+  const badSkinPrice = await apiJson('/api/admin/economy/skins', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { name: 'Cheap Illegal', priceDiamonds: 5, rarity: 'Common' }
+  });
+  assert.equal(badSkinPrice.status, 400);
+
+  const validSkin = await apiJson('/api/admin/economy/skins', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { id: 'neon_cyber', name: 'Neon Cyber', priceDiamonds: 35, rarity: 'Epic', assetKey: 'galaxy_purple', accentColor: '#06b6d4' }
+  });
+  assert.equal(validSkin.status, 200);
+
+  // Admin melakukan adjustment saldo & refund dengan alasan wajib
+  const noReasonAdj = await apiJson('/api/admin/economy/wallets/adjust', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { userId: regularAuth.user.id, amount: 20, reason: '' }
+  });
+  assert.equal(noReasonAdj.status, 400);
+
+  const negTooMuch = await apiJson('/api/admin/economy/wallets/adjust', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { userId: regularAuth.user.id, amount: -999, reason: 'Uji batas minus' }
+  });
+  assert.equal(negTooMuch.status, 400);
+
+  const adjOk = await apiJson('/api/admin/economy/wallets/adjust', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { userId: regularAuth.user.id, amount: 25, txType: 'REFUND', reason: 'Kompensasi maintenance' }
+  });
+  assert.equal(adjOk.status, 200);
+  assert.equal(adjOk.data.wallet.diamonds, 30);
+
+  // Pastikan endpoint lama Coins shop & topup tetap kompatibel
+  const legacyItems = await apiJson('/api/shop/items');
+  assert.equal(legacyItems.status, 200);
+  assert.equal(legacyItems.data.items.length >= 4, true);
+  const legacyTopup = await apiJson('/api/topup/config');
+  assert.equal(legacyTopup.status, 200);
+  assert.equal(legacyTopup.data.packages.length, 6);
+});

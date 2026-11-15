@@ -274,7 +274,7 @@ export default function App() {
   const inGame = game.screen === 'room' && game.room?.started;
   const inLobby = game.screen === 'room' && game.room && !game.room.started;
   const isMobileFeaturePage =
-    isMobileView && !inGame && (modal === 'friends' || modal === 'groups' || modal === 'shop');
+    isMobileView && !inGame && (modal === 'friends' || modal === 'groups');
   const quizRoom = quiz.room;
   const chessRoom = chess.room;
   const snakesRoom = snakes.room;
@@ -308,7 +308,7 @@ export default function App() {
       <a className="skip-link" href="#main">Langsung ke konten</a>
       <ReconnectBar {...network} />
 
-      {inGame ? (
+      {inGame && modal !== 'shop' ? (
         <GameHeader
           room={game.room}
           audio={audio}
@@ -327,7 +327,7 @@ export default function App() {
           friendBadgeCount={social.friendBadgeCount}
           groupBadgeCount={social.groupBadgeCount}
           onGoHome={
-            isMobileFeaturePage
+            isMobileFeaturePage || modal === 'shop'
               ? () => {
                   sound.playClick();
                   close();
@@ -398,7 +398,26 @@ export default function App() {
         }}
       />
 
-      {inGame ? (
+      {modal === 'shop' ? (
+        <Suspense
+          fallback={
+            <main className="loading-screen" id="main" role="status">
+              <span className="spinner" aria-hidden="true" /> Memuat PlayGo Marketplace...
+            </main>
+          }
+        >
+          <ShopModal
+            isOpen
+            asPage
+            onClose={close}
+            currentUser={auth.currentUser}
+            onUpdateUser={auth.setCurrentUser}
+            authToken={auth.authToken}
+            initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
+            onOpenAuth={open('auth')}
+          />
+        </Suspense>
+      ) : inGame ? (
         <GameScreen game={game} itemCatalog={itemCatalog} sheet={sheet} onSheetChange={changeSheet} onOpenShop={open('shop')} />
       ) : isMobileFeaturePage ? (
         <Suspense
@@ -408,17 +427,6 @@ export default function App() {
             </main>
           }
         >
-          {modal === 'shop' && (
-            <ShopModal
-              isOpen
-              asPage
-              onClose={close}
-              currentUser={auth.currentUser}
-              onUpdateUser={auth.setCurrentUser}
-              authToken={auth.authToken}
-              initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
-            />
-          )}
           {modal === 'friends' && (
             <FriendsModal
               isOpen
@@ -457,6 +465,7 @@ export default function App() {
           actions={game.actions}
           social={social}
           onOpenFriends={open('friends')}
+          onOpenShop={open('shop')}
           onViewProfile={openProfile}
         />
       ) : game.screen === 'room' ? (
@@ -578,16 +587,6 @@ export default function App() {
             socket={game.socket}
             onViewProfile={openProfile}
             initialTab={gameMode === 'quiz' ? 'quiz' : gameMode === 'chess' ? 'chess' : gameMode === 'snakes' ? 'snakes' : 'ludo'}
-          />
-        )}
-        {!isMobileFeaturePage && modal === 'shop' && (
-          <ShopModal
-            isOpen
-            onClose={close}
-            currentUser={auth.currentUser}
-            onUpdateUser={auth.setCurrentUser}
-            authToken={auth.authToken}
-            initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
           />
         )}
         {!isMobileFeaturePage && modal === 'friends' && (

@@ -819,8 +819,10 @@ test('topup diamonds dengan duitku payment gateway (config, reference, verify, n
   const cfg = await cfgRes.json();
   assert.equal(cfg.success, true);
   assert.equal(cfg.gateway, 'duitku');
+  assert.equal(cfg.mode, 'direct_api');
   assert.equal(cfg.packages.length, 6);
-  assert.ok(cfg.popJsUrl);
+  assert.ok(Array.isArray(cfg.paymentMethods) && cfg.paymentMethods.length > 0);
+  assert.equal(cfg.popJsUrl, undefined);
 
   const p50 = cfg.packages.find(p => p.diamonds === 50);
   const p120 = cfg.packages.find(p => p.diamonds === 120);
@@ -852,21 +854,23 @@ test('topup diamonds dengan duitku payment gateway (config, reference, verify, n
   const token = reg.token;
   const initialPoints = reg.user.points; // default starter points (200)
 
-  // 3. Create Duitku transaction untuk paket 120 diamonds
+  // 3. Create Duitku transaction untuk paket 120 coins via Direct API (BCA VA)
   const duitkuRes = await fetch(`${url}/api/topup/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_120' })
+    body: JSON.stringify({ packageId: 'diamond_120', paymentMethod: 'BC' })
   });
   assert.equal(duitkuRes.status, 200);
   const duitkuBody = await duitkuRes.json();
   assert.equal(duitkuBody.success, true);
   assert.ok(duitkuBody.orderId);
-  assert.ok(duitkuBody.reference || duitkuBody.token);
-  assert.ok(duitkuBody.popJsUrl);
+  assert.ok(duitkuBody.reference);
+  assert.equal(duitkuBody.popJsUrl, undefined);
+  assert.equal(duitkuBody.paymentMethod, 'BC');
+  assert.ok(duitkuBody.vaNumber);
   assert.equal(duitkuBody.package.diamonds, 120);
 
   // 4. Simulasi pembayaran topup (simulate)
@@ -963,4 +967,12 @@ test('topup diamonds dengan duitku payment gateway (config, reference, verify, n
   });
   const finalUserData = await finalUserRes.json();
   assert.equal(finalUserData.user.points, initialPoints + 120 + 3250 + 260);
+});
+
+test('GET /ads.txt mengembalikan text/plain dengan publisher Google AdSense', async () => {
+  const res = await fetch(`${url}/ads.txt`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /text\/plain/i);
+  const body = await res.text();
+  assert.equal(body.trim(), 'google.com, pub-9965100396262528, DIRECT, f08c47fec0942fa0');
 });

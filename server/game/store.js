@@ -39,7 +39,7 @@ function publicPlayer(p, room) {
   // sessionId adalah rahasia reconnect; catatan dadu tidak dikirim agar lemparan tidak bisa dihitung;
   // stok item dikirim dalam bentuk ringkasan
   const { sessionId, items, diceStats, ...rest } = p;
-  return { ...rest, items: inventory.publicItems(p, room) };
+  return { ...rest, equippedSkin: p.equippedSkin || null, items: inventory.publicItems(p, room) };
 }
 
 function publicRoom(r) {
@@ -312,6 +312,22 @@ function stopAllTimers() {
   }
 }
 
+function syncPlayerSkin(userId, equippedSkin) {
+  if (!userId) return;
+  for (const room of rooms.values()) {
+    let changed = false;
+    for (const p of room.players || []) {
+      if (p.userId === userId) {
+        p.equippedSkin = equippedSkin || null;
+        changed = true;
+      }
+    }
+    if (changed) {
+      emitRoom(room);
+    }
+  }
+}
+
 module.exports = {
   rooms,
   stopAllTimers,
@@ -335,5 +351,6 @@ module.exports = {
   reassignHost,
   removeLobbyPlayer,
   cancelLobbyRemoval,
-  holdLobbySeat
+  holdLobbySeat,
+  syncPlayerSkin
 };

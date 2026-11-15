@@ -1214,25 +1214,25 @@ export default function ChessMasterScreen({
               <div className="cm-gameover-actions">
                 <button
                   type="button"
-                  className="btn btn--secondary btn--lg btn--block cm-btn-review"
+                  className="btn btn--secondary btn--block cm-btn-review"
                   onClick={() => startGameReview(0)}
                 >
-                  🔍 Review Permainan (Analisis Langkah demi Langkah)
+                  🔍 Review &amp; Analisis Langkah
                 </button>
 
                 <button
                   type="button"
-                  className="btn btn--primary btn--lg btn--block"
+                  className="btn btn--primary btn--block"
                   onClick={() => {
                     sound.playClick();
                     actions.requestRematch();
                   }}
                 >
                   {rematchRequestedByMe
-                    ? '⏳ Menunggu Lawan Menerima Rematch...'
+                    ? '⏳ Menunggu Lawan...'
                     : rematchRequestedByOpponent
-                    ? '⚡ Terima Tantangan Rematch Sekarang!'
-                    : '🔄 Main Lagi (Tantang Rematch)'}
+                    ? '⚡ Terima Tantangan Rematch!'
+                    : '🔄 Main Lagi (Rematch)'}
                 </button>
 
                 <div className="cm-gameover-actions__row">

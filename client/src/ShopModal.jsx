@@ -1,180 +1,332 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from './components/Modal';
 import Icon from './components/Icon';
+import { LudoSkinPreview } from './components/game/LudoSkinPawn';
+import { useItemCatalogState } from './items';
 import { sound } from './sound';
 import { storage } from './storage';
-import { useItemCatalogState } from './items';
 
-const KIND_LABELS = {
-  active: 'Dipakai manual saat bertanding',
-  passive: 'Bekerja otomatis',
-  reactive: 'Muncul pilihan saat dibutuhkan'
-};
+function formatIdr(value) {
+  return `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
+}
 
-const DEFAULT_DIAMOND_PACKAGES = [
+function formatDateTime(iso) {
+  if (!iso) return '-';
+  try {
+    return new Date(iso).toLocaleString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function txTypeLabel(type) {
+  switch (type) {
+    case 'TOPUP':
+      return { label: 'Top-Up Diamonds', tone: 'success' };
+    case 'CONVERSION':
+      return { label: 'Konversi Coins', tone: 'info' };
+    case 'SKIN_PURCHASE':
+      return { label: 'Beli Skin Ludo', tone: 'warning' };
+    case 'REFUND':
+      return { label: 'Refund', tone: 'brand' };
+    case 'ADMIN_ADJUSTMENT':
+      return { label: 'Penyesuaian Admin', tone: 'neutral' };
+    default:
+      return { label: type || '-', tone: 'neutral' };
+  }
+}
+
+function orderStatusTone(status) {
+  switch (status) {
+    case 'PAID':
+      return 'success';
+    case 'PENDING':
+      return 'warning';
+    case 'FAILED':
+    case 'CANCELLED':
+    case 'EXPIRED':
+      return 'error';
+    default:
+      return 'neutral';
+  }
+}
+
+function methodCategoryLabel(category) {
+  if (category === 'qris') return 'QRIS';
+  if (category === 'ewallet') return 'E-Wallet';
+  return 'Virtual Account';
+}
+
+const DEFAULT_DUITKU_METHODS = [
   {
-    id: 'diamond_50',
-    name: '50 Coins',
-    diamonds: 50,
-    price: 5000,
-    formattedPrice: 'Rp 5.000',
-    subtitle: 'Paket pemula',
-    description: 'Paket pemula',
-    badge: null,
-    icon: 'coin'
+    code: 'SP',
+    label: 'QRIS (All E-Wallet & M-Banking)',
+    category: 'qris',
+    bank: 'QRIS',
+    badge: 'Instan',
+    description: 'Scan QR dari GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin, Wondr.'
   },
   {
-    id: 'diamond_120',
-    name: '120 Coins',
-    diamonds: 120,
-    price: 10000,
-    formattedPrice: 'Rp 10.000',
-    subtitle: 'Paket hemat',
-    description: 'Paket hemat',
+    code: 'M2',
+    label: 'Mandiri Virtual Account',
+    category: 'va',
+    bank: 'Mandiri',
+    badge: 'VA',
+    description: 'Transfer via Livin by Mandiri atau ATM Mandiri.'
+  },
+  {
+    code: 'BC',
+    label: 'BCA Virtual Account',
+    category: 'va',
+    bank: 'BCA',
     badge: 'Populer',
-    icon: 'coin'
+    description: 'Bayar lewat myBCA, BCA Mobile, KlikBCA, atau ATM BCA.'
   },
   {
-    id: 'diamond_260',
-    name: '260 Coins',
-    diamonds: 260,
-    price: 20000,
-    formattedPrice: 'Rp 20.000',
-    subtitle: 'Paket reguler',
-    description: 'Paket reguler',
-    badge: null,
-    icon: 'coin'
+    code: 'I1',
+    label: 'BNI Virtual Account',
+    category: 'va',
+    bank: 'BNI',
+    badge: 'VA',
+    description: 'Transfer via Wondr / BNI Mobile Banking atau ATM BNI.'
   },
   {
-    id: 'diamond_700',
-    name: '700 Coins',
-    diamonds: 700,
-    price: 50000,
-    formattedPrice: 'Rp 50.000',
-    subtitle: 'Paket premium',
-    description: 'Paket premium',
-    badge: 'Bonus 100',
-    icon: 'coin'
+    code: 'SA',
+    label: 'ShopeePay E-Wallet',
+    category: 'ewallet',
+    bank: 'ShopeePay',
+    badge: 'E-Wallet',
+    description: 'Bayar instan melalui aplikasi ShopeePay.'
   },
   {
-    id: 'diamond_1500',
-    name: '1.500 Coins',
-    diamonds: 1500,
-    price: 100000,
-    formattedPrice: 'Rp 100.000',
-    subtitle: 'Paket besar',
-    description: 'Paket besar',
-    badge: 'Bonus 250',
-    icon: 'crown'
-  },
-  {
-    id: 'diamond_3250',
-    name: '3.250 Coins',
-    diamonds: 3250,
-    price: 200000,
-    formattedPrice: 'Rp 200.000',
-    subtitle: 'Paket sultan',
-    description: 'Paket sultan',
-    badge: 'Bonus 750',
-    icon: 'crown'
+    code: 'DA',
+    label: 'DANA E-Wallet',
+    category: 'ewallet',
+    bank: 'DANA',
+    badge: 'E-Wallet',
+    description: 'Bayar langsung lewat aplikasi DANA di ponselmu.'
   }
 ];
 
-function loadDuitkuPop(popJsUrl) {
-  return new Promise((resolve, reject) => {
-    if (window.checkout && window.checkout.process) return resolve(window.checkout);
-    const scriptId = 'duitku-pop-script';
-    let script = document.getElementById(scriptId);
-    if (script) {
-      if (window.checkout && window.checkout.process) return resolve(window.checkout);
-      script.addEventListener('load', () => resolve(window.checkout));
-      script.addEventListener('error', () => reject(new Error('Gagal memuat Duitku POP')));
-      return;
-    }
-    script = document.createElement('script');
-    script.id = scriptId;
-    script.src = popJsUrl || 'https://app-sandbox.duitku.com/lib/js/duitku.js';
-    script.async = true;
-    script.onload = () => {
-      if (window.checkout && window.checkout.process) resolve(window.checkout);
-      else reject(new Error('Duitku POP tidak tersedia'));
-    };
-    script.onerror = () => reject(new Error('Koneksi Duitku POP gagal'));
-    document.head.appendChild(script);
-  });
-}
+function DuitkuPaymentPanel({
+  payment,
+  verifying,
+  cancelling,
+  copiedField,
+  onCopy,
+  onCheckStatus,
+  onCancelOrder,
+  onBack
+}) {
+  if (!payment) return null;
+  const qrSrc =
+    payment.qrCodeUrl ||
+    (payment.qrString
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(payment.qrString)}`
+      : null);
 
-function ShopItemCard({ item, points, ownedCount, currentUser, buyingId, onBuy }) {
-  const affordable = points >= item.price;
-  const isQuizItem = item.game === 'quiz';
   return (
-    <li className="shop-item card">
-      <div className="shop-item__head">
-        <span className="shop-item__icon" aria-hidden="true">
-          <Icon name={item.icon || item.id} size={26} />
-        </span>
-        <div>
-          <div className="shop-item__title-row">
-            <h3>{item.name}</h3>
-            <span className={`badge ${isQuizItem ? 'badge--info' : 'badge--brand'}`}>
-              {isQuizItem ? 'Monster Quiz Battle' : 'JakLudo'}
-            </span>
+    <div className="topup-modal-view">
+      <div className="topup-summary-box">
+        <div className="mp-payment-meta">
+          <div className="shop-item__badges">
+            <span className="badge badge--warning">Menunggu Pembayaran</span>
           </div>
-          <p className="muted">
-            {isQuizItem ? 'Dipakai saat menjawab soal (50:50)' : KIND_LABELS[item.kind] || 'Bekerja otomatis'} · dimiliki {ownedCount}
-          </p>
+          <h4>{payment.title}</h4>
+          <div className="muted mp-payment-ids">
+            <span>Order ID: <code className="code-text">{payment.orderId}</code></span>
+            {payment.reference && <span> · Ref: <code className="code-text">{payment.reference}</code></span>}
+          </div>
+          <div className="muted mp-payment-method-line">
+            Metode: <strong>{payment.paymentMethodName || payment.paymentMethod || 'Pembayaran Online'}</strong>
+          </div>
+        </div>
+        <div className="mp-payment-amount-col">
+          <span className="muted">Total Tagihan</span>
+          <strong className="mp-payment-amount">{formatIdr(payment.amountIdr)}</strong>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => onCopy(String(payment.amountIdr), 'amount')}
+          >
+            {copiedField === 'amount' ? '✓ Nominal Disalin' : 'Salin Nominal'}
+          </button>
         </div>
       </div>
+
+      <div className="mp-payment-screen">
+        {qrSrc && (
+          <div className="mp-payment-block">
+            <h4>Scan QRIS untuk Menyelesaikan Pembayaran</h4>
+            <div className="topup-qr-container">
+              <img src={qrSrc} alt="Kode QRIS PlayGo" className="topup-qr-image" />
+              <div className="mp-qr-caption">PlayGo Indonesia · QRIS Resmi</div>
+            </div>
+            <p className="muted mp-payment-hint">
+              Buka aplikasi <strong>GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin by Mandiri</strong>, atau aplikasi perbankan apa pun yang mendukung QRIS, lalu pindai kode QR di atas.
+            </p>
+            {payment.qrString && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => onCopy(payment.qrString, 'qr')}
+              >
+                {copiedField === 'qr' ? '✓ Kode QRIS Disalin' : 'Salin Kode QRIS'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {payment.vaNumber && (
+          <div className="mp-payment-block">
+            <h4>Transfer ke {payment.bank || payment.paymentMethodName || 'Virtual Account'}</h4>
+            <div className="topup-va-display">
+              <span className="muted">Nomor Virtual Account</span>
+              <span className="topup-va-number">{payment.vaNumber}</span>
+              <button
+                type="button"
+                className="btn btn--secondary topup-copy-btn"
+                onClick={() => onCopy(payment.vaNumber, 'va')}
+              >
+                {copiedField === 'va' ? '✓ Nomor VA Disalin!' : 'Salin Nomor Virtual Account'}
+              </button>
+            </div>
+            <p className="muted mp-payment-hint">
+              Transfer sesuai nominal pas sebesar <strong>{formatIdr(payment.amountIdr)}</strong> lewat m-banking, internet banking, atau ATM. Saldo otomatis bertambah begitu pembayaran terkonfirmasi.
+            </p>
+          </div>
+        )}
+
+        {payment.paymentUrl && (
+          <div className="mp-payment-url-box">
+            {!qrSrc && !payment.vaNumber && (
+              <>
+                <h4>Lanjutkan Pembayaran via {payment.paymentMethodName || 'E-Wallet'}</h4>
+                <p className="muted mp-payment-hint">
+                  Klik tombol di bawah untuk menyelesaikan pembayaran melalui aplikasi atau halaman pembayaran resmi.
+                </p>
+              </>
+            )}
+            <a
+              href={payment.paymentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`btn ${!qrSrc && !payment.vaNumber ? 'btn--primary' : 'btn--secondary btn--sm'}`}
+            >
+              {!qrSrc && !payment.vaNumber ? 'Lanjutkan Pembayaran ↗' : 'Lihat Panduan Pembayaran ↗'}
+            </a>
+          </div>
+        )}
+
+        <div className="topup-live-indicator">
+          <span className="topup-live-dot" />
+          <span>Memantau status pembayaran secara otomatis...</span>
+        </div>
+
+        <div className="mp-payment-actions">
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={verifying}
+            onClick={onCheckStatus}
+          >
+            {verifying ? 'Memeriksa...' : 'Cek Status Pembayaran'}
+          </button>
+          {onCancelOrder && (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={cancelling || verifying}
+              onClick={onCancelOrder}
+            >
+              {cancelling ? 'Membatalkan...' : 'Batalkan Pesanan'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={onBack}
+          >
+            ← Kembali ke Paket
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LegacyShopItemCard({ item, points, ownedCount, currentUser, buyingId, onBuy }) {
+  const canAfford = points >= item.price;
+  const isBusy = buyingId === item.id;
+  const disabled = !currentUser || !canAfford || isBusy;
+
+  return (
+    <li className={`shop-item card mp-product-card shop-item--${item.game || 'ludo'}`}>
+      <div className="shop-item__head">
+        <span className="shop-item__icon" aria-hidden="true">{item.icon || '🎁'}</span>
+        <div className="shop-item__title-wrap">
+          <strong>{item.name}</strong>
+          <div className="shop-item__badges">
+            {item.badge && (
+              <span className="badge" style={{ '--badge-color': item.badgeColor || 'var(--brand)' }}>
+                {item.badge}
+              </span>
+            )}
+            {currentUser && ownedCount > 0 && (
+              <span className="badge badge--success">Dimiliki: {ownedCount}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
       <p className="shop-item__desc">{item.description}</p>
-      {item.highlight && <p className="shop-item__note">{item.highlight}</p>}
-      <div className="shop-item__buy">
+      {item.highlight && <p className="shop-item__highlight muted">{item.highlight}</p>}
+
+      <div className="shop-item__foot">
         <span className="shop-item__price">
-          <Icon name="coin" size={16} /> {item.price} Coins
+          <Icon name="coin" size={16} /> <strong>{item.price}</strong> Coins
         </span>
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={!currentUser || !affordable || buyingId === item.id}
+          className={`btn btn--sm ${canAfford && currentUser ? 'btn--primary' : 'btn--secondary'}`}
+          disabled={disabled}
           onClick={() => onBuy(item)}
         >
-          {buyingId === item.id ? 'Membeli...' : !currentUser ? 'Masuk dulu' : affordable ? `Beli ${item.name}` : 'Coins kurang'}
+          {isBusy ? 'Membeli...' : !currentUser ? 'Perlu Login' : !canAfford ? 'Coins Kurang' : 'Beli Item'}
         </button>
       </div>
     </li>
   );
 }
 
-function TopupPackageCard({ pkg, currentUser, topupLoadingId, onTopup }) {
-  const isSultan = pkg.id === 'diamond_3250';
-  const isPopular = pkg.id === 'diamond_120' || pkg.badge === 'Populer';
-  const isBonus = Boolean(pkg.badge && pkg.badge.startsWith('Bonus'));
-  const badgeClass = isSultan ? 'badge--sultan' : isBonus ? 'badge--bonus' : isPopular ? 'badge--popular' : 'badge--info';
-
+function LegacyTopupCard({ pkg, currentUser, topupLoadingId, onTopup }) {
+  const isBusy = topupLoadingId === pkg.id;
   return (
-    <li className={`shop-item card shop-item--topup ${isPopular ? 'shop-item--topup-popular' : ''}`}>
+    <li className="shop-item card mp-product-card shop-item--topup">
       <div className="shop-item__head">
-        <span className="shop-item__icon" aria-hidden="true" style={{ color: isSultan ? '#f59e0b' : '#eab308' }}>
-          <Icon name={pkg.icon || 'coin'} size={28} />
+        <span className="shop-item__icon" aria-hidden="true">
+          <Icon name={pkg.icon === 'crown' ? 'crown' : 'coin'} size={24} />
         </span>
-        <div>
-          <div className="shop-item__title-row">
-            <h3>{pkg.name}</h3>
-            {pkg.badge && <span className={`badge ${badgeClass}`}>{pkg.badge}</span>}
-          </div>
-          <p className="muted">{pkg.subtitle || pkg.description || 'Duitku Payment'}</p>
+        <div className="shop-item__title-wrap">
+          <strong>{pkg.name}</strong>
+          {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
         </div>
       </div>
-      <div className="shop-item__buy">
-        <div className="topup-card__price">
-          {pkg.formattedPrice}
-        </div>
+      <p className="shop-item__desc">{pkg.description}</p>
+      <div className="shop-item__foot">
+        <span className="topup-price">{pkg.formattedPrice}</span>
         <button
           type="button"
-          className={`btn ${isPopular || isSultan ? 'btn--primary' : 'btn--secondary'}`}
-          disabled={!currentUser || topupLoadingId === pkg.id}
+          className="btn btn--primary btn--sm"
+          disabled={!currentUser || isBusy}
           onClick={() => onTopup(pkg)}
         >
-          {topupLoadingId === pkg.id ? 'Memproses...' : !currentUser ? 'Masuk dulu' : `Beli (${pkg.formattedPrice})`}
+          {isBusy ? 'Memproses...' : !currentUser ? 'Login' : 'Buat Tagihan'}
         </button>
       </div>
     </li>
@@ -182,371 +334,2091 @@ function TopupPackageCard({ pkg, currentUser, topupLoadingId, onTopup }) {
 }
 
 export default function ShopModal({
-  isOpen,
+  isOpen = true,
   onClose,
-  asPage = false,
   currentUser,
   onUpdateUser,
   authToken,
-  initialGame = 'all'
+  initialGame = 'all',
+  onOpenAuth
 }) {
-  const [buying, setBuying] = useState(null);
-  const [topupLoadingId, setTopupLoadingId] = useState(null);
-  const [feedback, setFeedback] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState(initialGame || 'all');
-  const [diamondPackages, setDiamondPackages] = useState(DEFAULT_DIAMOND_PACKAGES);
-  const [popConfig, setPopConfig] = useState(null);
-
   const catalog = useItemCatalogState();
+  const token = authToken || storage.get('token') || '';
+  const isAdmin = Boolean(currentUser?.isAdmin || currentUser?.role === 'admin');
 
-  useEffect(() => {
-    if (isOpen && initialGame) {
-      setSelectedCategory(initialGame);
+  const [activeTab, setActiveTab] = useState(initialGame === 'quiz' ? 'items' : 'skins');
+  const [feedback, setFeedback] = useState(null);
+
+  // Dual currency economy state
+  const [wallet, setWallet] = useState(null);
+  const [economySettings, setEconomySettings] = useState({
+    coinsPerDiamond: 100,
+    minConvertDiamonds: 10,
+    maxConvertDiamonds: 50,
+    conversionEnabled: true
+  });
+  const [diamondPackages, setDiamondPackages] = useState([]);
+  const [paymentOrders, setPaymentOrders] = useState([]);
+  const [skins, setSkins] = useState([]);
+  const [equippedSkinId, setEquippedSkinId] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [txTypeFilter, setTxTypeFilter] = useState('');
+
+  // Skin Marketplace Filters & Interactive Preview
+  const [skinFilter, setSkinFilter] = useState('all');
+  const [skinQuery, setSkinQuery] = useState('');
+  const [inspectedSkinId, setInspectedSkinId] = useState(null);
+
+  // Conversion & Duitku Direct API Top-Up State
+  const [convertDiamonds, setConvertDiamonds] = useState(10);
+  const [converting, setConverting] = useState(false);
+  const [duitkuMethods, setDuitkuMethods] = useState(DEFAULT_DUITKU_METHODS);
+  const [methodCategoryFilter, setMethodCategoryFilter] = useState('all');
+  const [paymentMethod, setPaymentMethod] = useState('SP');
+  const [selectedPkgId, setSelectedPkgId] = useState('');
+  const [creatingOrderPkgId, setCreatingOrderPkgId] = useState('');
+  const [checkingOrderId, setCheckingOrderId] = useState('');
+  const [activePayment, setActivePayment] = useState(null);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
+  const [copiedField, setCopiedField] = useState('');
+  const [confirmSkin, setConfirmSkin] = useState(null);
+  const [skinActionId, setSkinActionId] = useState('');
+
+  // Legacy Coins Shop & Coins Top-Up
+  const [legacyCategory, setLegacyCategory] = useState(initialGame === 'quiz' ? 'quiz' : 'all');
+  const [legacyPackages, setLegacyPackages] = useState([]);
+  const [buyingLegacyId, setBuyingLegacyId] = useState('');
+  const [topupLegacyId, setTopupLegacyId] = useState('');
+
+  // Admin state
+  const [adminOverview, setAdminOverview] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminSubTab, setAdminSubTab] = useState('config');
+  const [adminSettingsForm, setAdminSettingsForm] = useState({
+    coinsPerDiamond: 100,
+    minConvertDiamonds: 10,
+    maxConvertDiamonds: 50,
+    conversionEnabled: true
+  });
+  const [adminPkgForm, setAdminPkgForm] = useState({
+    id: '',
+    name: '',
+    diamonds: 10,
+    bonusDiamonds: 0,
+    priceIdr: 5000,
+    badge: '',
+    sortOrder: 5,
+    isActive: true
+  });
+  const [adminSkinForm, setAdminSkinForm] = useState({
+    id: '',
+    name: '',
+    description: '',
+    priceDiamonds: 25,
+    rarity: 'Rare',
+    assetKey: 'classic_gold',
+    accentColor: '#38bdf8',
+    sortOrder: 8,
+    isActive: true
+  });
+  const [adminAdjustForm, setAdminAdjustForm] = useState({
+    userId: '',
+    amount: 10,
+    txType: 'ADMIN_ADJUSTMENT',
+    reason: ''
+  });
+
+  const authHeaders = useCallback(() => {
+    const h = { 'Content-Type': 'application/json' };
+    if (token) h.Authorization = `Bearer ${token}`;
+    return h;
+  }, [token]);
+
+  const loadEconomyData = useCallback(async () => {
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const [pkgRes, skinRes] = await Promise.all([
+        fetch('/api/economy/packages', { headers }),
+        fetch('/api/economy/skins', { headers })
+      ]);
+      const pkgData = await pkgRes.json().catch(() => ({}));
+      const skinData = await skinRes.json().catch(() => ({}));
+
+      if (pkgRes.ok && pkgData.success) {
+        const pkgs = pkgData.packages || [];
+        setDiamondPackages(pkgs);
+        setSelectedPkgId(prev => {
+          if (prev && pkgs.some(p => p.id === prev)) return prev;
+          return pkgs.find(p => p.id === 'pkg_popular')?.id || pkgs[0]?.id || '';
+        });
+        if (Array.isArray(pkgData.paymentMethods) && pkgData.paymentMethods.length > 0) {
+          setDuitkuMethods(pkgData.paymentMethods);
+        }
+        if (pkgData.settings) {
+          setEconomySettings(pkgData.settings);
+          setConvertDiamonds(prev => {
+            const min = pkgData.settings.minConvertDiamonds || 10;
+            const max = pkgData.settings.maxConvertDiamonds || 50;
+            if (prev < min) return min;
+            if (prev > max) return max;
+            return prev;
+          });
+        }
+        if (pkgData.wallet) setWallet(pkgData.wallet);
+      }
+      if (skinRes.ok && skinData.success) {
+        setSkins(skinData.skins || []);
+        setEquippedSkinId(skinData.equippedSkinId || null);
+      }
+
+      if (token) {
+        const [wRes, txRes, ordRes] = await Promise.all([
+          fetch('/api/economy/wallet', { headers }),
+          fetch(`/api/economy/transactions${txTypeFilter ? `?txType=${encodeURIComponent(txTypeFilter)}` : ''}`, { headers }),
+          fetch('/api/economy/topup/history', { headers })
+        ]);
+        const wData = await wRes.json().catch(() => ({}));
+        const txData = await txRes.json().catch(() => ({}));
+        const ordData = await ordRes.json().catch(() => ({}));
+        if (wRes.ok && wData.success) {
+          setWallet(wData.wallet);
+          if (wData.user) onUpdateUser?.(wData.user);
+        }
+        if (txRes.ok && txData.success) {
+          setTransactions(txData.transactions || []);
+        }
+        if (ordRes.ok && ordData.success) {
+          setPaymentOrders(ordData.orders || []);
+        }
+      }
+    } catch {
+      // Abaikan gangguan jaringan sementara
     }
-    if (!isOpen) {
-      setFeedback(null);
+  }, [token, txTypeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadLegacyTopup = useCallback(async () => {
+    try {
+      const res = await fetch('/api/topup/config');
+      const data = await res.json().catch(() => ({}));
+      if (data?.success) {
+        setLegacyPackages(data.packages || []);
+        if (Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0) {
+          setDuitkuMethods(data.paymentMethods);
+        }
+      }
+    } catch {}
+  }, []);
+
+  const loadLivePaymentMethods = useCallback(async amountIdr => {
+    try {
+      const amount = Math.max(1000, Number(amountIdr) || 10000);
+      const res = await fetch(`/api/economy/payment-methods?amount=${encodeURIComponent(amount)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success && Array.isArray(data.methods) && data.methods.length > 0) {
+        setDuitkuMethods(data.methods);
+        setPaymentMethod(prev => (data.methods.some(m => m.code === prev) ? prev : data.methods[0].code));
+      }
+    } catch {}
+  }, []);
+
+  const loadAdminOverview = useCallback(async () => {
+    if (!token || !isAdmin) return;
+    setAdminLoading(true);
+    try {
+      const res = await fetch('/api/admin/economy/overview?limit=80', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setAdminOverview(data);
+        if (data.settings) setAdminSettingsForm(data.settings);
+      }
+    } catch {} finally {
+      setAdminLoading(false);
     }
-  }, [isOpen, initialGame]);
+  }, [token, isAdmin]);
 
   useEffect(() => {
     if (!isOpen) return;
-    let active = true;
-    fetch('/api/topup/config')
-      .then(res => res.json())
-      .then(data => {
-        if (!active || !data.success) return;
-        if (Array.isArray(data.packages) && data.packages.length > 0) {
-          setDiamondPackages(data.packages);
-        }
-        setPopConfig(data);
-        if (data.popJsUrl) {
-          loadDuitkuPop(data.popJsUrl).catch(() => {});
-        }
-      })
-      .catch(() => {});
-    return () => { active = false; };
-  }, [isOpen]);
-
-  const points = currentUser?.points ?? 0;
-  const owned = currentUser?.inventory || {};
-
-  const ludoItems = catalog.items.filter(it => it.game !== 'quiz');
-  const quizItems = catalog.items.filter(it => it.game === 'quiz');
-
-  const groups = [
-    {
-      key: 'ludo',
-      name: 'JakLudo (Papan Ludo)',
-      icon: 'dice',
-      badge: `${ludoItems.length} Item`,
-      desc: 'Item taktik & perlindungan bidak untuk pertandingan papan JakLudo.',
-      items: ludoItems
-    },
-    {
-      key: 'quiz',
-      name: 'Monster Quiz Battle',
-      icon: 'swords',
-      badge: `${quizItems.length} Item`,
-      desc: 'Item bantuan eliminasi jawaban (50:50) untuk duel kuis pengetahuan & matematika.',
-      items: quizItems
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    loadEconomyData();
+    loadLegacyTopup();
+    if (isAdmin && activeTab === 'admin') {
+      loadAdminOverview();
     }
-  ];
+  }, [isOpen, loadEconomyData, loadLegacyTopup, isAdmin, activeTab, loadAdminOverview]);
 
-  const visibleGroups = selectedCategory === 'all'
-    ? groups.filter(g => g.items.length > 0)
-    : selectedCategory === 'topup'
-      ? []
-      : groups.filter(g => g.key === selectedCategory);
+  const selectedPkg =
+    diamondPackages.find(p => p.id === selectedPkgId) ||
+    diamondPackages[0] ||
+    null;
 
-  const buy = async item => {
-    setBuying(item.id);
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'diamonds') return;
+    if (selectedPkg?.priceIdr) {
+      loadLivePaymentMethods(selectedPkg.priceIdr);
+    }
+  }, [isOpen, activeTab, selectedPkg?.priceIdr, loadLivePaymentMethods]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = e => {
+      if (e.key === 'Escape' && !confirmSkin) {
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, confirmSkin, onClose]);
+
+  const verifyDiamondOrder = useCallback(async (orderId, silentIfPending = false) => {
+    if (!orderId) return;
+    setCheckingOrderId(orderId);
+    setVerifyingPayment(true);
+    try {
+      const res = await fetch(`/api/economy/topup/status/${encodeURIComponent(orderId)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        if (data.wallet) setWallet(data.wallet);
+        if (data.order?.status === 'PAID') {
+          sound.playShopPurchase();
+          setActivePayment(prev => (prev?.orderId === orderId ? null : prev));
+          setFeedback({
+            type: 'success',
+            message: `Pembayaran ${orderId} terkonfirmasi LUNAS! +${data.order.totalDiamonds} Diamonds telah masuk ke akunmu.`
+          });
+          await loadEconomyData();
+        } else if (['FAILED', 'EXPIRED', 'CANCELLED'].includes(data.order?.status)) {
+          setActivePayment(prev => (prev?.orderId === orderId ? null : prev));
+          setFeedback({
+            type: 'error',
+            message: `Pesanan ${orderId} berstatus ${data.order.status}.`
+          });
+          await loadEconomyData();
+        } else if (!silentIfPending) {
+          setFeedback({
+            type: 'info',
+            message: `Status order ${orderId}: masih menunggu pembayaran (${data.order?.status || 'PENDING'}).`
+          });
+          await loadEconomyData();
+        }
+      }
+    } catch {} finally {
+      setCheckingOrderId('');
+      setVerifyingPayment(false);
+    }
+  }, [token, loadEconomyData]);
+
+  const verifyLegacyCoinsOrder = useCallback(async (orderId, silentIfPending = false) => {
+    if (!orderId) return;
+    setCheckingOrderId(orderId);
+    setVerifyingPayment(true);
+    try {
+      const res = await fetch('/api/topup/verify', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ orderId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.status === 'success') {
+        sound.playShopPurchase();
+        if (data.user) onUpdateUser?.(data.user);
+        setActivePayment(prev => (prev?.orderId === orderId ? null : prev));
+        setFeedback({
+          type: 'success',
+          message: `Pembayaran Coins ${orderId} terkonfirmasi! +${data.coins || data.diamonds} Coins telah ditambahkan.`
+        });
+        await loadEconomyData();
+      } else if (!silentIfPending) {
+        setFeedback({
+          type: 'info',
+          message: data.message || `Pesanan ${orderId} masih menunggu pembayaran.`
+        });
+      }
+    } catch {} finally {
+      setCheckingOrderId('');
+      setVerifyingPayment(false);
+    }
+  }, [authHeaders, loadEconomyData, onUpdateUser]);
+
+  // Realtime auto-polling ke backend saat layar instruksi pembayaran Duitku API terbuka
+  const activePaymentRef = useRef(activePayment);
+  activePaymentRef.current = activePayment;
+  useEffect(() => {
+    if (!isOpen || !activePayment?.orderId) return undefined;
+    const orderId = activePayment.orderId;
+    const mode = activePayment.mode;
+    const timer = setInterval(() => {
+      const cur = activePaymentRef.current;
+      if (!cur || cur.orderId !== orderId) return;
+      if (mode === 'diamonds') {
+        verifyDiamondOrder(orderId, true);
+      } else {
+        verifyLegacyCoinsOrder(orderId, true);
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [isOpen, activePayment?.orderId, activePayment?.mode, verifyDiamondOrder, verifyLegacyCoinsOrder]);
+
+  if (!isOpen) return null;
+
+  const points = Number(wallet?.coins ?? currentUser?.points ?? 0);
+  const diamonds = Number(wallet?.diamonds ?? currentUser?.diamonds ?? 0);
+  const ownedItems = currentUser?.inventory || {};
+
+  const copyToClipboard = async (text, field) => {
+    if (!text) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      sound.playClick();
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(''), 2200);
+    } catch {}
+  };
+
+  // ---- CONVERSION HANDLER ----
+  const handleConvert = async e => {
+    e?.preventDefault?.();
+    if (!currentUser) {
+      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk menukar Coins ke Diamonds.' });
+      return;
+    }
+    const qty = Number(convertDiamonds);
+    setConverting(true);
+    setFeedback(null);
+    sound.playClick();
+    try {
+      const idempotencyKey = `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const res = await fetch('/api/economy/convert', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ diamonds: qty, idempotencyKey })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Konversi Coins gagal.');
+      sound.playShopPurchase();
+      if (data.wallet) setWallet(data.wallet);
+      if (data.user) onUpdateUser?.(data.user);
+      setFeedback({
+        type: 'success',
+        message: `Berhasil menukar ${data.conversion?.coinsSpent?.toLocaleString('id-ID')} Coins menjadi +${data.conversion?.diamondsReceived} Diamonds!`
+      });
+      loadEconomyData();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  // ---- DUITKU DIRECT API v2 DIAMOND TOP-UP ----
+  const handleCreateDiamondTopup = async pkg => {
+    if (!pkg) return;
+    if (!currentUser) {
+      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk top-up Diamonds.' });
+      return;
+    }
+    setCreatingOrderPkgId(pkg.id);
+    setFeedback(null);
+    sound.playClick();
+    try {
+      const res = await fetch('/api/economy/topup/create', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ packageId: pkg.id, paymentMethod: paymentMethod || 'SP' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membuat tagihan top-up Diamonds.');
+
+      const order = data.order;
+      const inv = data.invoice || {};
+      const selectedMethodObj = duitkuMethods.find(m => m.code === (inv.paymentMethod || paymentMethod));
+
+      setActivePayment({
+        mode: 'diamonds',
+        orderId: order.id,
+        reference: inv.reference || order.gatewayReference,
+        title: `${order.packageName} (${order.totalDiamonds} Diamonds)`,
+        amountIdr: order.amountIdr,
+        paymentMethod: inv.paymentMethod || order.paymentMethod || paymentMethod,
+        paymentMethodName: inv.paymentMethodName || selectedMethodObj?.label || order.paymentMethod,
+        paymentCategory: inv.paymentCategory || selectedMethodObj?.category || 'va',
+        bank: inv.bank || selectedMethodObj?.bank || null,
+        vaNumber: inv.vaNumber || order.vaNumber || null,
+        qrString: inv.qrString || order.qrString || null,
+        qrCodeUrl: inv.qrCodeUrl || order.qrCodeUrl || null,
+        paymentUrl: inv.paymentUrl || order.paymentUrl || null,
+        status: order.status
+      });
+
+      setFeedback({
+        type: 'info',
+        message: `Tagihan ${order.id} (${formatIdr(order.amountIdr)}) siap dibayar. Selesaikan pembayaran sesuai instruksi di bawah.`
+      });
+      loadEconomyData();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setCreatingOrderPkgId('');
+    }
+  };
+
+  const openOrderInstruction = ord => {
+    if (!ord) return;
+    sound.playClick();
+    const raw = ord.rawCreateResponse || {};
+    const methodObj = duitkuMethods.find(m => m.code === ord.paymentMethod);
+    setActivePayment({
+      mode: 'diamonds',
+      orderId: ord.id,
+      reference: ord.gatewayReference || raw.reference || null,
+      title: `${ord.packageName} (${ord.totalDiamonds} Diamonds)`,
+      amountIdr: ord.amountIdr,
+      paymentMethod: ord.paymentMethod || raw.paymentMethod,
+      paymentMethodName: ord.paymentMethodName || raw.paymentMethodName || methodObj?.label || ord.paymentMethod,
+      paymentCategory: ord.paymentCategory || raw.paymentCategory || methodObj?.category || 'va',
+      bank: ord.bank || raw.bank || methodObj?.bank || null,
+      vaNumber: ord.vaNumber || raw.vaNumber || null,
+      qrString: ord.qrString || raw.qrString || null,
+      qrCodeUrl: ord.qrCodeUrl || raw.qrCodeUrl || null,
+      paymentUrl: ord.paymentUrl || raw.paymentUrl || null,
+      status: ord.status
+    });
+    window.scrollTo({ top: 180, behavior: 'smooth' });
+  };
+
+  const cancelDiamondOrder = async orderId => {
+    setCheckingOrderId(orderId);
+    try {
+      const res = await fetch('/api/economy/topup/cancel', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ orderId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membatalkan order.');
+      setActivePayment(prev => (prev?.orderId === orderId ? null : prev));
+      setFeedback({ type: 'info', message: `Order ${orderId} dibatalkan.` });
+      await loadEconomyData();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setCheckingOrderId('');
+    }
+  };
+
+  // ---- LUDO SKIN PURCHASE & EQUIP ----
+  const executeBuySkin = async skin => {
+    if (!skin || !currentUser) return;
+    setSkinActionId(skin.id);
+    setFeedback(null);
+    sound.playClick();
+    try {
+      const res = await fetch('/api/economy/skins/purchase', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          skinId: skin.id,
+          idempotencyKey: `skin_${skin.id}_${Date.now()}`
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membeli skin.');
+      sound.playShopPurchase();
+      if (data.wallet) setWallet(data.wallet);
+      if (data.user) onUpdateUser?.(data.user);
+      setConfirmSkin(null);
+      setFeedback({
+        type: 'success',
+        message: `Selamat! Skin "${skin.name}" sekarang menjadi milikmu. Klik Pasang untuk memakainya di JakLudo!`
+      });
+      await loadEconomyData();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+      setConfirmSkin(null);
+    } finally {
+      setSkinActionId('');
+    }
+  };
+
+  const handleEquipSkin = async skinId => {
+    if (!currentUser) return;
+    setSkinActionId(skinId || 'default');
+    setFeedback(null);
+    sound.playClick();
+    try {
+      const res = await fetch('/api/economy/skins/equip', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ skinId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal memasang skin.');
+      sound.playShopPurchase();
+      setEquippedSkinId(data.equippedSkinId || null);
+      if (data.user) onUpdateUser?.(data.user);
+      setFeedback({
+        type: 'success',
+        message: data.equippedSkin
+          ? `Skin "${data.equippedSkin.name}" aktif untuk bidak JakLudo kamu!`
+          : 'Skin bidak dikembalikan ke Standar PlayGo.'
+      });
+      await loadEconomyData();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setSkinActionId('');
+    }
+  };
+
+  // ---- LEGACY COINS SHOP & DIRECT API TOP-UP ----
+  const buyLegacyItem = async item => {
+    setBuyingLegacyId(item.id);
     setFeedback(null);
     sound.playClick();
     try {
       const res = await fetch('/api/shop/buy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken || storage.get('token')}` },
+        headers: authHeaders(),
         body: JSON.stringify({ itemId: item.id })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error || 'Pembelian gagal. Coba lagi.');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Pembelian gagal.');
       sound.playShopPurchase();
-      setFeedback({ type: 'success', message: `${item.name} berhasil dibeli. Sisa Coins: ${data.user?.points ?? points - item.price}.` });
+      setFeedback({ type: 'success', message: `${item.name} berhasil dibeli.` });
       if (data.user) onUpdateUser?.(data.user);
+      loadEconomyData();
     } catch (err) {
       setFeedback({ type: 'error', message: err.message });
     } finally {
-      setBuying(null);
+      setBuyingLegacyId('');
     }
   };
 
-  const handleTopup = async pkg => {
+  const handleLegacyTopup = async pkg => {
     if (!currentUser) {
-      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk melakukan top up Coins.' });
+      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu.' });
       return;
     }
-    setTopupLoadingId(pkg.id);
+    setTopupLegacyId(pkg.id);
     setFeedback(null);
     sound.playClick();
-    const token = authToken || storage.get('token');
-
     try {
       const res = await fetch('/api/topup/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ packageId: pkg.id })
+        headers: authHeaders(),
+        body: JSON.stringify({ packageId: pkg.id, paymentMethod: paymentMethod || 'SP' })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Gagal memulai transaksi top up.');
-      }
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membuat tagihan top up Coins.');
 
-      const popJsUrl = data.popJsUrl || popConfig?.popJsUrl;
-      try {
-        await loadDuitkuPop(popJsUrl);
-      } catch (err) {
-        console.warn('Gagal memuat Duitku POP script:', err.message);
-      }
+      const methodObj = duitkuMethods.find(m => m.code === (data.paymentMethod || paymentMethod));
+      setActivePayment({
+        mode: 'coins',
+        orderId: data.orderId,
+        reference: data.reference || null,
+        title: `${pkg.name}`,
+        amountIdr: pkg.price,
+        paymentMethod: data.paymentMethod || paymentMethod,
+        paymentMethodName: data.paymentMethodName || methodObj?.label || data.paymentMethod,
+        paymentCategory: data.paymentCategory || methodObj?.category || 'va',
+        bank: data.bank || methodObj?.bank || null,
+        vaNumber: data.vaNumber || data.payment?.vaNumber || null,
+        qrString: data.qrString || data.payment?.qrString || null,
+        qrCodeUrl: data.qrCodeUrl || data.payment?.qrCodeUrl || null,
+        paymentUrl: data.paymentUrl || data.payment?.paymentUrl || null,
+        status: 'PENDING'
+      });
 
-      if (window.checkout && window.checkout.process && data.reference) {
-        window.checkout.process(data.reference, {
-          defaultLanguage: 'id',
-          successEvent: async function () {
-            try {
-              const verifyRes = await fetch('/api/topup/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ orderId: data.orderId })
-              });
-              const verifyData = await verifyRes.json().catch(() => ({}));
-              sound.playShopPurchase();
-              setFeedback({
-                type: 'success',
-                message: `Pembayaran berhasil! +${pkg.diamonds || pkg.coins} Coins telah ditambahkan ke akunmu.`
-              });
-              if (verifyData.user) onUpdateUser?.(verifyData.user);
-            } catch {
-              setFeedback({
-                type: 'success',
-                message: 'Pembayaran berhasil diterima oleh Duitku!'
-              });
-            }
-          },
-          pendingEvent: function () {
-            setFeedback({
-              type: 'info',
-              message: `Pesanan ${data.orderId} sedang menunggu pembayaran. Selesaikan pembayaran sesuai instruksi Duitku.`
-            });
-          },
-          errorEvent: function () {
-            setFeedback({
-              type: 'error',
-              message: 'Pembayaran Duitku gagal atau dibatalkan.'
-            });
-          },
-          closeEvent: async function () {
-            try {
-              const checkRes = await fetch('/api/topup/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ orderId: data.orderId })
-              });
-              const checkData = await checkRes.json().catch(() => ({}));
-              if (checkData?.status === 'success' && checkData.user) {
-                sound.playShopPurchase();
-                setFeedback({
-                  type: 'success',
-                  message: `Pembayaran berhasil! +${pkg.diamonds || pkg.coins} Coins telah ditambahkan ke akunmu.`
-                });
-                onUpdateUser?.(checkData.user);
-              }
-            } catch {}
-          }
-        });
-      } else if (data.paymentUrl) {
-        window.open(data.paymentUrl, '_blank');
-        setFeedback({
-          type: 'info',
-          message: 'Halaman pembayaran Duitku telah dibuka di tab baru. Silakan selesaikan pembayaran.'
-        });
-      } else {
-        throw new Error('Duitku checkout tidak tersedia.');
-      }
+      setFeedback({
+        type: 'info',
+        message: `Tagihan Coins ${data.orderId} (${pkg.formattedPrice}) siap dibayar.`
+      });
     } catch (err) {
       setFeedback({ type: 'error', message: err.message });
     } finally {
-      setTopupLoadingId(null);
+      setTopupLegacyId('');
     }
   };
 
+  // ---- ADMIN ACTIONS ----
+  const saveAdminSettings = async e => {
+    e.preventDefault();
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/economy/settings', {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          coinsPerDiamond: Number(adminSettingsForm.coinsPerDiamond),
+          minConvertDiamonds: Number(adminSettingsForm.minConvertDiamonds),
+          maxConvertDiamonds: Number(adminSettingsForm.maxConvertDiamonds),
+          conversionEnabled: Boolean(adminSettingsForm.conversionEnabled)
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal menyimpan pengaturan konversi.');
+      setFeedback({ type: 'success', message: 'Pengaturan konversi Coins → Diamonds diperbarui.' });
+      await Promise.all([loadAdminOverview(), loadEconomyData()]);
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const saveAdminPackage = async e => {
+    e.preventDefault();
+    setFeedback(null);
+    try {
+      const url = adminPkgForm.id
+        ? `/api/admin/economy/packages/${encodeURIComponent(adminPkgForm.id)}`
+        : '/api/admin/economy/packages';
+      const method = adminPkgForm.id ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: adminPkgForm.name,
+          diamonds: Number(adminPkgForm.diamonds),
+          bonusDiamonds: Number(adminPkgForm.bonusDiamonds || 0),
+          priceIdr: Number(adminPkgForm.priceIdr),
+          badge: adminPkgForm.badge,
+          sortOrder: Number(adminPkgForm.sortOrder || 10),
+          isActive: Boolean(adminPkgForm.isActive)
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal menyimpan paket Diamond.');
+      setFeedback({ type: 'success', message: `Paket "${data.package?.name}" berhasil disimpan.` });
+      await Promise.all([loadAdminOverview(), loadEconomyData()]);
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const saveAdminSkin = async e => {
+    e.preventDefault();
+    setFeedback(null);
+    try {
+      const url = adminSkinForm.id
+        ? `/api/admin/economy/skins/${encodeURIComponent(adminSkinForm.id)}`
+        : '/api/admin/economy/skins';
+      const method = adminSkinForm.id ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: adminSkinForm.name,
+          description: adminSkinForm.description,
+          priceDiamonds: Number(adminSkinForm.priceDiamonds),
+          rarity: adminSkinForm.rarity,
+          assetKey: adminSkinForm.assetKey,
+          accentColor: adminSkinForm.accentColor,
+          sortOrder: Number(adminSkinForm.sortOrder || 10),
+          isActive: Boolean(adminSkinForm.isActive)
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal menyimpan Skin Ludo.');
+      setFeedback({ type: 'success', message: `Skin "${data.skin?.name}" berhasil disimpan.` });
+      await Promise.all([loadAdminOverview(), loadEconomyData()]);
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const submitAdminAdjustment = async e => {
+    e.preventDefault();
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/economy/wallets/adjust', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          username: adminAdjustForm.userId,
+          amount: Number(adminAdjustForm.amount),
+          txType: adminAdjustForm.txType,
+          reason: adminAdjustForm.reason
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Gagal menyesuaikan saldo Diamonds.');
+      setFeedback({
+        type: 'success',
+        message: `Saldo Diamonds pemain berhasil disesuaikan (${data.transaction?.amount > 0 ? '+' : ''}${data.transaction?.amount} Diamonds).`
+      });
+      setAdminAdjustForm(prev => ({ ...prev, reason: '' }));
+      await Promise.all([loadAdminOverview(), loadEconomyData()]);
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const queryLower = skinQuery.trim().toLowerCase();
+  const visibleSkins = skins.filter(s => {
+    if (skinFilter === 'owned' && !s.owned) return false;
+    if (['Common', 'Rare', 'Epic', 'Legendary'].includes(skinFilter) && s.rarity !== skinFilter) return false;
+    if (queryLower && !s.name.toLowerCase().includes(queryLower) && !String(s.description || '').toLowerCase().includes(queryLower)) {
+      return false;
+    }
+    return true;
+  });
+
+  const activeSkinObj = skins.find(s => s.id === equippedSkinId) || currentUser?.equippedLudoSkin || null;
+  const showcaseSkin =
+    skins.find(s => s.id === inspectedSkinId) ||
+    activeSkinObj ||
+    skins.find(s => s.id === 'legendary_diamond') ||
+    skins[0] ||
+    null;
+
+  const minConv = Number(economySettings.minConvertDiamonds || 10);
+  const maxConv = Number(economySettings.maxConvertDiamonds || 50);
+  const convRate = Number(economySettings.coinsPerDiamond || 100);
+  const clampedConv = Math.max(minConv, Math.min(maxConv, Math.trunc(Number(convertDiamonds) || minConv)));
+  const coinsNeeded = clampedConv * convRate;
+  const canAffordConv = points >= coinsNeeded && Boolean(economySettings.conversionEnabled);
+
+  const visibleMethods = duitkuMethods.filter(
+    m => methodCategoryFilter === 'all' || m.category === methodCategoryFilter
+  );
+  const selectedMethodObj = duitkuMethods.find(m => m.code === paymentMethod) || duitkuMethods[0] || null;
+
+  const catalogItems = Array.isArray(catalog?.items) ? catalog.items : [];
+  const ludoItems = catalogItems.filter(i => (i.game || 'ludo') === 'ludo');
+  const quizItems = catalogItems.filter(i => i.game === 'quiz');
+  const legacyGroups = [
+    {
+      key: 'ludo',
+      name: 'JakLudo — Item & Taktik',
+      desc: 'Dipakai langsung saat bermain JakLudo dari tab Item di panel kanan atau di bawah papan.',
+      icon: 'dice',
+      badge: 'Coins',
+      items: ludoItems
+    },
+    {
+      key: 'quiz',
+      name: 'Monster Quiz Battle — Bantuan Duel',
+      desc: 'Bantuan pintar untuk menaklukkan soal cepat di Monster Quiz Battle.',
+      icon: 'swords',
+      badge: 'Coins',
+      items: quizItems
+    }
+  ].filter(g => g.items.length > 0 && (legacyCategory === 'all' || legacyCategory === g.key));
+
+  const navItems = [
+    { id: 'skins', icon: 'pawn', label: 'Skin Bidak Ludo', count: skins.length },
+    { id: 'diamonds', icon: 'diamond', label: 'Top-Up & Konversi 💎', count: diamondPackages.length },
+    { id: 'items', icon: 'shop', label: 'Item Game & Coins', count: catalogItems.length },
+    { id: 'wallet', icon: 'trophy', label: 'Dompet & Riwayat', count: null },
+    ...(isAdmin ? [{ id: 'admin', icon: 'crown', label: 'Admin Ekonomi', count: null }] : [])
+  ];
+
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      asPage={asPage}
-      size="lg"
-      icon="shop"
-      title="Toko item"
-      subtitle={currentUser ? `Saldo kamu: ${points.toLocaleString('id-ID')} Coins` : 'Masuk dulu untuk membeli item atau top up.'}
-    >
+    <main className="marketplace-page" id="main">
+      {/* ================= HERO HEADER & WALLET ================= */}
+      <section className="mp-hero card" aria-label="Header PlayGo Marketplace">
+        <div className="mp-hero__top">
+          <div className="mp-hero__brand">
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm mp-back-btn"
+              onClick={() => {
+                sound.playClick();
+                onClose?.();
+              }}
+            >
+              ← Kembali
+            </button>
+            <div>
+              <h1 className="mp-hero__title">PlayGo Marketplace</h1>
+              <p className="mp-hero__subtitle">
+                Belanja Skin Bidak JakLudo, tukar Coins jadi Diamonds, Top-Up instan, dan lengkapi item permainanmu.
+              </p>
+            </div>
+          </div>
+
+          {!currentUser && onOpenAuth && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => {
+                sound.playClick();
+                onOpenAuth();
+              }}
+            >
+              Masuk untuk Transaksi
+            </button>
+          )}
+        </div>
+
+        <div className="mp-wallet-cards">
+          <div className="mp-wallet-card mp-wallet-card--coins">
+            <span className="mp-wallet-card__icon"><Icon name="coin" size={24} /></span>
+            <div className="mp-wallet-card__meta">
+              <span className="econ-currency-label">Coins Standar</span>
+              <strong className="econ-currency-value">{points.toLocaleString('id-ID')}</strong>
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => {
+                sound.playClick();
+                setActiveTab('items');
+                setLegacyCategory('topup');
+              }}
+            >
+              + Coins
+            </button>
+          </div>
+
+          <div className="mp-wallet-card mp-wallet-card--diamonds">
+            <span className="mp-wallet-card__icon"><Icon name="diamond" size={24} /></span>
+            <div className="mp-wallet-card__meta">
+              <span className="econ-currency-label">Diamonds Premium</span>
+              <strong className="econ-currency-value">{diamonds.toLocaleString('id-ID')}</strong>
+            </div>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={() => {
+                sound.playClick();
+                setActiveTab('diamonds');
+              }}
+            >
+              + Isi / Tukar 💎
+            </button>
+          </div>
+
+          <div className="mp-wallet-card mp-wallet-card--skin">
+            <LudoSkinPreview skin={activeSkinObj} size={44} teamColor="blue" />
+            <div className="mp-wallet-card__meta">
+              <span className="econ-currency-label">Skin JakLudo Terpasang</span>
+              <strong className="econ-currency-value econ-currency-value--sm">
+                {activeSkinObj?.name || 'Standar PlayGo'}
+              </strong>
+            </div>
+            {equippedSkinId && (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={skinActionId === 'default'}
+                onClick={() => handleEquipSkin(null)}
+              >
+                Lepas
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
       {feedback && (
-        <p className={`alert alert--${feedback.type === 'success' ? 'success' : feedback.type === 'info' ? 'info' : 'error'} shop__feedback`} role="alert">
+        <p className={`alert alert--${feedback.type === 'success' ? 'success' : feedback.type === 'info' ? 'info' : 'error'} mp-feedback`} role="alert">
           {feedback.message}
         </p>
       )}
 
-      {catalog.status === 'loading' && (
-        <p className="state-msg" role="status"><span className="spinner" aria-hidden="true" /> Memuat item...</p>
-      )}
-      {catalog.status === 'error' && (
-        <div className="state-msg" role="alert">
-          <p>Daftar item gagal dimuat.</p>
-          <button type="button" className="btn btn--secondary" onClick={catalog.retry}>Coba lagi</button>
-        </div>
-      )}
-      {catalog.status === 'ready' && catalog.items.length === 0 && (
-        <p className="state-msg">Belum ada item di toko.</p>
-      )}
-
-      {catalog.status === 'ready' && (
-        <div className="tabs shop__filter-tabs" role="tablist" aria-label="Filter kategori toko">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedCategory === 'all'}
-            className="tabs__tab"
-            onClick={() => {
-              sound.playClick();
-              setSelectedCategory('all');
-            }}
-          >
-            Semua ({catalog.items.length + diamondPackages.length})
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedCategory === 'topup'}
-            className="tabs__tab"
-            onClick={() => {
-              sound.playClick();
-              setSelectedCategory('topup');
-            }}
-          >
-            <Icon name="coin" size={16} />
-            <span>Top Up Coins</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedCategory === 'ludo'}
-            className="tabs__tab"
-            onClick={() => {
-              sound.playClick();
-              setSelectedCategory('ludo');
-            }}
-          >
-            <Icon name="dice" size={16} />
-            <span>JakLudo ({ludoItems.length})</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedCategory === 'quiz'}
-            className="tabs__tab"
-            onClick={() => {
-              sound.playClick();
-              setSelectedCategory('quiz');
-            }}
-          >
-            <Icon name="swords" size={16} />
-            <span>Monster Quiz ({quizItems.length})</span>
-          </button>
-        </div>
-      )}
-
-      {/* Bagian Top Up Coins (Muncul di tab 'all' atau tab khusus 'topup') */}
-      {(selectedCategory === 'all' || selectedCategory === 'topup') && (
-        <section className="shop__group" aria-label="Top Up Coins Duitku POP">
-          <div className="shop__group-header shop__group-header--topup">
-            <div>
-              <h3 className="shop__group-title">
-                <Icon name="coin" size={20} />
-                <span>Top Up Coins PlayGo</span>
-              </h3>
-              <p className="shop__group-desc">
-                Beli Coins instan via Duitku (QRIS, E-Wallet &amp; Virtual Account).
-              </p>
-            </div>
-            <span className="badge badge--popular">
-              Duitku POP
-            </span>
-          </div>
-
-          <ul className="shop__items">
-            {diamondPackages.map(pkg => (
-              <TopupPackageCard
-                key={pkg.id}
-                pkg={pkg}
-                currentUser={currentUser}
-                topupLoadingId={topupLoadingId}
-                onTopup={handleTopup}
-              />
-            ))}
-          </ul>
-
-          <div className="shop__duitku-banner">
-            <span>🛡️ Pembayaran resmi &amp; otomatis terverifikasi via <strong>Duitku</strong></span>
-            <span>QRIS · GoPay · OVO · DANA · ShopeePay · BCA VA · BRI VA · BNI VA · Mandiri · Gerai Retail</span>
-          </div>
-        </section>
-      )}
-
-      {/* Bagian Item Game (JakLudo & Monster Quiz) */}
-      {visibleGroups.map(group => (
-        <section key={group.key} className="shop__group" aria-label={group.name}>
-          <div className={`shop__group-header ${group.key === 'quiz' ? 'shop__group-header--quiz' : ''}`}>
-            <div>
-              <h3 className="shop__group-title">
-                <Icon name={group.icon} size={18} />
-                <span>{group.name}</span>
-              </h3>
-              <p className="shop__group-desc">{group.desc}</p>
-            </div>
-            <span className={`badge ${group.key === 'quiz' ? 'badge--info' : 'badge--brand'}`}>
-              {group.badge}
-            </span>
-          </div>
-
-          <ul className="shop__items">
-            {group.items.map(item => (
-              <ShopItemCard
+      {/* ================= MARKETPLACE SIDEBAR + CONTENT STAGE ================= */}
+      <div className="mp-layout">
+        <aside className="mp-sidebar" aria-label="Navigasi Kategori Marketplace">
+          <nav className="mp-nav card" role="tablist" aria-label="Menu Ekonomi PlayGo">
+            {navItems.map(item => (
+              <button
                 key={item.id}
-                item={item}
-                points={points}
-                ownedCount={owned[item.id] || 0}
-                currentUser={currentUser}
-                buyingId={buying}
-                onBuy={buy}
-              />
+                type="button"
+                role="tab"
+                aria-selected={activeTab === item.id}
+                className={`mp-nav__item ${activeTab === item.id ? 'is-active' : ''}`}
+                onClick={() => {
+                  sound.playClick();
+                  setActiveTab(item.id);
+                  setFeedback(null);
+                }}
+              >
+                <span className="mp-nav__left">
+                  <Icon name={item.icon} size={17} />
+                  <span>{item.label}</span>
+                </span>
+                {item.count !== null && <span className="mp-nav__count">{item.count}</span>}
+              </button>
             ))}
-          </ul>
-        </section>
-      ))}
+          </nav>
 
-      <section className="shop__earn" aria-labelledby="earn-title">
-        <h3 id="earn-title">Cara dapat Coins PlayGo</h3>
-        <ul>
-          <li>Top up instan: <strong>50 Coins = Rp 5.000</strong>, <strong>120 Coins = Rp 10.000</strong>, <strong>260 Coins = Rp 20.000</strong>, <strong>700 Coins = Rp 50.000</strong>, <strong>1.500 Coins = Rp 100.000</strong>, <strong>3.250 Coins = Rp 200.000</strong></li>
-          <li>Menang <strong>Monster Quiz Battle</strong>: <strong>+30 Coins</strong></li>
-          <li>Peringkat 1 <strong>JakLudo</strong>: <strong>+30 Coins</strong></li>
-          <li>Peringkat 2 <strong>JakLudo</strong>: <strong>+20 Coins</strong> (main 4 orang) atau <strong>+15</strong> (main 3 orang)</li>
-          <li>Peringkat 3 <strong>JakLudo</strong> (main 4 orang): <strong>+15 Coins</strong></li>
-          <li>Peringkat terakhir <strong>JakLudo</strong>: <strong>+5 Coins</strong></li>
-          <li>Bonus harian: <strong>+5 Coins</strong> untuk pertandingan pertama yang kamu selesaikan tiap hari</li>
-          <li>Bonus akun baru: <strong>200 Coins</strong></li>
-        </ul>
-        <p className="muted">Coins dapat digunakan untuk membeli item di JakLudo maupun Hints Jawaban di Monster Quiz Battle.</p>
-      </section>
-    </Modal>
+          <div className="mp-tips card">
+            <h4>Info Kurs &amp; Pembayaran</h4>
+            <ul>
+              <li><strong>1 💎</strong> = {convRate} Coins</li>
+              <li>Menang Match = <strong>+30 Coins</strong></li>
+              <li>Bonus Harian = <strong>+5 Coins</strong></li>
+              <li>Pembayaran mudah via <strong>QRIS, Virtual Account, &amp; E-Wallet</strong></li>
+            </ul>
+          </div>
+        </aside>
+
+        <div className="mp-stage">
+          {/* ================= TAB 1: JAKLUDO SKIN SHOP ================= */}
+          {activeTab === 'skins' && (
+            <section className="mp-section" aria-label="Toko Skin Bidak JakLudo">
+              {showcaseSkin && (
+                <div
+                  className="mp-skin-showcase card"
+                  style={{ '--skin-accent': showcaseSkin.accentColor || '#38bdf8' }}
+                >
+                  <div className="mp-skin-showcase__previews">
+                    <LudoSkinPreview skin={showcaseSkin} size={64} teamColor="red" />
+                    <LudoSkinPreview skin={showcaseSkin} size={64} teamColor="blue" />
+                    <LudoSkinPreview skin={showcaseSkin} size={64} teamColor="green" />
+                    <LudoSkinPreview skin={showcaseSkin} size={64} teamColor="yellow" />
+                  </div>
+                  <div className="mp-skin-showcase__info">
+                    <div className="mp-skin-showcase__badges">
+                      <span className="badge badge--diamond">Pratinjau 4 Tim</span>
+                      <span className={`rarity-badge rarity-badge--${String(showcaseSkin.rarity).toLowerCase()}`}>
+                        {showcaseSkin.rarity}
+                      </span>
+                      {showcaseSkin.equipped && <span className="badge badge--success">✓ Terpasang</span>}
+                    </div>
+                    <h2>{showcaseSkin.name}</h2>
+                    <p className="muted">{showcaseSkin.description}</p>
+                    <div className="mp-skin-showcase__actions">
+                      <span className="mp-price-tag">
+                        <Icon name="diamond" size={16} /> <strong>{showcaseSkin.priceDiamonds}</strong> Diamonds
+                      </span>
+                      {showcaseSkin.owned ? (
+                        showcaseSkin.equipped ? (
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            disabled={skinActionId === showcaseSkin.id}
+                            onClick={() => handleEquipSkin(null)}
+                          >
+                            TERPASANG (Lepas)
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn--primary btn--sm"
+                            disabled={skinActionId === showcaseSkin.id}
+                            onClick={() => handleEquipSkin(showcaseSkin.id)}
+                          >
+                            PASANG KE JAKLUDO
+                          </button>
+                        )
+                      ) : currentUser ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary btn--sm"
+                          disabled={diamonds < Number(showcaseSkin.priceDiamonds) || skinActionId === showcaseSkin.id}
+                          onClick={() => setConfirmSkin(showcaseSkin)}
+                        >
+                          {diamonds >= Number(showcaseSkin.priceDiamonds)
+                            ? `BELI SKIN (${showcaseSkin.priceDiamonds} 💎)`
+                            : 'Diamonds Kurang'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mp-toolbar card">
+                <div className="skin-filter-pills">
+                  {[
+                    { id: 'all', label: `Semua (${skins.length})` },
+                    { id: 'owned', label: `Dimiliki (${skins.filter(s => s.owned).length})` },
+                    { id: 'Common', label: 'Common' },
+                    { id: 'Rare', label: 'Rare' },
+                    { id: 'Epic', label: 'Epic' },
+                    { id: 'Legendary', label: 'Legendary' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className={`btn btn--sm ${skinFilter === f.id ? 'btn--primary' : 'btn--ghost'}`}
+                      onClick={() => setSkinFilter(f.id)}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  type="search"
+                  className="input input--sm mp-search"
+                  placeholder="Cari skin bidak..."
+                  value={skinQuery}
+                  onChange={e => setSkinQuery(e.target.value)}
+                  aria-label="Cari skin bidak Ludo"
+                />
+              </div>
+
+              {visibleSkins.length === 0 ? (
+                <div className="card mp-empty-state">
+                  <p className="muted">Tidak ada skin yang cocok dengan filter ini.</p>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => {
+                      setSkinFilter('all');
+                      setSkinQuery('');
+                    }}
+                  >
+                    Tampilkan Semua Skin
+                  </button>
+                </div>
+              ) : (
+                <ul className="mp-skin-grid">
+                  {visibleSkins.map(skin => {
+                    const isBusy = skinActionId === skin.id;
+                    const canAfford = diamonds >= Number(skin.priceDiamonds);
+                    return (
+                      <li
+                        key={skin.id}
+                        className={`mp-skin-card ${skin.equipped ? 'is-equipped' : ''} ${skin.owned ? 'is-owned' : ''}`}
+                        style={{ '--skin-accent': skin.accentColor || '#38bdf8' }}
+                        onMouseEnter={() => setInspectedSkinId(skin.id)}
+                        onFocus={() => setInspectedSkinId(skin.id)}
+                      >
+                        <div className="mp-skin-card__visual">
+                          <div className="mp-skin-card__badges">
+                            <span className={`rarity-badge rarity-badge--${String(skin.rarity).toLowerCase()}`}>
+                              {skin.rarity}
+                            </span>
+                            {skin.equipped ? (
+                              <span className="badge badge--success">✓ DIPAKAI</span>
+                            ) : skin.owned ? (
+                              <span className="badge badge--diamond">✓ OWNED</span>
+                            ) : null}
+                          </div>
+
+                          <div className="mp-skin-card__medallion">
+                            <LudoSkinPreview skin={skin} size={74} teamColor="blue" />
+                          </div>
+
+                          <div className="mp-skin-card__team-dots" aria-hidden="true">
+                            <span className="mp-team-dot mp-team-dot--red" />
+                            <span className="mp-team-dot mp-team-dot--blue" />
+                            <span className="mp-team-dot mp-team-dot--green" />
+                            <span className="mp-team-dot mp-team-dot--yellow" />
+                          </div>
+                        </div>
+
+                        <div className="mp-skin-card__body">
+                          <h3 className="mp-skin-card__title">{skin.name}</h3>
+                          <p className="mp-skin-card__desc">{skin.description}</p>
+                        </div>
+
+                        <div className="mp-skin-card__foot">
+                          <div className="skin-card__price">
+                            <Icon name="diamond" size={15} /> <strong>{skin.priceDiamonds}</strong> Diamonds
+                          </div>
+
+                          <div className="mp-skin-card__cta">
+                            {skin.owned ? (
+                              skin.equipped ? (
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary btn--sm btn--block"
+                                  disabled={isBusy}
+                                  onClick={() => handleEquipSkin(null)}
+                                >
+                                  {isBusy ? '...' : 'TERPASANG (Lepas)'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn--primary btn--sm btn--block"
+                                  disabled={isBusy}
+                                  onClick={() => handleEquipSkin(skin.id)}
+                                >
+                                  {isBusy ? 'Memasang...' : 'PASANG SKIN'}
+                                </button>
+                              )
+                            ) : !currentUser ? (
+                              <button
+                                type="button"
+                                className="btn btn--secondary btn--sm btn--block"
+                                onClick={() => onOpenAuth?.()}
+                              >
+                                Login untuk Beli
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`btn btn--sm btn--block ${canAfford ? 'btn--primary' : 'btn--secondary'}`}
+                                disabled={!canAfford || isBusy}
+                                onClick={() => {
+                                  sound.playClick();
+                                  setConfirmSkin(skin);
+                                }}
+                              >
+                                {canAfford ? `BELI (${skin.priceDiamonds} 💎)` : 'Diamonds Kurang'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <Modal
+                isOpen={!!confirmSkin}
+                onClose={() => !skinActionId && setConfirmSkin(null)}
+                size="sm"
+                title="Konfirmasi Pembelian Skin"
+                subtitle="Pastikan pilihan skin bidak JakLudo kamu sebelum membayar dengan Diamonds."
+                footer={
+                  confirmSkin && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        disabled={!!skinActionId}
+                        onClick={() => setConfirmSkin(null)}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={skinActionId === confirmSkin.id || diamonds < confirmSkin.priceDiamonds}
+                        onClick={() => executeBuySkin(confirmSkin)}
+                      >
+                        {skinActionId === confirmSkin.id ? 'Memproses...' : `Beli Sekarang (${confirmSkin.priceDiamonds} 💎)`}
+                      </button>
+                    </>
+                  )
+                }
+              >
+                {confirmSkin && (
+                  <div className="skin-confirm-box">
+                    <div className="skin-confirm-preview">
+                      <LudoSkinPreview skin={confirmSkin} size={64} teamColor="red" />
+                      <LudoSkinPreview skin={confirmSkin} size={64} teamColor="blue" />
+                      <LudoSkinPreview skin={confirmSkin} size={64} teamColor="green" />
+                      <LudoSkinPreview skin={confirmSkin} size={64} teamColor="yellow" />
+                    </div>
+                    <div className="skin-confirm-details">
+                      <strong>{confirmSkin.name}</strong>
+                      <span className={`rarity-badge rarity-badge--${String(confirmSkin.rarity).toLowerCase()}`}>
+                        {confirmSkin.rarity}
+                      </span>
+                      <div className="skin-confirm-math">
+                        <div><span>Harga Skin</span><strong>{confirmSkin.priceDiamonds} Diamonds</strong></div>
+                        <div><span>Saldo Saat Ini</span><strong>{diamonds} Diamonds</strong></div>
+                        <div><span>Sisa Setelah Beli</span><strong>{Math.max(0, diamonds - confirmSkin.priceDiamonds)} Diamonds</strong></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Modal>
+            </section>
+          )}
+
+          {/* ================= TAB 2: DIAMONDS (KONVERSI & TOP-UP DUITKU API) ================= */}
+          {activeTab === 'diamonds' && (
+            <div className="mp-section">
+              {/* 1. Konversi Coins ke Diamonds */}
+              <section className="mp-convert-card card" aria-label="Konversi Coins ke Diamonds">
+                <div className="mp-card-head">
+                  <div>
+                    <h3 className="shop__group-title">
+                      <Icon name="coin" size={18} />
+                      <span>→</span>
+                      <Icon name="diamond" size={18} />
+                      <span>Konversi Coins ke Diamonds</span>
+                    </h3>
+                    <p className="shop__group-desc">
+                      Tukar Coins hasil kemenangan menjadi Diamonds secara instan tanpa biaya tambahan.
+                    </p>
+                  </div>
+                  <div className="shop-item__badges">
+                    <span className="badge badge--info">1 💎 = {convRate} Coins</span>
+                    <span className="badge badge--brand">Batas {minConv}–{maxConv} 💎</span>
+                    {!economySettings.conversionEnabled && (
+                      <span className="badge badge--warning">Nonaktif Sementara</span>
+                    )}
+                  </div>
+                </div>
+
+                <form onSubmit={handleConvert} className="mp-convert-grid">
+                  <div className="mp-convert-inputs">
+                    <div className="conv-presets">
+                      {[minConv, Math.min(maxConv, 20), Math.min(maxConv, 30), maxConv]
+                        .filter((v, idx, arr) => arr.indexOf(v) === idx)
+                        .map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            className={`btn btn--sm ${Number(convertDiamonds) === preset ? 'btn--primary' : 'btn--secondary'}`}
+                            onClick={() => setConvertDiamonds(preset)}
+                          >
+                            +{preset} 💎 ({(preset * convRate).toLocaleString('id-ID')})
+                          </button>
+                        ))}
+                    </div>
+
+                    <label className="conv-input-label">
+                      <span>Jumlah Diamonds ({minConv}–{maxConv}):</span>
+                      <div className="mp-stepper">
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          disabled={clampedConv <= minConv}
+                          onClick={() => setConvertDiamonds(Math.max(minConv, clampedConv - 1))}
+                          aria-label="Kurangi jumlah Diamonds"
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          className="input"
+                          min={minConv}
+                          max={maxConv}
+                          step={1}
+                          value={convertDiamonds}
+                          onChange={e => setConvertDiamonds(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          disabled={clampedConv >= maxConv}
+                          onClick={() => setConvertDiamonds(Math.min(maxConv, clampedConv + 1))}
+                          aria-label="Tambah jumlah Diamonds"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="mp-convert-summary-box">
+                    <div className="conv-summary">
+                      <div>
+                        <span className="muted">Biaya Coins</span>
+                        <strong>{coinsNeeded.toLocaleString('id-ID')} Coins</strong>
+                      </div>
+                      <div>
+                        <span className="muted">Sisa Coins</span>
+                        <strong>{Math.max(0, points - coinsNeeded).toLocaleString('id-ID')}</strong>
+                      </div>
+                      <div>
+                        <span className="muted">Diamonds Nanti</span>
+                        <strong>{(diamonds + clampedConv).toLocaleString('id-ID')} 💎</strong>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="btn btn--primary btn--block"
+                      disabled={!currentUser || converting || !canAffordConv}
+                    >
+                      {converting
+                        ? 'Mengonversi...'
+                        : !currentUser
+                        ? 'Login Terlebih Dahulu'
+                        : !economySettings.conversionEnabled
+                        ? 'Konversi Ditutup Admin'
+                        : points < coinsNeeded
+                        ? `Coins Kurang (Butuh ${coinsNeeded.toLocaleString('id-ID')})`
+                        : `Tukar ${coinsNeeded.toLocaleString('id-ID')} Coins → ${clampedConv} 💎`}
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              {/* 2. Top-Up Diamonds */}
+              <section className="card mp-topup-card" aria-label="Top-Up Diamonds">
+                <div className="mp-card-head mp-card-head--topup">
+                  <div>
+                    <h3 className="shop__group-title">
+                      <Icon name="diamond" size={18} />
+                      <span>Top-Up Diamonds</span>
+                    </h3>
+                    <p className="shop__group-desc">
+                      Pilih paket Diamonds dan metode pembayaran favoritmu. Saldo otomatis bertambah setelah pembayaran selesai.
+                    </p>
+                  </div>
+                  <span className="badge badge--diamond">Proses Otomatis</span>
+                </div>
+
+                {activePayment?.mode === 'diamonds' ? (
+                  <DuitkuPaymentPanel
+                    payment={activePayment}
+                    verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
+                    cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
+                    copiedField={copiedField}
+                    onCopy={copyToClipboard}
+                    onCheckStatus={() => verifyDiamondOrder(activePayment.orderId, false)}
+                    onCancelOrder={() => cancelDiamondOrder(activePayment.orderId)}
+                    onBack={() => setActivePayment(null)}
+                  />
+                ) : (
+                  <>
+                    {/* Langkah 1: Pilih Paket Diamonds */}
+                    <div className="mp-step-block">
+                      <div className="mp-step-head">
+                        <span className="mp-step-num">1</span>
+                        <h4>Pilih Paket Diamonds</h4>
+                      </div>
+
+                      <div className="mp-diamond-pkg-grid" role="radiogroup" aria-label="Pilihan paket Diamonds">
+                        {diamondPackages.map(pkg => {
+                          const totalD = Number(pkg.diamonds) + Number(pkg.bonusDiamonds || 0);
+                          const isSelected = selectedPkg?.id === pkg.id;
+                          return (
+                            <button
+                              key={pkg.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={isSelected}
+                              className={`mp-diamond-pkg ${isSelected ? 'is-selected' : ''}`}
+                              onClick={() => {
+                                sound.playClick();
+                                setSelectedPkgId(pkg.id);
+                              }}
+                            >
+                              <div className="mp-diamond-pkg__top">
+                                <span className="shop-item__icon shop-item__icon--diamond" aria-hidden="true">
+                                  <Icon name="diamond" size={22} />
+                                </span>
+                                <div className="shop-item__badges">
+                                  {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
+                                  {isSelected && <span className="badge badge--diamond">✓ Dipilih</span>}
+                                </div>
+                              </div>
+
+                              <div className="mp-diamond-pkg__body">
+                                <div className="mp-diamond-pkg__qty">{totalD} Diamonds</div>
+                                <div className="mp-diamond-pkg__name">
+                                  {pkg.name}
+                                  {pkg.bonusDiamonds > 0 && ` (+${pkg.bonusDiamonds} Bonus)`}
+                                </div>
+                              </div>
+
+                              <div className="mp-diamond-pkg__foot">
+                                <strong className="topup-price">{formatIdr(pkg.priceIdr)}</strong>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Langkah 2: Pilih Metode Pembayaran */}
+                    <div className="mp-step-block">
+                      <div className="mp-step-head mp-step-head--between">
+                        <div className="mp-step-title-group">
+                          <span className="mp-step-num">2</span>
+                          <h4>Pilih Metode Pembayaran</h4>
+                        </div>
+                        <div className="skin-filter-pills">
+                          {[
+                            { id: 'all', label: 'Semua' },
+                            { id: 'qris', label: 'QRIS' },
+                            { id: 'va', label: 'Virtual Account' },
+                            { id: 'ewallet', label: 'E-Wallet' }
+                          ].map(cat => (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              className={`btn btn--sm ${methodCategoryFilter === cat.id ? 'btn--primary' : 'btn--ghost'}`}
+                              onClick={() => setMethodCategoryFilter(cat.id)}
+                            >
+                              {cat.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mp-method-grid" role="radiogroup" aria-label="Metode pembayaran">
+                        {visibleMethods.map(method => {
+                          const isSelected = paymentMethod === method.code;
+                          return (
+                            <button
+                              key={method.code}
+                              type="button"
+                              role="radio"
+                              aria-checked={isSelected}
+                              className={`mp-method-card ${isSelected ? 'is-selected' : ''}`}
+                              onClick={() => {
+                                sound.playClick();
+                                setPaymentMethod(method.code);
+                              }}
+                            >
+                              <div className="mp-method-card__top">
+                                <span className="mp-method-tag">{methodCategoryLabel(method.category)}</span>
+                                {method.badge && (
+                                  <span className={`badge ${method.badge === 'Instan' ? 'badge--success' : 'badge--popular'}`}>
+                                    {method.badge}
+                                  </span>
+                                )}
+                              </div>
+                              <strong className="mp-method-card__label">{method.label}</strong>
+                              <span className="muted mp-method-card__desc">{method.description}</span>
+                              {typeof method.totalFee === 'number' && method.totalFee > 0 && (
+                                <span className="mp-method-card__fee">Biaya admin: {formatIdr(method.totalFee)}</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Langkah 3: Ringkasan & Buat Tagihan */}
+                    {selectedPkg && (
+                      <div className="mp-checkout-bar">
+                        <div className="mp-checkout-bar__info">
+                          <span className="muted">Ringkasan Tagihan</span>
+                          <strong>
+                            {selectedPkg.name} ({Number(selectedPkg.diamonds) + Number(selectedPkg.bonusDiamonds || 0)} 💎)
+                            {selectedMethodObj ? ` · ${selectedMethodObj.label}` : ''}
+                          </strong>
+                        </div>
+                        <div className="mp-checkout-bar__cta">
+                          <div className="mp-checkout-bar__total">
+                            <span className="muted">Total</span>
+                            <strong>{formatIdr(selectedPkg.priceIdr)}</strong>
+                          </div>
+                          {!currentUser ? (
+                            <button
+                              type="button"
+                              className="btn btn--primary"
+                              onClick={() => onOpenAuth?.()}
+                            >
+                              Login untuk Top-Up
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn--primary"
+                              disabled={creatingOrderPkgId === selectedPkg.id}
+                              onClick={() => handleCreateDiamondTopup(selectedPkg)}
+                            >
+                              {creatingOrderPkgId === selectedPkg.id
+                                ? 'Membuat Tagihan...'
+                                : 'Buat Tagihan Pembayaran'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+
+              {/* 3. Riwayat Order Pembayaran Top-Up */}
+              {currentUser && paymentOrders.length > 0 && (
+                <div className="econ-orders-panel card">
+                  <div className="section-head">
+                    <h3>Riwayat Order Pembayaran Top-Up</h3>
+                    <span className="muted">{paymentOrders.length} pesanan terbaru</span>
+                  </div>
+                  <div className="tx-table-wrap">
+                    <table className="tx-table">
+                      <thead>
+                        <tr>
+                          <th>Order ID</th>
+                          <th>Paket</th>
+                          <th>Metode</th>
+                          <th>Harga</th>
+                          <th>Status</th>
+                          <th>Waktu</th>
+                          <th>Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paymentOrders.slice(0, 15).map(ord => (
+                          <tr key={ord.id}>
+                            <td className="code-text">{ord.id}</td>
+                            <td>{ord.packageName} ({ord.totalDiamonds} 💎)</td>
+                            <td>{ord.paymentMethodName || ord.paymentMethod || '-'}</td>
+                            <td>{formatIdr(ord.amountIdr)}</td>
+                            <td>
+                              <span className={`badge badge--${orderStatusTone(ord.status)}`}>
+                                {ord.status}
+                              </span>
+                            </td>
+                            <td>{formatDateTime(ord.createdAt)}</td>
+                            <td>
+                              <div className="tx-actions">
+                                {ord.status === 'PENDING' && (
+                                  <>
+                                    {(ord.vaNumber || ord.qrCodeUrl || ord.qrString || ord.paymentUrl) && (
+                                      <button
+                                        type="button"
+                                        className="btn btn--primary btn--sm"
+                                        onClick={() => openOrderInstruction(ord)}
+                                      >
+                                        Lihat Instruksi
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn btn--secondary btn--sm"
+                                      disabled={checkingOrderId === ord.id}
+                                      onClick={() => verifyDiamondOrder(ord.id)}
+                                    >
+                                      {checkingOrderId === ord.id ? '...' : 'Cek Status'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn--ghost btn--sm"
+                                      disabled={checkingOrderId === ord.id}
+                                      onClick={() => cancelDiamondOrder(ord.id)}
+                                    >
+                                      Batal
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ================= TAB 3: LEGACY COINS SHOP & COINS TOP-UP ================= */}
+          {activeTab === 'items' && (
+            <section className="mp-section" aria-label="Item Game dan Top-Up Coins">
+              <div className="mp-toolbar card">
+                <div className="skin-filter-pills">
+                  {[
+                    { id: 'all', label: `Semua (${catalogItems.length + legacyPackages.length})` },
+                    { id: 'topup', label: 'Top Up Coins' },
+                    { id: 'ludo', label: `JakLudo (${ludoItems.length})` },
+                    { id: 'quiz', label: `Monster Quiz (${quizItems.length})` }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className={`btn btn--sm ${legacyCategory === f.id ? 'btn--primary' : 'btn--ghost'}`}
+                      onClick={() => setLegacyCategory(f.id)}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(legacyCategory === 'all' || legacyCategory === 'topup') && legacyPackages.length > 0 && (
+                <section className="card mp-section-card">
+                  <div className="mp-card-head mp-card-head--topup">
+                    <div>
+                      <h3 className="shop__group-title">
+                        <Icon name="coin" size={18} />
+                        <span>Top Up Coins PlayGo (Reguler)</span>
+                      </h3>
+                      <p className="shop__group-desc">Coins dipakai untuk beli item arena atau ditukar menjadi Diamonds.</p>
+                    </div>
+                    <span className="badge badge--diamond">Proses Otomatis</span>
+                  </div>
+
+                  {activePayment?.mode === 'coins' ? (
+                    <DuitkuPaymentPanel
+                      payment={activePayment}
+                      verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
+                      cancelling={false}
+                      copiedField={copiedField}
+                      onCopy={copyToClipboard}
+                      onCheckStatus={() => verifyLegacyCoinsOrder(activePayment.orderId, false)}
+                      onBack={() => setActivePayment(null)}
+                    />
+                  ) : (
+                    <>
+                      <div className="mp-coins-method-bar">
+                        <label htmlFor="coins-duitku-method" className="muted">
+                          Metode Pembayaran:
+                        </label>
+                        <select
+                          id="coins-duitku-method"
+                          className="input input--sm duitku-method-select"
+                          value={paymentMethod}
+                          onChange={e => setPaymentMethod(e.target.value)}
+                        >
+                          {duitkuMethods.map(m => (
+                            <option key={m.code} value={m.code}>{m.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <ul className="mp-pkg-grid">
+                        {legacyPackages.map(pkg => (
+                          <LegacyTopupCard
+                            key={pkg.id}
+                            pkg={pkg}
+                            currentUser={currentUser}
+                            topupLoadingId={topupLegacyId}
+                            onTopup={handleLegacyTopup}
+                          />
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
+
+              {legacyGroups.map(group => (
+                <section key={group.key} className="card mp-section-card">
+                  <div className={`shop__group-header ${group.key === 'quiz' ? 'shop__group-header--quiz' : ''}`}>
+                    <div>
+                      <h3 className="shop__group-title">
+                        <Icon name={group.icon} size={18} />
+                        <span>{group.name}</span>
+                      </h3>
+                      <p className="shop__group-desc">{group.desc}</p>
+                    </div>
+                    <span className="badge badge--brand">{group.badge}</span>
+                  </div>
+                  <ul className="mp-pkg-grid">
+                    {group.items.map(item => (
+                      <LegacyShopItemCard
+                        key={item.id}
+                        item={item}
+                        points={points}
+                        ownedCount={ownedItems[item.id] || 0}
+                        currentUser={currentUser}
+                        buyingId={buyingLegacyId}
+                        onBuy={buyLegacyItem}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </section>
+          )}
+
+          {/* ================= TAB 4: WALLET & IMMUTABLE TRANSACTIONS ================= */}
+          {activeTab === 'wallet' && (
+            <section className="mp-section" aria-label="Dompet Diamond dan Riwayat Transaksi">
+              {!currentUser ? (
+                <div className="card mp-empty-state">
+                  <p className="muted">Silakan login untuk melihat detail dompet dan riwayat transaksi Diamonds kamu.</p>
+                  {onOpenAuth && (
+                    <button type="button" className="btn btn--primary btn--sm" onClick={onOpenAuth}>
+                      Masuk Sekarang
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="wallet-kpi-grid">
+                    <div className="wallet-kpi card">
+                      <span className="muted">Saldo Diamonds</span>
+                      <strong>{diamonds.toLocaleString('id-ID')} 💎</strong>
+                    </div>
+                    <div className="wallet-kpi card">
+                      <span className="muted">Total Top-Up</span>
+                      <strong>{Number(wallet?.totalPurchased || 0).toLocaleString('id-ID')} 💎</strong>
+                    </div>
+                    <div className="wallet-kpi card">
+                      <span className="muted">Hasil Konversi Coins</span>
+                      <strong>{Number(wallet?.totalConverted || 0).toLocaleString('id-ID')} 💎</strong>
+                    </div>
+                    <div className="wallet-kpi card">
+                      <span className="muted">Total Terpakai</span>
+                      <strong>{Number(wallet?.totalSpent || 0).toLocaleString('id-ID')} 💎</strong>
+                    </div>
+                  </div>
+
+                  <div className="card mp-section-card">
+                    <div className="section-head">
+                      <h3>Riwayat Transaksi Diamonds</h3>
+                      <select
+                        className="input input--sm"
+                        value={txTypeFilter}
+                        onChange={e => setTxTypeFilter(e.target.value)}
+                        aria-label="Filter tipe transaksi"
+                      >
+                        <option value="">Semua Transaksi</option>
+                        <option value="TOPUP">Top-Up Diamonds</option>
+                        <option value="CONVERSION">Konversi Coins</option>
+                        <option value="SKIN_PURCHASE">Beli Skin Ludo</option>
+                        <option value="REFUND">Refund</option>
+                        <option value="ADMIN_ADJUSTMENT">Penyesuaian Admin</option>
+                      </select>
+                    </div>
+
+                    {transactions.length === 0 ? (
+                      <p className="muted">Belum ada transaksi Diamonds.</p>
+                    ) : (
+                      <div className="tx-table-wrap">
+                        <table className="tx-table">
+                          <thead>
+                            <tr>
+                              <th>Waktu</th>
+                              <th>Tipe</th>
+                              <th>Jumlah</th>
+                              <th>Saldo (Sebelum → Sesudah)</th>
+                              <th>Keterangan</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {transactions.map(tx => {
+                              const meta = txTypeLabel(tx.txType);
+                              return (
+                                <tr key={tx.id}>
+                                  <td>{formatDateTime(tx.createdAt)}</td>
+                                  <td><span className={`badge badge--${meta.tone}`}>{meta.label}</span></td>
+                                  <td className={tx.amount >= 0 ? 'tx-plus' : 'tx-minus'}>
+                                    {tx.amount >= 0 ? `+${tx.amount}` : tx.amount} 💎
+                                  </td>
+                                  <td>{tx.previousBalance} → <strong>{tx.newBalance}</strong></td>
+                                  <td>
+                                    <div>{tx.description}</div>
+                                    {tx.referenceId && <span className="muted code-text">Ref: {tx.referenceId}</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
+          {/* ================= TAB 5: ADMIN ECONOMY DASHBOARD ================= */}
+          {activeTab === 'admin' && isAdmin && (
+            <section className="mp-section" aria-label="Dashboard Admin Ekonomi">
+              <div className="mp-toolbar card">
+                <div className="admin-subtabs">
+                  {[
+                    { id: 'config', label: '⚙️ Kurs Konversi' },
+                    { id: 'packages', label: '📦 Paket Top-Up' },
+                    { id: 'skins', label: '🎨 Kelola Skin' },
+                    { id: 'adjust', label: '💎 Penyesuaian Saldo' },
+                    { id: 'logs', label: '📋 Riwayat & Log Pembayaran' }
+                  ].map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`btn btn--sm ${adminSubTab === s.id ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setAdminSubTab(s.id)}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={loadAdminOverview} disabled={adminLoading}>
+                  {adminLoading ? 'Memuat...' : 'Refresh'}
+                </button>
+              </div>
+
+              {adminOverview?.summary && (
+                <div className="wallet-kpi-grid">
+                  <div className="wallet-kpi card">
+                    <span className="muted">Diamonds Beredar</span>
+                    <strong>{adminOverview.summary.totalDiamondsCirculating.toLocaleString('id-ID')} 💎</strong>
+                  </div>
+                  <div className="wallet-kpi card">
+                    <span className="muted">Order Top-Up Lunas</span>
+                    <strong>{adminOverview.summary.totalPaidOrders} Order</strong>
+                  </div>
+                  <div className="wallet-kpi card">
+                    <span className="muted">Total Revenue Top-Up</span>
+                    <strong>{formatIdr(adminOverview.summary.totalRevenueIdr)}</strong>
+                  </div>
+                  <div className="wallet-kpi card">
+                    <span className="muted">Skin Terjual / Konversi</span>
+                    <strong>{adminOverview.summary.totalSkinsSold} Skin · {adminOverview.summary.totalConversions} Konv</strong>
+                  </div>
+                </div>
+              )}
+
+              {adminSubTab === 'config' && (
+                <form className="card admin-econ-form" onSubmit={saveAdminSettings}>
+                  <h3>Pengaturan Konversi Coins → Diamonds</h3>
+                  <div className="admin-form-grid">
+                    <label>
+                      <span>Coins per 1 Diamond</span>
+                      <input
+                        type="number"
+                        className="input"
+                        min={1}
+                        value={adminSettingsForm.coinsPerDiamond}
+                        onChange={e => setAdminSettingsForm(f => ({ ...f, coinsPerDiamond: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Minimum Konversi (Diamonds)</span>
+                      <input
+                        type="number"
+                        className="input"
+                        min={1}
+                        value={adminSettingsForm.minConvertDiamonds}
+                        onChange={e => setAdminSettingsForm(f => ({ ...f, minConvertDiamonds: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Maksimum Konversi (Diamonds)</span>
+                      <input
+                        type="number"
+                        className="input"
+                        min={1}
+                        value={adminSettingsForm.maxConvertDiamonds}
+                        onChange={e => setAdminSettingsForm(f => ({ ...f, maxConvertDiamonds: e.target.value }))}
+                      />
+                    </label>
+                    <label className="admin-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(adminSettingsForm.conversionEnabled)}
+                        onChange={e => setAdminSettingsForm(f => ({ ...f, conversionEnabled: e.target.checked }))}
+                      />
+                      <span>Aktifkan Fitur Konversi</span>
+                    </label>
+                  </div>
+                  <button type="submit" className="btn btn--primary">Simpan Pengaturan</button>
+                </form>
+              )}
+
+              {adminSubTab === 'packages' && (
+                <div className="mp-section">
+                  <form className="card admin-econ-form" onSubmit={saveAdminPackage}>
+                    <h3>{adminPkgForm.id ? `Edit Paket (${adminPkgForm.id})` : 'Tambah Paket Diamond Baru'}</h3>
+                    <div className="admin-form-grid">
+                      <label>
+                        <span>Nama Paket</span>
+                        <input className="input" value={adminPkgForm.name} onChange={e => setAdminPkgForm(f => ({ ...f, name: e.target.value }))} required />
+                      </label>
+                      <label>
+                        <span>Diamonds</span>
+                        <input type="number" className="input" min={1} value={adminPkgForm.diamonds} onChange={e => setAdminPkgForm(f => ({ ...f, diamonds: e.target.value }))} required />
+                      </label>
+                      <label>
+                        <span>Bonus Diamonds</span>
+                        <input type="number" className="input" min={0} value={adminPkgForm.bonusDiamonds} onChange={e => setAdminPkgForm(f => ({ ...f, bonusDiamonds: e.target.value }))} />
+                      </label>
+                      <label>
+                        <span>Harga (IDR)</span>
+                        <input type="number" className="input" min={1000} value={adminPkgForm.priceIdr} onChange={e => setAdminPkgForm(f => ({ ...f, priceIdr: e.target.value }))} required />
+                      </label>
+                      <label>
+                        <span>Badge Promo</span>
+                        <input className="input" value={adminPkgForm.badge} onChange={e => setAdminPkgForm(f => ({ ...f, badge: e.target.value }))} />
+                      </label>
+                      <label className="admin-checkbox-label">
+                        <input type="checkbox" checked={Boolean(adminPkgForm.isActive)} onChange={e => setAdminPkgForm(f => ({ ...f, isActive: e.target.checked }))} />
+                        <span>Aktif Dijual</span>
+                      </label>
+                    </div>
+                    <div className="admin-form-actions">
+                      <button type="submit" className="btn btn--primary">Simpan Paket</button>
+                      {adminPkgForm.id && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          onClick={() => setAdminPkgForm({ id: '', name: '', diamonds: 10, bonusDiamonds: 0, priceIdr: 5000, badge: '', sortOrder: 5, isActive: true })}
+                        >
+                          Mode Tambah Baru
+                        </button>
+                      )}
+                    </div>
+                  </form>
+
+                  <div className="card tx-table-wrap">
+                    <table className="tx-table">
+                      <thead>
+                        <tr><th>Paket</th><th>Diamonds</th><th>Harga IDR</th><th>Status</th><th>Aksi</th></tr>
+                      </thead>
+                      <tbody>
+                        {(adminOverview?.packages || []).map(p => (
+                          <tr key={p.id}>
+                            <td><strong>{p.name}</strong> {p.badge && <span className="badge">{p.badge}</span>}</td>
+                            <td>{p.diamonds}{p.bonusDiamonds > 0 ? ` (+${p.bonusDiamonds})` : ''} 💎</td>
+                            <td>{formatIdr(p.priceIdr)}</td>
+                            <td><span className={`badge ${p.isActive ? 'badge--success' : ''}`}>{p.isActive ? 'Aktif' : 'Nonaktif'}</span></td>
+                            <td>
+                              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setAdminPkgForm({ ...p })}>
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {adminSubTab === 'skins' && (
+                <div className="mp-section">
+                  <form className="card admin-econ-form" onSubmit={saveAdminSkin}>
+                    <h3>{adminSkinForm.id ? `Edit Skin (${adminSkinForm.id})` : 'Tambah Skin Bidak Ludo Baru'}</h3>
+                    <div className="admin-form-grid">
+                      <label>
+                        <span>Nama Skin</span>
+                        <input className="input" value={adminSkinForm.name} onChange={e => setAdminSkinForm(f => ({ ...f, name: e.target.value }))} required />
+                      </label>
+                      <label>
+                        <span>Harga (10–50 Diamonds)</span>
+                        <input type="number" className="input" min={10} max={50} value={adminSkinForm.priceDiamonds} onChange={e => setAdminSkinForm(f => ({ ...f, priceDiamonds: e.target.value }))} required />
+                      </label>
+                      <label>
+                        <span>Rarity</span>
+                        <select className="input" value={adminSkinForm.rarity} onChange={e => setAdminSkinForm(f => ({ ...f, rarity: e.target.value }))}>
+                          <option value="Common">Common</option>
+                          <option value="Rare">Rare</option>
+                          <option value="Epic">Epic</option>
+                          <option value="Legendary">Legendary</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Template Visual</span>
+                        <select className="input" value={adminSkinForm.assetKey} onChange={e => setAdminSkinForm(f => ({ ...f, assetKey: e.target.value }))}>
+                          <option value="classic_gold">Classic Gold</option>
+                          <option value="ruby_crystal">Ruby Crystal</option>
+                          <option value="ocean_blue">Ocean Blue</option>
+                          <option value="emerald_green">Emerald Green</option>
+                          <option value="galaxy_purple">Galaxy Purple</option>
+                          <option value="fire_phoenix">Fire Phoenix</option>
+                          <option value="legendary_diamond">Legendary Diamond</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Deskripsi</span>
+                        <input className="input" value={adminSkinForm.description} onChange={e => setAdminSkinForm(f => ({ ...f, description: e.target.value }))} />
+                      </label>
+                      <label className="admin-checkbox-label">
+                        <input type="checkbox" checked={Boolean(adminSkinForm.isActive)} onChange={e => setAdminSkinForm(f => ({ ...f, isActive: e.target.checked }))} />
+                        <span>Aktif di Shop</span>
+                      </label>
+                    </div>
+                    <div className="admin-form-actions">
+                      <button type="submit" className="btn btn--primary">Simpan Skin</button>
+                      {adminSkinForm.id && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          onClick={() => setAdminSkinForm({ id: '', name: '', description: '', priceDiamonds: 25, rarity: 'Rare', assetKey: 'classic_gold', accentColor: '#38bdf8', sortOrder: 8, isActive: true })}
+                        >
+                          Mode Tambah Baru
+                        </button>
+                      )}
+                    </div>
+                  </form>
+
+                  <div className="card tx-table-wrap">
+                    <table className="tx-table">
+                      <thead>
+                        <tr><th>Skin</th><th>Rarity</th><th>Harga</th><th>Status</th><th>Aksi</th></tr>
+                      </thead>
+                      <tbody>
+                        {(adminOverview?.skins || []).map(s => (
+                          <tr key={s.id}>
+                            <td><strong>{s.name}</strong></td>
+                            <td>{s.rarity}</td>
+                            <td>{s.priceDiamonds} 💎</td>
+                            <td><span className={`badge ${s.isActive ? 'badge--success' : ''}`}>{s.isActive ? 'Aktif' : 'Nonaktif'}</span></td>
+                            <td>
+                              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setAdminSkinForm({ ...s })}>
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {adminSubTab === 'adjust' && (
+                <form className="card admin-econ-form" onSubmit={submitAdminAdjustment}>
+                  <h3>Penyesuaian / Refund Saldo Diamonds Pemain</h3>
+                  <div className="admin-form-grid">
+                    <label>
+                      <span>Username atau User ID Pemain</span>
+                      <input className="input" placeholder="contoh: alice" value={adminAdjustForm.userId} onChange={e => setAdminAdjustForm(f => ({ ...f, userId: e.target.value }))} required />
+                    </label>
+                    <label>
+                      <span>Tipe Transaksi</span>
+                      <select className="input" value={adminAdjustForm.txType} onChange={e => setAdminAdjustForm(f => ({ ...f, txType: e.target.value }))}>
+                        <option value="ADMIN_ADJUSTMENT">Penyesuaian Saldo (+ / -)</option>
+                        <option value="REFUND">Refund (+)</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Jumlah Diamonds (+ tambah / - kurang)</span>
+                      <input type="number" className="input" value={adminAdjustForm.amount} onChange={e => setAdminAdjustForm(f => ({ ...f, amount: e.target.value }))} required />
+                    </label>
+                    <label>
+                      <span>Alasan Audit (Wajib)</span>
+                      <input className="input" placeholder="Alasan penyesuaian saldo" value={adminAdjustForm.reason} onChange={e => setAdminAdjustForm(f => ({ ...f, reason: e.target.value }))} required />
+                    </label>
+                  </div>
+                  <button type="submit" className="btn btn--primary">Eksekusi Penyesuaian Saldo</button>
+                </form>
+              )}
+
+              {adminSubTab === 'logs' && (
+                <div className="mp-section">
+                  <div className="card tx-table-wrap">
+                    <h4>Transaksi Diamonds Terbaru</h4>
+                    <table className="tx-table">
+                      <thead>
+                        <tr><th>Waktu</th><th>Pemain</th><th>Tipe</th><th>Jumlah</th><th>Keterangan</th></tr>
+                      </thead>
+                      <tbody>
+                        {(adminOverview?.transactions || []).slice(0, 25).map(t => (
+                          <tr key={t.id}>
+                            <td>{formatDateTime(t.createdAt)}</td>
+                            <td>{t.username}</td>
+                            <td>{t.txType}</td>
+                            <td className={t.amount >= 0 ? 'tx-plus' : 'tx-minus'}>{t.amount >= 0 ? `+${t.amount}` : t.amount} 💎</td>
+                            <td>{t.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="card tx-table-wrap">
+                    <h4>Log Notifikasi Pembayaran</h4>
+                    <table className="tx-table">
+                      <thead>
+                        <tr><th>Waktu</th><th>Order ID</th><th>Sig Valid</th><th>Result</th><th>Status Proses</th></tr>
+                      </thead>
+                      <tbody>
+                        {(adminOverview?.callbackLogs || []).slice(0, 20).map(l => (
+                          <tr key={l.id}>
+                            <td>{formatDateTime(l.createdAt)}</td>
+                            <td className="code-text">{l.orderId || '-'}</td>
+                            <td>{l.signatureValid ? '✅ Valid' : '❌ Ditolak'}</td>
+                            <td>{l.resultCode || '-'}</td>
+                            <td>{l.processingStatus} — <span className="muted">{l.notes}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }

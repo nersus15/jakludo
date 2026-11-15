@@ -90,6 +90,7 @@ function joinRoom(socket, code, payload) {
 
   const rawName = typeof payload.name === 'string' ? payload.name : '';
   const isFirstPlayer = room.players.length === 0;
+  const economyStore = require('../economy/store');
   const player = {
     id: socket.id,
     sessionId: makeSessionId(),
@@ -101,6 +102,7 @@ function joinRoom(socket, code, payload) {
     isHost: room.host === socket.id,
     isBot: false,
     isLudoKing: db.checkIsLudoKing(user?.id),
+    equippedSkin: economyStore.getValidatedEquippedSkin(user?.id),
     connected: true,
     autoPlayCount: 0,
     isOut: false,
@@ -165,10 +167,12 @@ function rejoinPlayer(socket, room, player, user) {
   player.autoPlayCount = 0;
   store.cancelLobbyRemoval(room, player);
   if (user) {
+    const economyStore = require('../economy/store');
     inventory.loadOwned(player, user.inventory);
     player.name = user.name || player.name;
     player.avatar = user.avatar || '🎲';
     player.isLudoKing = db.checkIsLudoKing(user.id);
+    player.equippedSkin = economyStore.getValidatedEquippedSkin(user.id);
   }
 
   if (room.host === oldSocketId || store.isCreator(room, player)) {

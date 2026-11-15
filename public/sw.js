@@ -53,6 +53,16 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
 
+  // Jangan intersep request cross-origin (mis. Google AdSense / fonts / analytics)
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // Jangan intersep file teks crawler agar tidak tertangkap sebagai cache navigasi SPA
+  if (url.pathname === '/ads.txt' || url.pathname === '/robots.txt' || url.pathname === '/sitemap.xml') {
+    return;
+  }
+
   // Jangan intersep WebSocket & socket.io polling/handshake
   if (url.pathname.startsWith('/socket.io')) {
     return;

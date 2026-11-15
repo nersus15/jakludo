@@ -397,7 +397,12 @@ test('AI Bot: automatic bot fallback when no human in queue + direct Play vs Bot
 
     const soloRoom = chessEngine.chessRooms.get(foundPayload.roomCode);
     assert.ok(soloRoom);
-    assert.equal(soloRoom.players.some(p => p.isBot), true);
+    const botPlayer = soloRoom.players.find(p => p.isBot);
+    assert.ok(botPlayer);
+    assert.equal(/\bbot\b/i.test(botPlayer.name), false);
+    assert.equal(botPlayer.name.includes('(Bot)'), false);
+    assert.notEqual(botPlayer.avatar, '🤖');
+    assert.match(botPlayer.name, /^[a-z0-9._]+$/);
 
     await emitAck(cSolo, 'chess:room:leave', { roomCode: foundPayload.roomCode, token: uSolo.token });
 

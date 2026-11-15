@@ -19,6 +19,7 @@ function AccountMenu({
   onOpenFriends,
   onOpenGroups,
   onOpenLeaderboard,
+  onOpenShop,
   onViewProfile,
   onUploadAvatar,
   onLogout
@@ -109,9 +110,14 @@ function AccountMenu({
                   {user.name} {user.isLudoKing && <Icon name="crown" size={16} label="Ludo King" />}
                 </strong>
                 <span className="muted">@{user.username}</span>
-                <span className="badge badge--brand">
-                  <Icon name="coin" size={14} /> {user.points ?? 0} Coins
-                </span>
+                <div className="account__currencies">
+                  <span className="badge badge--brand">
+                    <Icon name="coin" size={14} /> {user.points ?? 0} Coins
+                  </span>
+                  <span className="badge badge--diamond">
+                    <Icon name="diamond" size={14} /> {user.diamonds ?? 0} Diamonds
+                  </span>
+                </div>
               </div>
             </div>
             {onUploadAvatar && (
@@ -233,11 +239,27 @@ export default function AppHeader({
 
       <div className="app-header__actions">
         <NetworkIndicator {...network} />
-        {user && (
-          <span className="badge badge--brand app-header__points" title="Coins kamu">
-            <Icon name="coin" size={14} /> {user.points ?? 0}
-          </span>
-        )}
+        <div className="account-menu__stats">
+          {user && (
+            <>
+              <span className="badge badge--brand app-header__points" title="Coins kamu">
+                <Icon name="coin" size={14} /> {user.points ?? 0}
+              </span>
+              <button
+                type="button"
+                className="badge badge--diamond app-header__diamonds"
+                title="Diamonds kamu (Klik untuk Top-Up / Konversi)"
+                onClick={() => {
+                  setOpen(false);
+                  sound.playClick();
+                  onOpenShop?.();
+                }}
+              >
+                <Icon name="diamond" size={14} /> {user.diamonds ?? 0}
+              </button>
+            </>
+          )}
+        </div>
         {onOpenFriends && (
           <button
             type="button"
@@ -302,6 +324,7 @@ export default function AppHeader({
             onOpenFriends={onOpenFriends}
             onOpenGroups={onOpenGroups}
             onOpenLeaderboard={onOpenLeaderboard}
+            onOpenShop={onOpenShop}
             onViewProfile={onViewProfile}
             onUploadAvatar={onUploadAvatar}
             onLogout={onLogout}

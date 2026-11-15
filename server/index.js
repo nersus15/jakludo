@@ -40,6 +40,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '20kb' }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -114,6 +115,12 @@ app.get('/robots.txt', (req, res) => {
       ''
     ].join('\n')
   );
+});
+
+app.get('/ads.txt', (req, res) => {
+  res.type('text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send('google.com, pub-9965100396262528, DIRECT, f08c47fec0942fa0\n');
 });
 
 app.get('/sitemap.xml', (req, res) => {

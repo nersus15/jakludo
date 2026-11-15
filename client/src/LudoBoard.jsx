@@ -11,6 +11,7 @@ import { HudTimer } from './components/game/TurnTimer';
 import Icon from './components/Icon';
 import PlayerAvatar from './components/PlayerAvatar';
 import { isAvatarUrl } from './social/media';
+import { LudoSkinTokenInner } from './components/game/LudoSkinPawn';
 
 // Pemetaan sudut layar (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
 // berdasarkan sudut rotasi papan agar badge nama pemain selalu sejajar dengan letak markasnya
@@ -332,14 +333,13 @@ function LudoBoardView({
                     <button
                       type="button"
                       className={`pawn-token pawn-${color} ${canMove ? 'pawn-can-move pulse-anim' : ''}`}
+                      data-skin={player?.equippedSkin?.id || ''}
                       onClick={() => handlePawnClick(pawnIdx, canMove)}
                       disabled={!canMove}
                       aria-label={canMove ? `Jalankan bidak ${pawnIdx + 1} keluar markas` : `Bidak ${pawnIdx + 1} ${player?.name || ''} di markas`}
                     >
                       {/* base-yard sudah diputar balik; jangan putar lagi agar angka tidak miring */}
-                      <span className="pawn-inner">
-                        {pawnIdx + 1}
-                      </span>
+                      <LudoSkinTokenInner skin={player?.equippedSkin} number={pawnIdx + 1} />
                     </button>
                   )}
                 </div>
@@ -433,6 +433,7 @@ function LudoBoardView({
                   key={`${player.id}-${pawnIdx}`}
                   type="button"
                   className={btnClass}
+                  data-skin={player?.equippedSkin?.id || ''}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (isTarget) {
@@ -452,7 +453,9 @@ function LudoBoardView({
                   }
                   style={{ zIndex: isHopping ? 100 : (isTarget ? 90 : 10 + idx) }}
                 >
-                  <span className="pawn-inner" style={counterStyle}>{pawnIdx + 1}</span>
+                  <span className="pawn-counter-wrap" style={counterStyle}>
+                    <LudoSkinTokenInner skin={player?.equippedSkin} number={pawnIdx + 1} />
+                  </span>
                   {isTarget && <span className="pawn-target-crosshair" aria-hidden="true">🎯</span>}
                 </button>
               );

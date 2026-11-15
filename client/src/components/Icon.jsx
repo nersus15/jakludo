@@ -148,12 +148,25 @@ export default function Icon({ name, size = 20, className = '', label }) {
 
     case 'coin':
     case 'coins':
-    case 'diamond':
       return (
         <svg {...common}>
-          <circle cx="12" cy="12" r="9" fill="var(--brand-soft)" />
-          <circle cx="12" cy="12" r="6.2" strokeWidth="1.5" />
-          <path d="M12 7.8l1.1 2.7 2.9.2-2.3 1.9.8 2.8-2.5-1.6-2.5 1.6.8-2.8-2.3-1.9 2.9-.2Z" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="12" r="9" fill="rgba(245, 158, 11, 0.18)" stroke="#f59e0b" />
+          <circle cx="12" cy="12" r="6.2" stroke="#d97706" strokeWidth="1.5" />
+          <path d="M12 7.8l1.1 2.7 2.9.2-2.3 1.9.8 2.8-2.5-1.6-2.5 1.6.8-2.8-2.3-1.9 2.9-.2Z" fill="#f59e0b" stroke="none" />
+        </svg>
+      );
+    case 'diamond':
+    case 'diamonds':
+      return (
+        <svg {...common}>
+          <polygon
+            points="6.5,4.5 17.5,4.5 21,9.5 12,20.5 3,9.5"
+            fill="rgba(56, 189, 248, 0.24)"
+            stroke="#0ea5e9"
+            strokeWidth="1.7"
+          />
+          <polyline points="3,9.5 21,9.5" stroke="#0284c7" strokeWidth="1.5" />
+          <polyline points="8.5,4.5 7.5,9.5 12,20.5 16.5,9.5 15.5,4.5" stroke="#38bdf8" strokeWidth="1.4" />
         </svg>
       );
 

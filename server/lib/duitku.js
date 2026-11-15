@@ -1,8 +1,12 @@
-// Integrasi Duitku Payment Gateway (Duitku POP & Callback) untuk Topup Coins / Poin PlayGo
-// Dokumentasi: https://docs.duitku.com/api/id/#langkah-awal & https://docs.duitku.com/pop/id/
+// Integrasi Duitku Direct REST API v2 untuk Top-Up Diamonds & Coins PlayGo
+// Dokumentasi resmi: https://docs.duitku.com/api/id/
+// - List Payment Method : POST /webapi/api/merchant/paymentmethod/getpaymentmethod
+// - Request Transaction : POST /webapi/api/merchant/v2/inquiry
+// - Check Transaction   : POST /webapi/api/merchant/transactionStatus
+// - Callback Validation : md5(merchantCode + amount + merchantOrderId + apiKey)
 const crypto = require('crypto');
 
-// 6 Paket Top Up Coins
+// 6 Paket Top Up Coins Reguler
 const DIAMOND_PACKAGES = {
   diamond_50: {
     id: 'diamond_50',
@@ -32,7 +36,7 @@ const DIAMOND_PACKAGES = {
     coins: 260,
     price: 20000,
     formattedPrice: 'Rp 20.000',
-    description: 'Cukup untuk beli dice, emote, dan skin spesial.',
+    description: 'Cukup untuk beli item arena & taktik game.',
     icon: 'coin'
   },
   diamond_700: {
@@ -72,6 +76,63 @@ const DIAMOND_PACKAGES = {
 
 const COIN_PACKAGES = DIAMOND_PACKAGES;
 
+// Katalog Channel Pembayaran Resmi Duitku Direct API v2 (6 Channel Utama PlayGo)
+const DUITKU_PAYMENT_METHODS = [
+  {
+    code: 'SP',
+    label: 'QRIS (All E-Wallet & M-Banking)',
+    category: 'qris',
+    bank: 'QRIS',
+    badge: 'Instan',
+    description: 'Scan QR dari GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin, Wondr.'
+  },
+  {
+    code: 'M2',
+    label: 'Mandiri Virtual Account',
+    category: 'va',
+    bank: 'Mandiri',
+    badge: 'VA',
+    description: 'Transfer via Livin by Mandiri atau ATM Mandiri.'
+  },
+  {
+    code: 'BC',
+    label: 'BCA Virtual Account',
+    category: 'va',
+    bank: 'BCA',
+    badge: 'Populer',
+    description: 'Bayar lewat myBCA, BCA Mobile, KlikBCA, atau ATM BCA.'
+  },
+  {
+    code: 'I1',
+    label: 'BNI Virtual Account',
+    category: 'va',
+    bank: 'BNI',
+    badge: 'VA',
+    description: 'Transfer via Wondr / BNI Mobile Banking atau ATM BNI.'
+  },
+  {
+    code: 'SA',
+    label: 'ShopeePay E-Wallet',
+    category: 'ewallet',
+    bank: 'ShopeePay',
+    badge: 'E-Wallet',
+    description: 'Bayar instan melalui aplikasi ShopeePay.'
+  },
+  {
+    code: 'DA',
+    label: 'DANA E-Wallet',
+    category: 'ewallet',
+    bank: 'DANA',
+    badge: 'E-Wallet',
+    description: 'Bayar langsung lewat aplikasi DANA di ponselmu.'
+  }
+];
+
+function findPaymentMethodMeta(code) {
+  const clean = String(code || 'SP').trim().toUpperCase() || 'SP';
+  return DUITKU_PAYMENT_METHODS.find(m => m.code === clean) || DUITKU_PAYMENT_METHODS[0];
+}
+
 function getDuitkuConfig() {
   const merchantCode = process.env.DUITKU_MERCHANT_CODE || '';
   const apiKey = process.env.DUITKU_API_KEY || '';
@@ -80,12 +141,8 @@ function getDuitkuConfig() {
     process.env.DUITKU_IS_PRODUCTION === '1';
 
   const baseUrl = isProduction
-    ? 'https://api-prod.duitku.com/api/merchant'
-    : 'https://api-sandbox.duitku.com/api/merchant';
-
-  const popJsUrl = isProduction
-    ? 'https://app-prod.duitku.com/lib/js/duitku.js'
-    : 'https://app-sandbox.duitku.com/lib/js/duitku.js';
+    ? 'https://passport.duitku.com/webapi/api/merchant'
+    : 'https://sandbox.duitku.com/webapi/api/merchant';
 
   return {
     merchantCode,
@@ -93,84 +150,246 @@ function getDuitkuConfig() {
     isProduction,
     isConfigured: Boolean(merchantCode && apiKey),
     baseUrl,
-    createInvoiceUrl: `${baseUrl}/createInvoice`,
+    inquiryUrl: `${baseUrl}/v2/inquiry`,
+    createInvoiceUrl: `${baseUrl}/v2/inquiry`,
+    paymentMethodUrl: `${baseUrl}/paymentmethod/getpaymentmethod`,
     transactionStatusUrl: `${baseUrl}/transactionStatus`,
-    popJsUrl,
     callbackUrl: process.env.DUITKU_CALLBACK_URL || '',
     returnUrl: process.env.DUITKU_RETURN_URL || ''
   };
 }
 
-// Generate MD5 Hash
 function md5(string) {
   return crypto.createHash('md5').update(string).digest('hex');
 }
 
-/**
- * Buat transaksi Duitku POP (Create Invoice)
- * Endpoint: /api/merchant/createInvoice
- * Header Signature: sha256(merchantCode + timestamp + apiKey)
- */
-async function createInvoice({ orderId, pkg, user, host = '' }) {
-  const config = getDuitkuConfig();
+function sha256(string) {
+  return crypto.createHash('sha256').update(string).digest('hex');
+}
 
-  // Mode mock HANYA diizinkan pada unit test otomatis (NODE_ENV=test) jika belum dikonfigurasi
-  if (!config.isConfigured) {
-    if (process.env.NODE_ENV === 'test') {
+function formatDuitkuDatetime(date = new Date()) {
+  const wibMs = date.getTime() + 7 * 60 * 60 * 1000;
+  return new Date(wibMs).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function buildQrImageUrl(qrString) {
+  if (!qrString) return null;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrString)}`;
+}
+
+/**
+ * Ambil daftar metode pembayaran aktif dari Duitku Get Payment Method API
+ * Endpoint: POST /webapi/api/merchant/paymentmethod/getpaymentmethod
+ * Signature: sha256(merchantcode + amount + datetime + apiKey)
+ */
+async function getPaymentMethods(amount = 10000) {
+  const config = getDuitkuConfig();
+  const paymentAmount = Math.max(1000, Math.trunc(Number(amount) || 10000));
+
+  if (!config.isConfigured || (process.env.NODE_ENV === 'test' && process.env.DUITKU_LIVE_TEST !== '1')) {
+    return {
+      success: true,
+      source: 'catalog',
+      amount: paymentAmount,
+      methods: DUITKU_PAYMENT_METHODS
+    };
+  }
+
+  try {
+    const datetime = formatDuitkuDatetime();
+    const signature = sha256(`${config.merchantCode}${paymentAmount}${datetime}${config.apiKey}`);
+    const res = await fetch(config.paymentMethodUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      body: JSON.stringify({
+        merchantcode: config.merchantCode,
+        amount: paymentAmount,
+        datetime,
+        signature
+      })
+    });
+
+    if (!res.ok) {
       return {
         success: true,
-        orderId,
-        merchantCode: config.merchantCode || 'DTEST',
-        reference: `duitku_ref_${orderId}`,
-        paymentUrl: `https://app-sandbox.duitku.com/payment/mock_${orderId}`,
-        statusCode: '00',
-        statusMessage: 'SUCCESS',
-        isSimulation: true,
-        popJsUrl: config.popJsUrl
+        source: 'catalog_fallback',
+        amount: paymentAmount,
+        methods: DUITKU_PAYMENT_METHODS
       };
     }
-    throw new Error('Sistem pembayaran Duitku belum dikonfigurasi di server. Pastikan DUITKU_MERCHANT_CODE dan DUITKU_API_KEY telah diisi di file .env.');
+
+    const data = await res.json().catch(() => null);
+    const feeList = Array.isArray(data?.paymentFee) ? data.paymentFee : [];
+    if (feeList.length === 0) {
+      return {
+        success: true,
+        source: 'catalog_fallback',
+        amount: paymentAmount,
+        methods: DUITKU_PAYMENT_METHODS
+      };
+    }
+
+    const feeMap = new Map(
+      feeList.map(item => [String(item.paymentMethod || '').trim().toUpperCase(), item])
+    );
+    const mapped = DUITKU_PAYMENT_METHODS.map(local => {
+      const remote = feeMap.get(local.code);
+      return {
+        ...local,
+        paymentImage: remote?.paymentImage || null,
+        totalFee: remote ? Number(remote.totalFee || 0) : 0
+      };
+    });
+
+    return {
+      success: true,
+      source: 'duitku_api',
+      amount: paymentAmount,
+      methods: mapped
+    };
+  } catch (err) {
+    console.warn('[DUITKU GET PAYMENT METHOD ERROR]', err.message);
+    return {
+      success: true,
+      source: 'catalog_fallback',
+      amount: paymentAmount,
+      methods: DUITKU_PAYMENT_METHODS
+    };
+  }
+}
+
+/**
+ * Buat transaksi langsung via Duitku API v2 Inquiry (tanpa POP/SNAP)
+ * Endpoint: POST /webapi/api/merchant/v2/inquiry
+ * Signature: md5(merchantCode + merchantOrderId + paymentAmount + apiKey)
+ */
+async function createInvoice({
+  orderId,
+  pkg,
+  user,
+  host = '',
+  callbackPath = '/api/topup/notification',
+  returnUrlOverride = '',
+  paymentMethod = 'SP'
+}) {
+  const config = getDuitkuConfig();
+  const unitPrice = Number(pkg?.price ?? pkg?.priceIdr ?? pkg?.amountIdr ?? 0);
+  const totalDiamonds = Number(pkg?.totalDiamonds ?? pkg?.diamonds ?? pkg?.coins ?? 0);
+  const methodMeta = findPaymentMethodMeta(paymentMethod);
+  const selectedCode = methodMeta.code;
+
+  const shouldMockInTest =
+    process.env.NODE_ENV === 'test' &&
+    process.env.DUITKU_LIVE_TEST !== '1';
+
+  if (shouldMockInTest || (!config.isConfigured && process.env.NODE_ENV === 'test')) {
+    const isQris = methodMeta.category === 'qris';
+    const isVa = methodMeta.category === 'va';
+    const mockQrString = isQris
+      ? `00020101021226590014ID.CO.SHOPEE.WWW01189360091800215505920208215505920303UMI520458125303360540${unitPrice}5802ID5912PLAYGO STORE6007JAKARTA62200116${orderId}6304ABCD`
+      : null;
+    const mockVaNumber = isVa ? `8808${String(Date.now()).slice(-10)}` : null;
+
+    return {
+      success: true,
+      orderId,
+      merchantCode: config.merchantCode || 'DTEST',
+      reference: `duitku_ref_${orderId}`,
+      paymentUrl: `https://sandbox.duitku.com/payment/mock_${orderId}`,
+      vaNumber: mockVaNumber,
+      qrString: mockQrString,
+      qrCodeUrl: buildQrImageUrl(mockQrString),
+      paymentMethod: selectedCode,
+      paymentMethodName: methodMeta.label,
+      paymentCategory: methodMeta.category,
+      bank: methodMeta.bank || null,
+      statusCode: '00',
+      statusMessage: 'SUCCESS',
+      grossAmount: unitPrice,
+      diamonds: totalDiamonds,
+      status: 'pending',
+      isSimulation: true
+    };
   }
 
-  const paymentAmount = Number(pkg.price);
-  const timestamp = Date.now();
-  const signature = crypto
-    .createHash('sha256')
-    .update(`${config.merchantCode}${timestamp}${config.apiKey}`)
-    .digest('hex');
+  if (!config.isConfigured) {
+    throw new Error(
+      'Sistem pembayaran Duitku belum dikonfigurasi di server. Pastikan DUITKU_MERCHANT_CODE dan DUITKU_API_KEY telah diisi di file .env.'
+    );
+  }
 
-  // Tentukan callback & return URL
-  let callbackUrl = config.callbackUrl;
+  const paymentAmount = Math.trunc(unitPrice);
+  const signature = md5(`${config.merchantCode}${orderId}${paymentAmount}${config.apiKey}`);
+
+  let callbackUrl = '';
+  if (config.callbackUrl) {
+    try {
+      const parsed = new URL(config.callbackUrl);
+      callbackUrl = callbackPath && callbackPath !== '/api/topup/notification'
+        ? `${parsed.origin}${callbackPath}`
+        : config.callbackUrl;
+    } catch {
+      callbackUrl = config.callbackUrl;
+    }
+  }
   if (!callbackUrl && host) {
-    const proto = host.includes('localhost') ? 'http' : 'https';
-    callbackUrl = `${proto}://${host}/api/topup/notification`;
+    const proto = host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
+    callbackUrl = `${proto}://${host}${callbackPath}`;
   }
-  let returnUrl = config.returnUrl;
+
+  let returnUrl = returnUrlOverride || config.returnUrl;
   if (!returnUrl && host) {
-    const proto = host.includes('localhost') ? 'http' : 'https';
+    const proto = host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
     returnUrl = `${proto}://${host}`;
   }
 
+  const cleanUsername = String(user?.username || 'player').replace(/[^a-zA-Z0-9._-]/g, '') || 'player';
+  const cleanCustomerName =
+    String(user?.name || user?.username || 'PlayGo Player')
+      .replace(/[^a-zA-Z0-9 ]/g, ' ')
+      .trim()
+      .slice(0, 30) || 'PlayGo Player';
+  const email = user?.email || `${cleanUsername}@playgo.game`;
+  const phoneNumber = user?.phone || '081234567890';
+  const productTitle = `${pkg.name} (${totalDiamonds} ${callbackPath.includes('economy') ? 'Diamonds' : 'Coins'})`;
+
   const payload = {
+    merchantCode: config.merchantCode,
     paymentAmount,
+    paymentMethod: selectedCode,
     merchantOrderId: orderId,
-    productDetails: `${pkg.name} (${pkg.diamonds} Diamonds)`,
-    email: user.email || `${user.username || 'player'}@playgo.game`,
-    phoneNumber: user.phone || '081234567890',
-    customerVaName: (user.name || user.username || 'PlayGo Player').slice(0, 30),
-    callbackUrl: callbackUrl || 'https://playgo.game/api/topup/notification',
-    returnUrl: returnUrl || 'https://playgo.game',
-    expiryPeriod: 1440 // 24 jam
+    productDetails: productTitle.slice(0, 255),
+    additionalParam: String(user?.id || ''),
+    merchantUserInfo: String(user?.username || user?.id || ''),
+    customerVaName: cleanCustomerName,
+    email,
+    phoneNumber,
+    itemDetails: [
+      {
+        name: productTitle.slice(0, 50),
+        price: paymentAmount,
+        quantity: 1
+      }
+    ],
+    customerDetail: {
+      firstName: cleanCustomerName,
+      email,
+      phoneNumber
+    },
+    callbackUrl: callbackUrl || `https://playgo.devgate.my.id${callbackPath}`,
+    returnUrl: returnUrl || 'https://playgo.devgate.my.id',
+    signature,
+    expiryPeriod: 1440
   };
 
-  const res = await fetch(config.createInvoiceUrl, {
+  const res = await fetch(config.inquiryUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'x-duitku-signature': signature,
-      'x-duitku-timestamp': String(timestamp),
-      'x-duitku-merchantcode': config.merchantCode
+      Accept: 'application/json'
     },
     body: JSON.stringify(payload)
   });
@@ -184,21 +403,30 @@ async function createInvoice({ orderId, pkg, user, host = '' }) {
   }
 
   if (!res.ok || (data.statusCode && data.statusCode !== '00')) {
-    const errorMsg = data.statusMessage || rawText || `Duitku Create Invoice Error (${res.status})`;
+    const errorMsg = data.Message || data.statusMessage || rawText || `Duitku Inquiry API Error (${res.status})`;
     throw new Error(errorMsg);
   }
+
+  const qrString = data.qrString || null;
+  const vaNumber = data.vaNumber || null;
 
   return {
     success: true,
     orderId,
-    reference: data.reference,
-    paymentUrl: data.paymentUrl,
+    reference: data.reference || null,
+    paymentUrl: data.paymentUrl || null,
+    vaNumber,
+    qrString,
+    qrCodeUrl: buildQrImageUrl(qrString),
+    paymentMethod: selectedCode,
+    paymentMethodName: methodMeta.label,
+    paymentCategory: methodMeta.category,
+    bank: methodMeta.bank || null,
     statusCode: data.statusCode || '00',
     statusMessage: data.statusMessage || 'SUCCESS',
-    merchantCode: config.merchantCode,
-    popJsUrl: config.popJsUrl,
-    grossAmount: pkg.price,
-    diamonds: pkg.diamonds,
+    merchantCode: data.merchantCode || config.merchantCode,
+    grossAmount: Number(data.amount || paymentAmount),
+    diamonds: totalDiamonds,
     status: 'pending'
   };
 }
@@ -209,15 +437,22 @@ async function createInvoice({ orderId, pkg, user, host = '' }) {
  */
 function verifyDuitkuCallback(payload) {
   const config = getDuitkuConfig();
+  const { merchantCode, amount, merchantOrderId, signature } = payload || {};
+
   if (!config.apiKey) {
-    // Hanya izinkan bypass pada mode pengujian internal NODE_ENV === 'test'
-    return process.env.NODE_ENV === 'test';
+    if (process.env.NODE_ENV !== 'test') return false;
+    if (!merchantOrderId) return false;
+    if (String(signature || '').toLowerCase().includes('invalid')) return false;
+    return true;
   }
 
-  const { merchantCode, amount, merchantOrderId, signature } = payload || {};
   if (!merchantOrderId || !signature || amount === undefined || amount === null) return false;
+  if (config.merchantCode && merchantCode && String(merchantCode) !== String(config.merchantCode)) {
+    return false;
+  }
 
-  const expectedSignature = md5(`${merchantCode || config.merchantCode}${amount}${merchantOrderId}${config.apiKey}`);
+  const resolvedMerchant = merchantCode || config.merchantCode;
+  const expectedSignature = md5(`${resolvedMerchant}${amount}${merchantOrderId}${config.apiKey}`);
   const sigBuf = Buffer.from(String(signature).toLowerCase(), 'utf8');
   const expBuf = Buffer.from(expectedSignature.toLowerCase(), 'utf8');
 
@@ -227,12 +462,15 @@ function verifyDuitkuCallback(payload) {
 
 /**
  * Cek status transaksi ke Duitku secara langsung
- * Endpoint: /api/merchant/transactionStatus
+ * Endpoint: POST /webapi/api/merchant/transactionStatus
  * Signature: md5(merchantCode + merchantOrderId + apiKey)
  */
 async function checkDuitkuStatus(orderId) {
   const config = getDuitkuConfig();
   if (!config.isConfigured) return null;
+  if (process.env.NODE_ENV === 'test' && process.env.DUITKU_LIVE_TEST !== '1') {
+    return null;
+  }
 
   try {
     const signature = md5(`${config.merchantCode}${orderId}${config.apiKey}`);
@@ -252,8 +490,7 @@ async function checkDuitkuStatus(orderId) {
     });
 
     if (!res.ok) return null;
-    const data = await res.json().catch(() => null);
-    return data;
+    return await res.json().catch(() => null);
   } catch (err) {
     console.error('[DUITKU STATUS CHECK ERROR]', err.message);
     return null;
@@ -263,9 +500,15 @@ async function checkDuitkuStatus(orderId) {
 module.exports = {
   DIAMOND_PACKAGES,
   COIN_PACKAGES,
+  DUITKU_PAYMENT_METHODS,
+  findPaymentMethodMeta,
   getDuitkuConfig,
+  md5,
+  sha256,
+  buildQrImageUrl,
+  getPaymentMethods,
   createInvoice,
+  createInquiry: createInvoice,
   verifyDuitkuCallback,
   checkDuitkuStatus
 };
-

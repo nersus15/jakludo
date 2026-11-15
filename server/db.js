@@ -282,6 +282,28 @@ function persistLocalFallback() {
   }
 }
 
+function getAdminUsernameSet() {
+  const raw = process.env.ADMIN_USERNAMES || 'admin';
+  return new Set(
+    raw
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function resolveUserRole(role, username) {
+  if (role === 'admin') return 'admin';
+  const uname = String(username || '').trim().toLowerCase();
+  if (uname && getAdminUsernameSet().has(uname)) return 'admin';
+  return 'player';
+}
+
+function isUserAdmin(userOrRow) {
+  if (!userOrRow) return false;
+  return resolveUserRole(userOrRow.role, userOrRow.username) === 'admin';
+}
+
 function setUserInState(u) {
   const row = {
     id: u.id,
@@ -292,6 +314,7 @@ function setUserInState(u) {
     avatar: u.avatar || null,
     email: u.email || null,
     googleId: u.googleId || u.google_id || null,
+    role: resolveUserRole(u.role, u.username),
     createdAt: u.createdAt || u.created_at || new Date().toISOString()
   };
   state.usersById.set(row.id, row);
@@ -585,6 +608,7 @@ async function init(options = {}) {
       await require('./quiz/store').hydrateFromPostgres();
       await require('./chess/store').hydrateFromPostgres();
       await require('./snakes/store').hydrateFromPostgres();
+      await require('./economy/store').hydrateFromPostgres();
       console.log(`[PG] Terhubung ke PostgreSQL (${state.usersById.size} user, ${state.leaderboard.size} leaderboard, ${state.rooms.size} room aktif).`);
     } else {
       console.warn('[DB] DATABASE_URL belum diset; berjalan dengan penyimpanan lokal di', DATA_DIR);
@@ -626,6 +650,7 @@ function buildUserObject(row) {
     avatar: row.avatar,
     email: row.email || undefined,
     googleId: row.googleId || undefined,
+    role: resolveUserRole(row.role, row.username),
     createdAt: row.createdAt,
     inventory: getUserItems(row.id)
   };
@@ -953,9 +978,86 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
 // PROFIL USER
 // ==========================================
 
+function getPool() {
+  return pool && !closed ? pool : null;
+}
+
+function syncUserRoleInState(userId, role) {
+  const row = state.usersById.get(userId);
+  if (!row) return null;
+  row.role = resolveUserRole(role, row.username);
+  return row;
+}
+
+async function setUserRole(userId, role) {
+  const row = state.usersById.get(userId);
+  if (!row) return null;
+  const resolved = role === 'admin' ? 'admin' : 'player';
+  row.role = resolveUserRole(resolved, row.username);
+  if (pool && !closed) {
+    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [row.role, userId]);
+  }
+  persistLocalFallback();
+  return sanitizeUser(findUserById(userId));
+}
+
+function getUserPoints(userId) {
+  const user = findUserById(userId);
+  if (!user) return 0;
+  const entry = ensureLeaderboardEntry(user);
+  return Number(entry.points || 0);
+}
+
+function adjustUserPointsInState(userId, delta) {
+  const user = findUserById(userId);
+  if (!user) return null;
+  const entry = ensureLeaderboardEntry(user);
+  const next = Number(entry.points || 0) + Math.trunc(Number(delta) || 0);
+  if (next < 0) return null;
+  entry.points = next;
+  persistLocalFallback();
+  return next;
+}
+
+function deductUserPoints(userId, amount) {
+  const amt = Math.floor(Number(amount) || 0);
+  if (!userId || amt <= 0) return null;
+  const user = findUserById(userId);
+  if (!user) return null;
+  const entry = ensureLeaderboardEntry(user);
+  if (Number(entry.points || 0) < amt) return null;
+  const previous = Number(entry.points || 0);
+  entry.points = previous - amt;
+  persistLocalFallback();
+  execPg(
+    'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
+    [amt, userId]
+  );
+  return { previous, current: entry.points };
+}
+
 function sanitizeUser(u) {
   if (!u) return null;
   const entry = state.leaderboard.get(u.id);
+  const points = entry ? entry.points : 0;
+  let diamonds = 0;
+  let equippedLudoSkin = null;
+  let ownedLudoSkins = [];
+  try {
+    const economyStore = require('./economy/store');
+    if (typeof economyStore.getDiamondBalanceSync === 'function') {
+      diamonds = economyStore.getDiamondBalanceSync(u.id);
+    }
+    if (typeof economyStore.getEquippedSkinSync === 'function') {
+      equippedLudoSkin = economyStore.getEquippedSkinSync(u.id);
+    }
+    if (typeof economyStore.getOwnedSkinIdsSync === 'function') {
+      ownedLudoSkins = economyStore.getOwnedSkinIdsSync(u.id);
+    }
+  } catch {
+    // Abaikan jika modul economy belum dimuat
+  }
+  const role = resolveUserRole(u.role, u.username);
   return {
     id: u.id,
     username: u.username,
@@ -963,7 +1065,13 @@ function sanitizeUser(u) {
     avatar: u.avatar,
     email: u.email,
     authType: u.authType,
-    points: entry ? entry.points : 0,
+    role,
+    isAdmin: role === 'admin',
+    points,
+    coins: points,
+    diamonds,
+    equippedLudoSkin,
+    ownedLudoSkins,
     inventory: { ...u.inventory }
   };
 }
@@ -1761,6 +1869,18 @@ module.exports = {
   getTopupOrder,
   completeTopupOrder,
   saveRoom,
+  getPool,
+  execPg,
+  execPgTransaction,
+  findUserById,
+  findUserByUsername,
+  ensureGlobalLeaderboardRow,
+  getUserPoints,
+  adjustUserPointsInState,
+  deductUserPoints,
+  isUserAdmin,
+  setUserRole,
+  syncUserRoleInState,
   deleteRoom,
   loadRooms,
   close

@@ -311,7 +311,7 @@ function getPlayerProfile(userId) {
       userId: bot.id,
       username: bot.username,
       name: bot.name,
-      avatar: bot.avatar || '🤖',
+      avatar: bot.avatar || '1',
       rating: bot.rating || DEFAULT_RATING,
       highestRating: bot.rating || DEFAULT_RATING,
       totalGames: 0,

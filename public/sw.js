@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jakludo-pwa-v7';
+const CACHE_NAME = 'jakludo-pwa-v8';
 
 const STATIC_ASSETS = [
   '/',

@@ -976,3 +976,74 @@ test('GET /ads.txt mengembalikan text/plain dengan publisher Google AdSense', as
   const body = await res.text();
   assert.equal(body.trim(), 'google.com, pub-9965100396262528, DIRECT, f08c47fec0942fa0');
 });
+
+test('SEO Global: robots.txt, sitemap.xml hreflang, dan SSR meta/JSON-LD untuk 4 game & multi-bahasa', async () => {
+  // 1. /robots.txt
+  const robotsRes = await fetch(`${url}/robots.txt`);
+  assert.equal(robotsRes.status, 200);
+  const robotsText = await robotsRes.text();
+  assert.match(robotsText, /Allow: \/\?game=jakludo/);
+  assert.match(robotsText, /Allow: \/\?game=chess-master/);
+  assert.match(robotsText, /Allow: \/\?game=snakes-and-ladders/);
+  assert.match(robotsText, /Allow: \/\?game=monster-quiz/);
+  assert.match(robotsText, /Allow: \/\?hl=en/);
+  assert.match(robotsText, /Allow: \/\?hl=id/);
+  assert.match(robotsText, new RegExp(`Sitemap: ${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/sitemap\\.xml`));
+
+  // 2. /sitemap.xml
+  const sitemapRes = await fetch(`${url}/sitemap.xml`);
+  assert.equal(sitemapRes.status, 200);
+  assert.match(sitemapRes.headers.get('content-type') || '', /application\/xml/i);
+  const sitemapXml = await sitemapRes.text();
+  assert.match(sitemapXml, /xmlns:xhtml="http:\/\/www\.w3\.org\/1999\/xhtml"/);
+  for (const q of ['', '?game=jakludo', '?game=chess-master', '?game=snakes-and-ladders', '?game=monster-quiz']) {
+    const baseLoc = `${url}/${q}`;
+    assert.ok(sitemapXml.includes(`<loc>${baseLoc}</loc>`), `Sitemap harus memuat ${baseLoc}`);
+    const sep = q ? '&amp;' : '?';
+    assert.ok(sitemapXml.includes(`hreflang="x-default" href="${baseLoc}"`));
+    assert.ok(sitemapXml.includes(`hreflang="en" href="${baseLoc}${sep}hl=en"`));
+    assert.ok(sitemapXml.includes(`hreflang="id" href="${baseLoc}${sep}hl=id"`));
+  }
+
+  // 3. SSR Hub / (default global en)
+  const hubHtml = await (await fetch(`${url}/`)).text();
+  assert.match(hubHtml, /<html lang="en"/);
+  assert.ok(hubHtml.includes(`<link rel="canonical" href="${url}/" />`));
+  assert.ok(hubHtml.includes(`<link rel="alternate" hreflang="x-default" href="${url}/" />`));
+  assert.ok(hubHtml.includes(`<link rel="alternate" hreflang="en" href="${url}/?hl=en" />`));
+  assert.ok(hubHtml.includes(`<link rel="alternate" hreflang="id" href="${url}/?hl=id" />`));
+
+  // Verifikasi JSON-LD valid dengan ke-4 game & URL absolut
+  const jsonLdMatch = hubHtml.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  assert.ok(jsonLdMatch, 'JSON-LD script harus ada');
+  const jsonLd = JSON.parse(jsonLdMatch[1]);
+  const graph = jsonLd['@graph'] || [];
+  const org = graph.find(n => n['@type'] === 'Organization');
+  assert.ok(org && org.url.startsWith(`${url}/`) && org.logo.startsWith(`${url}/playgo-logo.jpg`));
+  const videoGameNames = graph.filter(n => n['@type'] === 'VideoGame').map(n => n.name);
+  for (const expectedName of ['JakLudo', 'Monster Quiz Battle', 'Chess Master', 'Snakes and Ladders']) {
+    assert.ok(videoGameNames.includes(expectedName), `JSON-LD harus memuat VideoGame ${expectedName}`);
+  }
+  assert.ok(graph.some(n => n['@type'] === 'ItemList' && n.numberOfItems === 4));
+  assert.ok(graph.some(n => n['@type'] === 'FAQPage'));
+
+  // 4. SSR Chess Master
+  const chessHtml = await (await fetch(`${url}/?game=chess-master`)).text();
+  assert.match(chessHtml, /<title>Chess Master \(Play Online Multiplayer Chess/);
+  assert.ok(chessHtml.includes(`<link rel="canonical" href="${url}/?game=chess-master" />`));
+  assert.ok(chessHtml.includes(`<link rel="alternate" hreflang="en" href="${url}/?game=chess-master&amp;hl=en" />`));
+
+  // 5. SSR Snakes & Ladders (?hl=en)
+  const snakesEnHtml = await (await fetch(`${url}/?game=snakes-and-ladders&hl=en`)).text();
+  assert.match(snakesEnHtml, /<html lang="en"/);
+  assert.match(snakesEnHtml, /<meta property="og:locale" content="en_US" \/>/);
+  assert.match(snakesEnHtml, /<title>Snakes and Ladders Online Multiplayer/);
+  assert.ok(snakesEnHtml.includes(`<link rel="canonical" href="${url}/?game=snakes-and-ladders&amp;hl=en" />`));
+
+  // 6. SSR JakLudo (?hl=id)
+  const ludoIdHtml = await (await fetch(`${url}/?game=jakludo&hl=id`)).text();
+  assert.match(ludoIdHtml, /<html lang="id"/);
+  assert.match(ludoIdHtml, /<meta property="og:locale" content="id_ID" \/>/);
+  assert.match(ludoIdHtml, /<title>Main JakLudo Online \(Ludo 2–4 Pemain Realtime\)/);
+  assert.ok(ludoIdHtml.includes(`<link rel="canonical" href="${url}/?game=jakludo&amp;hl=id" />`));
+});

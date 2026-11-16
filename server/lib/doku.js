@@ -511,7 +511,7 @@ async function createInvoice({
       amount: paymentAmount,
       invoice_number: orderId,
       currency: 'IDR',
-      callback_url: callbackUrl,
+      callback_url: returnUrl,
       callback_url_cancel: returnUrl,
       callback_url_result: returnUrl,
       auto_redirect: true,

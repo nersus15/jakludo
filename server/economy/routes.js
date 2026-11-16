@@ -166,6 +166,12 @@ function registerEconomyRoutes(api) {
     res.json(result);
   }));
 
+  // Fallback GET jika browser user diarahkan ke URL callback (Back to Merchant)
+  router.get('/economy/topup/callback', (req, res) => {
+    const targetUrl = process.env.PUBLIC_URL || process.env.APP_URL || '/';
+    return res.redirect(302, targetUrl);
+  });
+
   // Server-to-server payment gateway callback webhook (DOKU / Duitku)
   router.post('/economy/topup/callback', asyncRoute(async (req, res) => {
     const payload = req.body || {};

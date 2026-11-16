@@ -353,6 +353,12 @@ function createApiRouter() {
     res.json({ success: true, order });
   }));
 
+  // Fallback GET jika browser user diarahkan ke URL notifikasi (Back to Merchant)
+  api.get('/topup/notification', (req, res) => {
+    const targetUrl = process.env.PUBLIC_URL || process.env.APP_URL || '/';
+    return res.redirect(302, targetUrl);
+  });
+
   // Webhook notifikasi Payment Gateway (DOKU / Duitku Callback URL)
   api.post('/topup/notification', asyncRoute(async (req, res) => {
     const notif = req.body || {};

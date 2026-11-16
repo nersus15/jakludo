@@ -326,7 +326,7 @@ function LegacyTopupCard({ pkg, currentUser, topupLoadingId, onTopup }) {
           disabled={!currentUser || isBusy}
           onClick={() => onTopup(pkg)}
         >
-          {isBusy ? 'Memproses...' : !currentUser ? 'Login' : 'Buat Tagihan'}
+          {isBusy ? 'Memproses...' : !currentUser ? 'Login' : 'Top Up Coin'}
         </button>
       </div>
     </li>
@@ -1174,7 +1174,8 @@ export default function ShopModal({
   const navItems = [
     { id: 'skins', icon: 'pawn', label: 'Skin Bidak Ludo', count: skins.length },
     { id: 'diamonds', icon: 'diamond', label: 'Top-Up & Konversi 💎', count: diamondPackages.length },
-    { id: 'items', icon: 'shop', label: 'Item Game & Coins', count: catalogItems.length },
+    { id: 'items', icon: 'shop', label: 'Item Game', count: catalogItems.length },
+    { id: 'coins', icon: 'coin', label: 'Coins', count: legacyPackages.length },
     { id: 'wallet', icon: 'trophy', label: 'Dompet & Riwayat', count: null },
     ...(isAdmin ? [{ id: 'admin', icon: 'crown', label: 'Admin Ekonomi', count: null }] : [])
   ];
@@ -1229,7 +1230,7 @@ export default function ShopModal({
               className="btn btn--secondary btn--sm"
               onClick={() => {
                 sound.playClick();
-                setActiveTab('diamonds');
+                setActiveTab('coins');
                 setTopupCurrency('coins');
               }}
             >
@@ -1938,7 +1939,7 @@ export default function ShopModal({
                             >
                               {topupLegacyId === selectedCoinPkg.id
                                 ? 'Membuat Tagihan...'
-                                : 'Buat Tagihan Pembayaran'}
+                                : 'Top Up Coin'}
                             </button>
                           ) : (
                             <button
@@ -2043,14 +2044,13 @@ export default function ShopModal({
             </div>
           )}
 
-          {/* ================= TAB 3: LEGACY COINS SHOP & COINS TOP-UP ================= */}
+          {/* ================= TAB 3: ITEM GAME ================= */}
           {activeTab === 'items' && (
-            <section className="mp-section" aria-label="Item Game dan Top-Up Coins">
+            <section className="mp-section" aria-label="Item Game">
               <div className="mp-toolbar card">
                 <div className="skin-filter-pills">
                   {[
-                    { id: 'all', label: `Semua (${catalogItems.length + legacyPackages.length})` },
-                    { id: 'topup', label: 'Top Up Coins' },
+                    { id: 'all', label: `Semua (${catalogItems.length})` },
                     { id: 'ludo', label: `JakLudo (${ludoItems.length})` },
                     { id: 'quiz', label: `Monster Quiz (${quizItems.length})` }
                   ].map(f => (
@@ -2065,64 +2065,6 @@ export default function ShopModal({
                   ))}
                 </div>
               </div>
-
-              {(legacyCategory === 'all' || legacyCategory === 'topup') && legacyPackages.length > 0 && (
-                <section className="card mp-section-card">
-                  <div className="mp-card-head mp-card-head--topup">
-                    <div>
-                      <h3 className="shop__group-title">
-                        <Icon name="coin" size={18} />
-                        <span>Top Up Coins PlayGo (Reguler)</span>
-                      </h3>
-                      <p className="shop__group-desc">Coins dipakai untuk beli item arena, Hints Jawaban kuis, dan perlengkapan game.</p>
-                    </div>
-                    <span className="badge badge--diamond">Proses Otomatis</span>
-                  </div>
-
-                  {activePayment?.mode === 'coins' ? (
-                    <DuitkuPaymentPanel
-                      payment={activePayment}
-                      verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
-                      cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
-                      copiedField={copiedField}
-                      onCopy={copyToClipboard}
-                      onCheckStatus={() => verifyLegacyCoinsOrder(activePayment.orderId, false)}
-                      onCancelOrder={() => cancelLegacyCoinsOrder(activePayment.orderId)}
-                      onBack={() => setActivePayment(null)}
-                    />
-                  ) : (
-                    <>
-                      <div className="mp-coins-method-bar">
-                        <label htmlFor="coins-duitku-method" className="muted">
-                          Metode Pembayaran:
-                        </label>
-                        <select
-                          id="coins-duitku-method"
-                          className="input input--sm duitku-method-select"
-                          value={paymentMethod}
-                          onChange={e => setPaymentMethod(e.target.value)}
-                        >
-                          {duitkuMethods.map(m => (
-                            <option key={m.code} value={m.code}>{m.label}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <ul className="mp-pkg-grid">
-                        {legacyPackages.map(pkg => (
-                          <LegacyTopupCard
-                            key={pkg.id}
-                            pkg={pkg}
-                            currentUser={currentUser}
-                            topupLoadingId={topupLegacyId}
-                            onTopup={handleLegacyTopup}
-                          />
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </section>
-              )}
 
               {legacyGroups.map(group => (
                 <section key={group.key} className="card mp-section-card">
@@ -2151,6 +2093,67 @@ export default function ShopModal({
                   </ul>
                 </section>
               ))}
+            </section>
+          )}
+
+          {/* ================= TAB 4: COINS TOP-UP ================= */}
+          {activeTab === 'coins' && (
+            <section className="mp-section" aria-label="Top Up Coins">
+              <section className="card mp-section-card">
+                <div className="mp-card-head mp-card-head--topup">
+                  <div>
+                    <h3 className="shop__group-title">
+                      <Icon name="coin" size={18} />
+                      <span>Top Up Coins PlayGo (Reguler)</span>
+                    </h3>
+                    <p className="shop__group-desc">Coins dipakai untuk beli item arena, Hints Jawaban kuis, dan perlengkapan game.</p>
+                  </div>
+                  <span className="badge badge--diamond">Proses Otomatis</span>
+                </div>
+
+                {activePayment?.mode === 'coins' ? (
+                  <DuitkuPaymentPanel
+                    payment={activePayment}
+                    verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
+                    cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
+                    copiedField={copiedField}
+                    onCopy={copyToClipboard}
+                    onCheckStatus={() => verifyLegacyCoinsOrder(activePayment.orderId, false)}
+                    onCancelOrder={() => cancelLegacyCoinsOrder(activePayment.orderId)}
+                    onBack={() => setActivePayment(null)}
+                  />
+                ) : (
+                  <>
+                    <div className="mp-coins-method-bar">
+                      <label htmlFor="coins-duitku-method" className="muted">
+                        Metode Pembayaran:
+                      </label>
+                      <select
+                        id="coins-duitku-method"
+                        className="input input--sm duitku-method-select"
+                        value={paymentMethod}
+                        onChange={e => setPaymentMethod(e.target.value)}
+                      >
+                        {duitkuMethods.map(m => (
+                          <option key={m.code} value={m.code}>{m.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <ul className="mp-pkg-grid">
+                      {legacyPackages.map(pkg => (
+                        <LegacyTopupCard
+                          key={pkg.id}
+                          pkg={pkg}
+                          currentUser={currentUser}
+                          topupLoadingId={topupLegacyId}
+                          onTopup={handleLegacyTopup}
+                        />
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </section>
             </section>
           )}
 

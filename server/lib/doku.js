@@ -20,6 +20,7 @@ const DOKU_PAYMENT_METHODS = [
   {
     code: 'M2',
     dokuChannel: 'VIRTUAL_ACCOUNT_BANK_MANDIRI',
+    directTarget: '/mandiri-virtual-account/v2/payment-code',
     label: 'Mandiri Virtual Account',
     category: 'va',
     bank: 'Mandiri',
@@ -29,6 +30,7 @@ const DOKU_PAYMENT_METHODS = [
   {
     code: 'BC',
     dokuChannel: 'VIRTUAL_ACCOUNT_BCA',
+    directTarget: '/bca-virtual-account/v2/payment-code',
     label: 'BCA Virtual Account',
     category: 'va',
     bank: 'BCA',
@@ -38,6 +40,7 @@ const DOKU_PAYMENT_METHODS = [
   {
     code: 'I1',
     dokuChannel: 'VIRTUAL_ACCOUNT_BNI',
+    directTarget: '/bni-virtual-account/v2/payment-code',
     label: 'BNI Virtual Account',
     category: 'va',
     bank: 'BNI',
@@ -382,7 +385,7 @@ async function createInvoice({
       orderId,
       merchantCode: config.clientId || config.merchantCode || 'BRN-TEST-DOKU',
       reference: `doku_ref_${orderId}`,
-      paymentUrl: `https://sandbox.doku.com/checkout-link-v2/${orderId}`,
+      paymentUrl: isQris || isVa ? null : `https://sandbox.doku.com/checkout-link-v2/${orderId}`,
       vaNumber: mockVaNumber,
       qrString: mockQrString,
       qrCodeUrl: buildQrImageUrl(mockQrString),
@@ -419,6 +422,89 @@ async function createInvoice({
   const phoneNumber = user?.phone || '081234567890';
   const productTitle = `${pkg.name} (${totalDiamonds} ${callbackPath.includes('economy') ? 'Diamonds' : 'Coins'})`.slice(0, 100);
 
+  let activeBaseUrl = config.baseUrl;
+
+  // 1. Utamakan DOKU Direct API v2 (Core API) untuk channel Virtual Account agar nomor VA tampil native tanpa redirect
+  if (methodMeta.category === 'va' && methodMeta.directTarget) {
+    const vaPayload = {
+      order: {
+        invoice_number: orderId,
+        amount: paymentAmount
+      },
+      virtual_account_info: {
+        expired_time: 60,
+        reusable_status: false,
+        info1: 'PlayGo Marketplace',
+        info2: productTitle.slice(0, 30),
+        info3: 'Terima kasih'
+      },
+      customer: {
+        name: cleanCustomerName,
+        email
+      }
+    };
+
+    let vaResult = await sendDokuWithEnvFallback({
+      baseUrl: activeBaseUrl,
+      config,
+      requestTarget: methodMeta.directTarget,
+      payload: vaPayload
+    });
+    activeBaseUrl = vaResult.activeBaseUrl;
+    let vaAttempt = vaResult.attempt;
+
+    if (!vaAttempt.ok) {
+      console.warn(`[DOKU DIRECT VA] ${methodMeta.directTarget} gagal (${vaAttempt.errorMsg}), mencoba /doku-virtual-account/v2/payment-code...`);
+      vaResult = await sendDokuWithEnvFallback({
+        baseUrl: activeBaseUrl,
+        config,
+        requestTarget: '/doku-virtual-account/v2/payment-code',
+        payload: vaPayload
+      });
+      activeBaseUrl = vaResult.activeBaseUrl;
+      vaAttempt = vaResult.attempt;
+    }
+
+    if (vaAttempt.ok && vaAttempt.data) {
+      const vaData = vaAttempt.data;
+      const vaResp = vaData.response || vaData;
+      const directVaNumber =
+        vaResp.virtual_account_info?.virtual_account_number ||
+        vaResp.vaNumber ||
+        null;
+      if (directVaNumber) {
+        const directRef =
+          vaResp.order?.session_id ||
+          vaResp.uuid ||
+          vaResp.virtual_account_info?.identifier?.[0]?.value ||
+          vaAttempt.requestId;
+        return {
+          success: true,
+          gateway: 'doku',
+          orderId,
+          reference: directRef,
+          paymentUrl: null,
+          vaNumber: directVaNumber,
+          qrString: null,
+          qrCodeUrl: null,
+          paymentMethod: selectedCode,
+          paymentMethodName: methodMeta.label,
+          paymentCategory: methodMeta.category,
+          bank: methodMeta.bank || null,
+          dokuChannel: methodMeta.dokuChannel,
+          statusCode: '00',
+          statusMessage: 'SUCCESS',
+          merchantCode: config.merchantCode || config.clientId,
+          grossAmount: Number(vaResp.order?.amount || paymentAmount),
+          diamonds: totalDiamonds,
+          status: 'pending'
+        };
+      }
+    } else {
+      console.warn(`[DOKU DIRECT VA] Fallback ke /checkout/v1/payment karena: ${vaAttempt?.errorMsg || 'nomor VA tidak dikembalikan'}`);
+    }
+  }
+
   const payload = {
     order: {
       amount: paymentAmount,
@@ -451,30 +537,14 @@ async function createInvoice({
     }
   };
 
-  let activeBaseUrl = config.baseUrl;
-  let attempt = await sendDokuCheckoutRequest({
+  let checkoutRes = await sendDokuWithEnvFallback({
     baseUrl: activeBaseUrl,
     config,
+    requestTarget: '/checkout/v1/payment',
     payload
   });
-
-  // Auto-switch Sandbox <-> Production jika Client-Id ternyata milik environment sebaliknya
-  if (!attempt.ok && /invalid\s*client-id/i.test(String(attempt.errorMsg || ''))) {
-    const altBaseUrl =
-      activeBaseUrl === 'https://api.doku.com'
-        ? 'https://api-sandbox.doku.com'
-        : 'https://api.doku.com';
-    console.warn(`[DOKU] Invalid Client-Id di ${activeBaseUrl}, mencoba fallback ke ${altBaseUrl}...`);
-    const altAttempt = await sendDokuCheckoutRequest({
-      baseUrl: altBaseUrl,
-      config,
-      payload
-    });
-    if (altAttempt.ok || !/invalid\s*client-id/i.test(String(altAttempt.errorMsg || ''))) {
-      activeBaseUrl = altBaseUrl;
-      attempt = altAttempt;
-    }
-  }
+  activeBaseUrl = checkoutRes.activeBaseUrl;
+  let attempt = checkoutRes.attempt;
 
   // Auto-fallback ke seluruh channel aktif merchant jika channel spesifik belum diaktifkan di DOKU
   if (!attempt.ok && /payment channel is inactive/i.test(String(attempt.errorMsg || ''))) {
@@ -483,9 +553,10 @@ async function createInvoice({
       ...payload,
       payment: { payment_due_date: payload.payment?.payment_due_date || 1440 }
     };
-    attempt = await sendDokuCheckoutRequest({
+    attempt = await sendDokuApiRequest({
       baseUrl: activeBaseUrl,
       config,
+      requestTarget: '/checkout/v1/payment',
       payload: fallbackPayload
     });
   }
@@ -507,11 +578,12 @@ async function createInvoice({
     resp.virtual_account_info?.virtual_account_number ||
     resp.vaNumber ||
     null;
-  const paymentUrl =
+  const rawPaymentUrl =
     resp.payment?.url ||
     data.payment?.url ||
     resp.paymentUrl ||
     null;
+  const paymentUrl = vaNumber || qrString ? null : rawPaymentUrl;
   const reference =
     resp.order?.session_id ||
     resp.uuid ||
@@ -541,11 +613,40 @@ async function createInvoice({
   };
 }
 
-async function sendDokuCheckoutRequest({ baseUrl, config, payload }) {
+async function sendDokuWithEnvFallback({ baseUrl, config, requestTarget, payload }) {
+  let activeBaseUrl = baseUrl;
+  let attempt = await sendDokuApiRequest({
+    baseUrl: activeBaseUrl,
+    config,
+    requestTarget,
+    payload
+  });
+
+  if (!attempt.ok && /invalid\s*client-id/i.test(String(attempt.errorMsg || ''))) {
+    const altBaseUrl =
+      activeBaseUrl === 'https://api.doku.com'
+        ? 'https://api-sandbox.doku.com'
+        : 'https://api.doku.com';
+    console.warn(`[DOKU] Invalid Client-Id di ${activeBaseUrl}, mencoba fallback ke ${altBaseUrl}...`);
+    const altAttempt = await sendDokuApiRequest({
+      baseUrl: altBaseUrl,
+      config,
+      requestTarget,
+      payload
+    });
+    if (altAttempt.ok || !/invalid\s*client-id/i.test(String(altAttempt.errorMsg || ''))) {
+      activeBaseUrl = altBaseUrl;
+      attempt = altAttempt;
+    }
+  }
+
+  return { activeBaseUrl, attempt };
+}
+
+async function sendDokuApiRequest({ baseUrl, config, requestTarget = '/checkout/v1/payment', payload }) {
   const rawBody = JSON.stringify(payload);
   const requestId = crypto.randomUUID();
   const requestTimestamp = new Date().toISOString().slice(0, 19) + 'Z';
-  const requestTarget = '/checkout/v1/payment';
   const digest = generateDigest(rawBody);
   const signature = generateDokuSignature({
     clientId: config.clientId,
@@ -580,7 +681,7 @@ async function sendDokuCheckoutRequest({ baseUrl, config, payload }) {
   const errorMsg = !res.ok
     ? (Array.isArray(data.error?.message) ? data.error.message.join(', ') : data.error?.message) ||
       (Array.isArray(data.message) ? data.message.join(', ') : data.message) ||
-      `DOKU Checkout API Error (${res.status})`
+      `DOKU API Error (${res.status})`
     : null;
 
   return { ok: res.ok, status: res.status, data, errorMsg, requestId };

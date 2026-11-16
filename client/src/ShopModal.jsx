@@ -202,24 +202,20 @@ function DuitkuPaymentPanel({
           </div>
         )}
 
-        {payment.paymentUrl && (
+        {!qrSrc && !payment.vaNumber && payment.paymentUrl && (
           <div className="mp-payment-url-box">
-            {!qrSrc && !payment.vaNumber && (
-              <>
-                <h4>Lanjutkan Pembayaran via {payment.paymentMethodName || 'E-Wallet'}</h4>
-                <p className="muted mp-payment-hint">
-                  Klik tombol di bawah untuk menyelesaikan pembayaran melalui aplikasi atau halaman pembayaran resmi.
-                </p>
-              </>
-            )}
-            <a
-              href={payment.paymentUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`btn ${!qrSrc && !payment.vaNumber ? 'btn--primary' : 'btn--secondary btn--sm'}`}
-            >
-              {!qrSrc && !payment.vaNumber ? 'Lanjutkan Pembayaran ↗' : 'Lihat Panduan Pembayaran ↗'}
-            </a>
+            <h4>Pembayaran via {payment.paymentMethodName || 'Payment Gateway'}</h4>
+            <p className="muted mp-payment-hint">
+              Selesaikan pembayaran langsung di halaman PlayGo di bawah ini tanpa meninggalkan aplikasi.
+            </p>
+            <div className="mp-inline-checkout-wrap">
+              <iframe
+                src={payment.paymentUrl}
+                title="Pembayaran Instan PlayGo"
+                className="mp-inline-checkout-frame"
+                allow="clipboard-read; clipboard-write; payment"
+              />
+            </div>
           </div>
         )}
 
@@ -304,32 +300,316 @@ function LegacyShopItemCard({ item, points, ownedCount, currentUser, buyingId, o
   );
 }
 
-function LegacyTopupCard({ pkg, currentUser, topupLoadingId, onTopup }) {
-  const isBusy = topupLoadingId === pkg.id;
+function UnifiedTopupSection({
+  mode,
+  packages,
+  selectedPkg,
+  onSelectPkg,
+  methods,
+  selectedMethodCode,
+  onSelectMethod,
+  selectedMethodObj,
+  activePayment,
+  verifyingPayment,
+  checkingOrderId,
+  copiedField,
+  onCopy,
+  onCheckStatus,
+  onCancelOrder,
+  onBackPayment,
+  currentUser,
+  onOpenAuth,
+  submitting,
+  onSubmitTopup
+}) {
+  const isCoins = mode === 'coins';
+  const [checkoutPkg, setCheckoutPkg] = useState(null);
+  const [activeMethod, setActiveMethod] = useState(selectedMethodCode || 'SP');
+  const [localSubmitting, setLocalSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (selectedMethodCode) setActiveMethod(selectedMethodCode);
+  }, [selectedMethodCode]);
+
+  const handleOpenCheckout = pkg => {
+    if (!currentUser) {
+      onOpenAuth?.();
+      return;
+    }
+    sound.playClick();
+    onSelectPkg?.(pkg.id);
+    setCheckoutPkg(pkg);
+  };
+
+  const handleConfirmCheckout = async () => {
+    if (!checkoutPkg || localSubmitting) return;
+    setLocalSubmitting(true);
+    try {
+      onSelectMethod?.(activeMethod);
+      const ok = await onSubmitTopup(checkoutPkg, activeMethod);
+      if (ok) {
+        setCheckoutPkg(null);
+      }
+    } catch {} finally {
+      setLocalSubmitting(false);
+    }
+  };
+
   return (
-    <li className="shop-item card mp-product-card shop-item--topup">
-      <div className="shop-item__head">
-        <span className="shop-item__icon" aria-hidden="true">
-          <Icon name={pkg.icon === 'crown' ? 'crown' : 'coin'} size={24} />
-        </span>
-        <div className="shop-item__title-wrap">
-          <strong>{pkg.name}</strong>
-          {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
+    <section className="card mp-topup-card" aria-label={isCoins ? 'Top-Up Coins' : 'Top-Up Diamonds'}>
+      <div className="mp-card-head mp-card-head--topup">
+        <div>
+          <h3 className="shop__group-title">
+            <Icon name={isCoins ? 'coin' : 'diamond'} size={18} />
+            <span>{isCoins ? 'Top-Up Coins PlayGo (Reguler)' : 'Top-Up Diamonds Premium'}</span>
+          </h3>
+          <p className="shop__group-desc">
+            {isCoins
+              ? 'Pilih paket Coins yang kamu butuhkan, bayar instan via QRIS, Virtual Account, atau E-Wallet.'
+              : 'Pilih paket Diamonds yang kamu butuhkan, bayar instan via QRIS, Virtual Account, atau E-Wallet.'}
+          </p>
         </div>
+        <span className="badge badge--diamond">Proses Otomatis</span>
       </div>
-      <p className="shop-item__desc">{pkg.description}</p>
-      <div className="shop-item__foot">
-        <span className="topup-price">{pkg.formattedPrice}</span>
-        <button
-          type="button"
-          className="btn btn--primary btn--sm"
-          disabled={!currentUser || isBusy}
-          onClick={() => onTopup(pkg)}
-        >
-          {isBusy ? 'Memproses...' : !currentUser ? 'Login' : 'Top Up Coin'}
-        </button>
+
+      {activePayment?.mode === mode ? (
+        <DuitkuPaymentPanel
+          payment={activePayment}
+          verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
+          cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
+          copiedField={copiedField}
+          onCopy={onCopy}
+          onCheckStatus={() => onCheckStatus(activePayment.orderId, false)}
+          onCancelOrder={() => onCancelOrder(activePayment.orderId)}
+          onBack={onBackPayment}
+        />
+      ) : (
+        <div className="mp-diamond-pkg-grid" role="list" aria-label={isCoins ? 'Pilihan paket Coins' : 'Pilihan paket Diamonds'}>
+          {packages.map(pkg => {
+            const totalD = Number(pkg.diamonds || 0) + Number(pkg.bonusDiamonds || 0);
+            const isBusy = (submitting || localSubmitting) && selectedPkg?.id === pkg.id;
+            return (
+              <div key={pkg.id} className="mp-diamond-pkg">
+                <div className="mp-diamond-pkg__top">
+                  <span
+                    className={`shop-item__icon ${isCoins ? '' : 'shop-item__icon--diamond'}`}
+                    aria-hidden="true"
+                  >
+                    <Icon name={isCoins ? (pkg.icon === 'crown' ? 'crown' : 'coin') : 'diamond'} size={22} />
+                  </span>
+                  <div className="shop-item__badges">
+                    {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
+                  </div>
+                </div>
+
+                <div className="mp-diamond-pkg__body">
+                  <div className="mp-diamond-pkg__qty">
+                    {isCoins ? pkg.name : `${totalD} Diamonds`}
+                  </div>
+                  <div className="mp-diamond-pkg__name">
+                    {isCoins
+                      ? pkg.description
+                      : `${pkg.name}${pkg.bonusDiamonds > 0 ? ` (+${pkg.bonusDiamonds} Bonus)` : ''}`}
+                  </div>
+                </div>
+
+                <div className="mp-diamond-pkg__foot">
+                  <strong className="topup-price">
+                    {isCoins ? (pkg.formattedPrice || formatIdr(pkg.price)) : formatIdr(pkg.priceIdr)}
+                  </strong>
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--sm"
+                    disabled={isBusy}
+                    onClick={() => handleOpenCheckout(pkg)}
+                  >
+                    {isBusy ? 'Memproses...' : !currentUser ? 'Login' : isCoins ? 'Top Up Coin' : 'Top Up Diamond'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pop-up Modal Pemilihan Metode Pembayaran */}
+      <Modal
+        isOpen={!!checkoutPkg}
+        onClose={() => !localSubmitting && setCheckoutPkg(null)}
+        size="md"
+        title={isCoins ? 'Pilih Metode Pembayaran Coins' : 'Pilih Metode Pembayaran Diamonds'}
+        subtitle="Pilih metode pembayaran favoritmu. Pembayaran diproses secara instan dan aman."
+        footer={
+          checkoutPkg && (
+            <>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={localSubmitting}
+                onClick={() => setCheckoutPkg(null)}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={localSubmitting}
+                onClick={handleConfirmCheckout}
+              >
+                {localSubmitting
+                  ? 'Membuat Tagihan...'
+                  : `Bayar Sekarang (${formatIdr(isCoins ? checkoutPkg.price : checkoutPkg.priceIdr)})`}
+              </button>
+            </>
+          )
+        }
+      >
+        {checkoutPkg && (
+          <div className="topup-checkout-popup">
+            <div className="topup-popup-summary">
+              <div className="topup-popup-summary__pkg">
+                <span className={`shop-item__icon ${isCoins ? '' : 'shop-item__icon--diamond'}`}>
+                  <Icon name={isCoins ? (checkoutPkg.icon === 'crown' ? 'crown' : 'coin') : 'diamond'} size={24} />
+                </span>
+                <div>
+                  <strong>{checkoutPkg.name}</strong>
+                  <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-xs)' }}>
+                    {isCoins
+                      ? checkoutPkg.description
+                      : `${Number(checkoutPkg.diamonds || 0) + Number(checkoutPkg.bonusDiamonds || 0)} Diamonds Premium`}
+                  </p>
+                </div>
+              </div>
+              <div className="topup-popup-summary__total">
+                <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Total Bayar</span>
+                <strong className="topup-price" style={{ fontSize: 'var(--fs-lg)' }}>
+                  {formatIdr(isCoins ? checkoutPkg.price : checkoutPkg.priceIdr)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="topup-popup-methods-head">
+              <h4 style={{ margin: 0, fontSize: 'var(--fs-sm)' }}>Pilih Metode Pembayaran:</h4>
+            </div>
+
+            <div className="mp-method-grid mp-method-grid--popup" role="radiogroup" aria-label="Metode pembayaran">
+              {methods.map(method => {
+                const isSelected = activeMethod === method.code;
+                return (
+                  <button
+                    key={method.code}
+                    type="button"
+                    role="radio"
+                    aria-checked={isSelected}
+                    className={`mp-method-card ${isSelected ? 'is-selected' : ''}`}
+                    onClick={() => {
+                      sound.playClick();
+                      setActiveMethod(method.code);
+                    }}
+                  >
+                    <div className="mp-method-card__top">
+                      <span className="mp-method-tag">{methodCategoryLabel(method.category)}</span>
+                      {method.badge && (
+                        <span className={`badge ${method.badge === 'Instan' ? 'badge--success' : 'badge--popular'}`}>
+                          {method.badge}
+                        </span>
+                      )}
+                    </div>
+                    <strong className="mp-method-card__label">{method.label}</strong>
+                    <span className="muted mp-method-card__desc">{method.description}</span>
+                    {typeof method.totalFee === 'number' && method.totalFee > 0 && (
+                      <span className="mp-method-card__fee">Biaya admin: {formatIdr(method.totalFee)}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Modal>
+    </section>
+  );
+}
+
+function UnifiedOrderHistoryPanel({
+  orders,
+  checkingOrderId,
+  onOpenInstruction,
+  onVerifyOrder,
+  onCancelOrder
+}) {
+  if (!orders.length) return null;
+  return (
+    <div className="econ-orders-panel card">
+      <div className="section-head">
+        <h3>Riwayat Order Pembayaran Top-Up</h3>
+        <span className="muted">{orders.length} pesanan terbaru</span>
       </div>
-    </li>
+      <div className="tx-table-wrap">
+        <table className="tx-table">
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Paket</th>
+              <th>Metode</th>
+              <th>Harga</th>
+              <th>Status</th>
+              <th>Waktu</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.slice(0, 20).map(ord => (
+              <tr key={ord.displayId}>
+                <td className="code-text">{ord.displayId}</td>
+                <td>{ord.displayPackage}</td>
+                <td>{ord.paymentMethodName || ord.paymentMethod || '-'}</td>
+                <td>{formatIdr(ord.displayAmount)}</td>
+                <td>
+                  <span className={`badge badge--${orderStatusTone(ord.displayStatus)}`}>
+                    {ord.displayStatus}
+                  </span>
+                </td>
+                <td>{formatDateTime(ord.createdAt)}</td>
+                <td>
+                  <div className="tx-actions">
+                    {ord.displayStatus === 'PENDING' && (
+                      <>
+                        {(ord.vaNumber || ord.qrCodeUrl || ord.qrString || ord.paymentUrl) && (
+                          <button
+                            type="button"
+                            className="btn btn--primary btn--sm"
+                            onClick={() => onOpenInstruction(ord, ord.kind)}
+                          >
+                            Lihat Instruksi
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          disabled={checkingOrderId === ord.displayId}
+                          onClick={() => onVerifyOrder(ord)}
+                        >
+                          {checkingOrderId === ord.displayId ? '...' : 'Cek Status'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          disabled={checkingOrderId === ord.displayId}
+                          onClick={() => onCancelOrder(ord)}
+                        >
+                          Batal
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -372,9 +652,7 @@ export default function ShopModal({
   // Conversion & Payment Gateway Direct API Top-Up State
   const [convertDiamonds, setConvertDiamonds] = useState(10);
   const [converting, setConverting] = useState(false);
-  const [topupCurrency, setTopupCurrency] = useState('diamonds'); // 'diamonds' | 'coins'
   const [duitkuMethods, setDuitkuMethods] = useState(DEFAULT_DUITKU_METHODS);
-  const [methodCategoryFilter, setMethodCategoryFilter] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState('SP');
   const [selectedPkgId, setSelectedPkgId] = useState('');
   const [selectedCoinPkgId, setSelectedCoinPkgId] = useState('');
@@ -572,10 +850,10 @@ export default function ShopModal({
     null;
 
   const activeTopupAmountIdr =
-    topupCurrency === 'coins' ? selectedCoinPkg?.price : selectedPkg?.priceIdr;
+    activeTab === 'coins' ? selectedCoinPkg?.price : selectedPkg?.priceIdr;
 
   useEffect(() => {
-    if (!isOpen || activeTab !== 'diamonds') return;
+    if (!isOpen || (activeTab !== 'diamonds' && activeTab !== 'coins')) return;
     if (activeTopupAmountIdr) {
       loadLivePaymentMethods(activeTopupAmountIdr);
     }
@@ -746,12 +1024,13 @@ export default function ShopModal({
   };
 
   // ---- DUITKU DIRECT API v2 DIAMOND TOP-UP ----
-  const handleCreateDiamondTopup = async pkg => {
-    if (!pkg) return;
+  const handleCreateDiamondTopup = async (pkg, methodOverride) => {
+    if (!pkg) return false;
     if (!currentUser) {
       setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk top-up Diamonds.' });
-      return;
+      return false;
     }
+    const chosenMethod = methodOverride || paymentMethod || 'SP';
     setCreatingOrderPkgId(pkg.id);
     setFeedback(null);
     sound.playClick();
@@ -759,14 +1038,14 @@ export default function ShopModal({
       const res = await fetch('/api/economy/topup/create', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ packageId: pkg.id, paymentMethod: paymentMethod || 'SP' })
+        body: JSON.stringify({ packageId: pkg.id, paymentMethod: chosenMethod })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membuat tagihan top-up Diamonds.');
 
       const order = data.order;
       const inv = data.invoice || {};
-      const selectedMethodObj = duitkuMethods.find(m => m.code === (inv.paymentMethod || paymentMethod));
+      const selectedMethodObj = duitkuMethods.find(m => m.code === (inv.paymentMethod || chosenMethod));
 
       setActivePayment({
         mode: 'diamonds',
@@ -774,7 +1053,7 @@ export default function ShopModal({
         reference: inv.reference || order.gatewayReference,
         title: `${order.packageName} (${order.totalDiamonds} Diamonds)`,
         amountIdr: order.amountIdr,
-        paymentMethod: inv.paymentMethod || order.paymentMethod || paymentMethod,
+        paymentMethod: inv.paymentMethod || order.paymentMethod || chosenMethod,
         paymentMethodName: inv.paymentMethodName || selectedMethodObj?.label || order.paymentMethod,
         paymentCategory: inv.paymentCategory || selectedMethodObj?.category || 'va',
         bank: inv.bank || selectedMethodObj?.bank || null,
@@ -790,8 +1069,10 @@ export default function ShopModal({
         message: `Tagihan ${order.id} (${formatIdr(order.amountIdr)}) siap dibayar. Selesaikan pembayaran sesuai instruksi di bawah.`
       });
       loadEconomyData();
+      return true;
     } catch (err) {
       setFeedback({ type: 'error', message: err.message });
+      return false;
     } finally {
       setCreatingOrderPkgId('');
     }
@@ -804,6 +1085,7 @@ export default function ShopModal({
     const methodObj = duitkuMethods.find(m => m.code === ord.paymentMethod);
     const id = ord.id || ord.orderId;
     const isCoins = mode === 'coins';
+    setActiveTab(isCoins ? 'coins' : 'diamonds');
     setActivePayment({
       mode: isCoins ? 'coins' : 'diamonds',
       orderId: id,
@@ -936,11 +1218,13 @@ export default function ShopModal({
     }
   };
 
-  const handleLegacyTopup = async pkg => {
+  const handleLegacyTopup = async (pkg, methodOverride) => {
+    if (!pkg) return false;
     if (!currentUser) {
       setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu.' });
-      return;
+      return false;
     }
+    const chosenMethod = methodOverride || paymentMethod || 'SP';
     setTopupLegacyId(pkg.id);
     setFeedback(null);
     sound.playClick();
@@ -948,19 +1232,19 @@ export default function ShopModal({
       const res = await fetch('/api/topup/create', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ packageId: pkg.id, paymentMethod: paymentMethod || 'SP' })
+        body: JSON.stringify({ packageId: pkg.id, paymentMethod: chosenMethod })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membuat tagihan top up Coins.');
 
-      const methodObj = duitkuMethods.find(m => m.code === (data.paymentMethod || paymentMethod));
+      const methodObj = duitkuMethods.find(m => m.code === (data.paymentMethod || chosenMethod));
       setActivePayment({
         mode: 'coins',
         orderId: data.orderId,
         reference: data.reference || null,
         title: `${pkg.name}`,
         amountIdr: pkg.price,
-        paymentMethod: data.paymentMethod || paymentMethod,
+        paymentMethod: data.paymentMethod || chosenMethod,
         paymentMethodName: data.paymentMethodName || methodObj?.label || data.paymentMethod,
         paymentCategory: data.paymentCategory || methodObj?.category || 'va',
         bank: data.bank || methodObj?.bank || null,
@@ -976,8 +1260,10 @@ export default function ShopModal({
         message: `Tagihan Coins ${data.orderId} (${pkg.formattedPrice}) siap dibayar. Selesaikan pembayaran sesuai instruksi di bawah.`
       });
       loadEconomyData();
+      return true;
     } catch (err) {
       setFeedback({ type: 'error', message: err.message });
+      return false;
     } finally {
       setTopupLegacyId('');
     }
@@ -1144,10 +1430,11 @@ export default function ShopModal({
     })
   ].sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
 
-  const visibleMethods = duitkuMethods.filter(
-    m => methodCategoryFilter === 'all' || m.category === methodCategoryFilter
-  );
   const selectedMethodObj = duitkuMethods.find(m => m.code === paymentMethod) || duitkuMethods[0] || null;
+  const verifyOrderFromHistory = ord =>
+    ord.kind === 'coins' ? verifyLegacyCoinsOrder(ord.displayId) : verifyDiamondOrder(ord.displayId);
+  const cancelOrderFromHistory = ord =>
+    ord.kind === 'coins' ? cancelLegacyCoinsOrder(ord.displayId) : cancelDiamondOrder(ord.displayId);
 
   const catalogItems = Array.isArray(catalog?.items) ? catalog.items : [];
   const ludoItems = catalogItems.filter(i => (i.game || 'ludo') === 'ludo');
@@ -1231,7 +1518,6 @@ export default function ShopModal({
               onClick={() => {
                 sound.playClick();
                 setActiveTab('coins');
-                setTopupCurrency('coins');
               }}
             >
               + Coins
@@ -1250,7 +1536,6 @@ export default function ShopModal({
               onClick={() => {
                 sound.playClick();
                 setActiveTab('diamonds');
-                setTopupCurrency('diamonds');
               }}
             >
               + Isi / Tukar 💎
@@ -1696,350 +1981,39 @@ export default function ShopModal({
                 </form>
               </section>
 
-              {/* 2. Top-Up Diamonds & Coins via Payment Gateway */}
-              <section className="card mp-topup-card" aria-label="Top-Up Diamonds dan Coins">
-                <div className="mp-card-head mp-card-head--topup">
-                  <div>
-                    <h3 className="shop__group-title">
-                      <Icon name={topupCurrency === 'coins' ? 'coin' : 'diamond'} size={18} />
-                      <span>{topupCurrency === 'coins' ? 'Top-Up Coins' : 'Top-Up Diamonds'}</span>
-                    </h3>
-                    <p className="shop__group-desc">
-                      Pilih paket {topupCurrency === 'coins' ? 'Coins' : 'Diamonds'} dan metode pembayaran favoritmu. Saldo otomatis bertambah setelah pembayaran selesai.
-                    </p>
-                  </div>
-                  <div className="skin-filter-pills" role="group" aria-label="Pilih mata uang top-up">
-                    <button
-                      type="button"
-                      className={`btn btn--sm ${topupCurrency === 'diamonds' ? 'btn--primary' : 'btn--secondary'}`}
-                      onClick={() => {
-                        sound.playClick();
-                        setTopupCurrency('diamonds');
-                      }}
-                    >
-                      💎 Paket Diamonds
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn btn--sm ${topupCurrency === 'coins' ? 'btn--primary' : 'btn--secondary'}`}
-                      onClick={() => {
-                        sound.playClick();
-                        setTopupCurrency('coins');
-                      }}
-                    >
-                      🪙 Paket Coins
-                    </button>
-                  </div>
-                </div>
-
-                {activePayment?.mode === 'diamonds' || activePayment?.mode === 'coins' ? (
-                  <DuitkuPaymentPanel
-                    payment={activePayment}
-                    verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
-                    cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
-                    copiedField={copiedField}
-                    onCopy={copyToClipboard}
-                    onCheckStatus={() =>
-                      activePayment.mode === 'diamonds'
-                        ? verifyDiamondOrder(activePayment.orderId, false)
-                        : verifyLegacyCoinsOrder(activePayment.orderId, false)
-                    }
-                    onCancelOrder={() =>
-                      activePayment.mode === 'diamonds'
-                        ? cancelDiamondOrder(activePayment.orderId)
-                        : cancelLegacyCoinsOrder(activePayment.orderId)
-                    }
-                    onBack={() => setActivePayment(null)}
-                  />
-                ) : (
-                  <>
-                    {/* Langkah 1: Pilih Paket Diamonds atau Coins */}
-                    <div className="mp-step-block">
-                      <div className="mp-step-head">
-                        <span className="mp-step-num">1</span>
-                        <h4>{topupCurrency === 'coins' ? 'Pilih Paket Coins' : 'Pilih Paket Diamonds'}</h4>
-                      </div>
-
-                      {topupCurrency === 'coins' ? (
-                        <div className="mp-diamond-pkg-grid" role="radiogroup" aria-label="Pilihan paket Coins">
-                          {legacyPackages.map(pkg => {
-                            const isSelected = selectedCoinPkg?.id === pkg.id;
-                            return (
-                              <button
-                                key={pkg.id}
-                                type="button"
-                                role="radio"
-                                aria-checked={isSelected}
-                                className={`mp-diamond-pkg ${isSelected ? 'is-selected' : ''}`}
-                                onClick={() => {
-                                  sound.playClick();
-                                  setSelectedCoinPkgId(pkg.id);
-                                }}
-                              >
-                                <div className="mp-diamond-pkg__top">
-                                  <span className="shop-item__icon" aria-hidden="true">
-                                    <Icon name={pkg.icon === 'crown' ? 'crown' : 'coin'} size={22} />
-                                  </span>
-                                  <div className="shop-item__badges">
-                                    {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
-                                    {isSelected && <span className="badge badge--diamond">✓ Dipilih</span>}
-                                  </div>
-                                </div>
-
-                                <div className="mp-diamond-pkg__body">
-                                  <div className="mp-diamond-pkg__qty">{pkg.name}</div>
-                                  <div className="mp-diamond-pkg__name">{pkg.description}</div>
-                                </div>
-
-                                <div className="mp-diamond-pkg__foot">
-                                  <strong className="topup-price">{pkg.formattedPrice || formatIdr(pkg.price)}</strong>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="mp-diamond-pkg-grid" role="radiogroup" aria-label="Pilihan paket Diamonds">
-                          {diamondPackages.map(pkg => {
-                            const totalD = Number(pkg.diamonds) + Number(pkg.bonusDiamonds || 0);
-                            const isSelected = selectedPkg?.id === pkg.id;
-                            return (
-                              <button
-                                key={pkg.id}
-                                type="button"
-                                role="radio"
-                                aria-checked={isSelected}
-                                className={`mp-diamond-pkg ${isSelected ? 'is-selected' : ''}`}
-                                onClick={() => {
-                                  sound.playClick();
-                                  setSelectedPkgId(pkg.id);
-                                }}
-                              >
-                                <div className="mp-diamond-pkg__top">
-                                  <span className="shop-item__icon shop-item__icon--diamond" aria-hidden="true">
-                                    <Icon name="diamond" size={22} />
-                                  </span>
-                                  <div className="shop-item__badges">
-                                    {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
-                                    {isSelected && <span className="badge badge--diamond">✓ Dipilih</span>}
-                                  </div>
-                                </div>
-
-                                <div className="mp-diamond-pkg__body">
-                                  <div className="mp-diamond-pkg__qty">{totalD} Diamonds</div>
-                                  <div className="mp-diamond-pkg__name">
-                                    {pkg.name}
-                                    {pkg.bonusDiamonds > 0 && ` (+${pkg.bonusDiamonds} Bonus)`}
-                                  </div>
-                                </div>
-
-                                <div className="mp-diamond-pkg__foot">
-                                  <strong className="topup-price">{formatIdr(pkg.priceIdr)}</strong>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Langkah 2: Pilih Metode Pembayaran */}
-                    <div className="mp-step-block">
-                      <div className="mp-step-head mp-step-head--between">
-                        <div className="mp-step-title-group">
-                          <span className="mp-step-num">2</span>
-                          <h4>Pilih Metode Pembayaran</h4>
-                        </div>
-                        <div className="skin-filter-pills">
-                          {[
-                            { id: 'all', label: 'Semua' },
-                            { id: 'qris', label: 'QRIS' },
-                            { id: 'va', label: 'Virtual Account' },
-                            { id: 'ewallet', label: 'E-Wallet' }
-                          ].map(cat => (
-                            <button
-                              key={cat.id}
-                              type="button"
-                              className={`btn btn--sm ${methodCategoryFilter === cat.id ? 'btn--primary' : 'btn--ghost'}`}
-                              onClick={() => setMethodCategoryFilter(cat.id)}
-                            >
-                              {cat.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mp-method-grid" role="radiogroup" aria-label="Metode pembayaran">
-                        {visibleMethods.map(method => {
-                          const isSelected = paymentMethod === method.code;
-                          return (
-                            <button
-                              key={method.code}
-                              type="button"
-                              role="radio"
-                              aria-checked={isSelected}
-                              className={`mp-method-card ${isSelected ? 'is-selected' : ''}`}
-                              onClick={() => {
-                                sound.playClick();
-                                setPaymentMethod(method.code);
-                              }}
-                            >
-                              <div className="mp-method-card__top">
-                                <span className="mp-method-tag">{methodCategoryLabel(method.category)}</span>
-                                {method.badge && (
-                                  <span className={`badge ${method.badge === 'Instan' ? 'badge--success' : 'badge--popular'}`}>
-                                    {method.badge}
-                                  </span>
-                                )}
-                              </div>
-                              <strong className="mp-method-card__label">{method.label}</strong>
-                              <span className="muted mp-method-card__desc">{method.description}</span>
-                              {typeof method.totalFee === 'number' && method.totalFee > 0 && (
-                                <span className="mp-method-card__fee">Biaya admin: {formatIdr(method.totalFee)}</span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Langkah 3: Ringkasan & Buat Tagihan */}
-                    {(topupCurrency === 'coins' ? selectedCoinPkg : selectedPkg) && (
-                      <div className="mp-checkout-bar">
-                        <div className="mp-checkout-bar__info">
-                          <span className="muted">Ringkasan Tagihan</span>
-                          <strong>
-                            {topupCurrency === 'coins'
-                              ? `${selectedCoinPkg.name} 🪙`
-                              : `${selectedPkg.name} (${Number(selectedPkg.diamonds) + Number(selectedPkg.bonusDiamonds || 0)} 💎)`}
-                            {selectedMethodObj ? ` · ${selectedMethodObj.label}` : ''}
-                          </strong>
-                        </div>
-                        <div className="mp-checkout-bar__cta">
-                          <div className="mp-checkout-bar__total">
-                            <span className="muted">Total</span>
-                            <strong>
-                              {formatIdr(topupCurrency === 'coins' ? selectedCoinPkg.price : selectedPkg.priceIdr)}
-                            </strong>
-                          </div>
-                          {!currentUser ? (
-                            <button
-                              type="button"
-                              className="btn btn--primary"
-                              onClick={() => onOpenAuth?.()}
-                            >
-                              Login untuk Top-Up
-                            </button>
-                          ) : topupCurrency === 'coins' ? (
-                            <button
-                              type="button"
-                              className="btn btn--primary"
-                              disabled={topupLegacyId === selectedCoinPkg.id}
-                              onClick={() => handleLegacyTopup(selectedCoinPkg)}
-                            >
-                              {topupLegacyId === selectedCoinPkg.id
-                                ? 'Membuat Tagihan...'
-                                : 'Top Up Coin'}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn btn--primary"
-                              disabled={creatingOrderPkgId === selectedPkg.id}
-                              onClick={() => handleCreateDiamondTopup(selectedPkg)}
-                            >
-                              {creatingOrderPkgId === selectedPkg.id
-                                ? 'Membuat Tagihan...'
-                                : 'Buat Tagihan Pembayaran'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </section>
+              {/* 2. Top-Up Diamonds via Payment Gateway */}
+              <UnifiedTopupSection
+                mode="diamonds"
+                packages={diamondPackages}
+                selectedPkg={selectedPkg}
+                onSelectPkg={setSelectedPkgId}
+                methods={duitkuMethods}
+                selectedMethodCode={paymentMethod}
+                onSelectMethod={setPaymentMethod}
+                selectedMethodObj={selectedMethodObj}
+                activePayment={activePayment}
+                verifyingPayment={verifyingPayment}
+                checkingOrderId={checkingOrderId}
+                copiedField={copiedField}
+                onCopy={copyToClipboard}
+                onCheckStatus={verifyDiamondOrder}
+                onCancelOrder={cancelDiamondOrder}
+                onBackPayment={() => setActivePayment(null)}
+                currentUser={currentUser}
+                onOpenAuth={onOpenAuth}
+                submitting={Boolean(selectedPkg && creatingOrderPkgId === selectedPkg.id)}
+                onSubmitTopup={handleCreateDiamondTopup}
+              />
 
               {/* 3. Riwayat Order Pembayaran Top-Up (Diamonds & Coins) */}
-              {currentUser && combinedPaymentOrders.length > 0 && (
-                <div className="econ-orders-panel card">
-                  <div className="section-head">
-                    <h3>Riwayat Order Pembayaran Top-Up</h3>
-                    <span className="muted">{combinedPaymentOrders.length} pesanan terbaru</span>
-                  </div>
-                  <div className="tx-table-wrap">
-                    <table className="tx-table">
-                      <thead>
-                        <tr>
-                          <th>Order ID</th>
-                          <th>Paket</th>
-                          <th>Metode</th>
-                          <th>Harga</th>
-                          <th>Status</th>
-                          <th>Waktu</th>
-                          <th>Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {combinedPaymentOrders.slice(0, 20).map(ord => (
-                          <tr key={ord.displayId}>
-                            <td className="code-text">{ord.displayId}</td>
-                            <td>{ord.displayPackage}</td>
-                            <td>{ord.paymentMethodName || ord.paymentMethod || '-'}</td>
-                            <td>{formatIdr(ord.displayAmount)}</td>
-                            <td>
-                              <span className={`badge badge--${orderStatusTone(ord.displayStatus)}`}>
-                                {ord.displayStatus}
-                              </span>
-                            </td>
-                            <td>{formatDateTime(ord.createdAt)}</td>
-                            <td>
-                              <div className="tx-actions">
-                                {ord.displayStatus === 'PENDING' && (
-                                  <>
-                                    {(ord.vaNumber || ord.qrCodeUrl || ord.qrString || ord.paymentUrl) && (
-                                      <button
-                                        type="button"
-                                        className="btn btn--primary btn--sm"
-                                        onClick={() => openOrderInstruction(ord, ord.kind)}
-                                      >
-                                        Lihat Instruksi
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      className="btn btn--secondary btn--sm"
-                                      disabled={checkingOrderId === ord.displayId}
-                                      onClick={() =>
-                                        ord.kind === 'coins'
-                                          ? verifyLegacyCoinsOrder(ord.displayId)
-                                          : verifyDiamondOrder(ord.displayId)
-                                      }
-                                    >
-                                      {checkingOrderId === ord.displayId ? '...' : 'Cek Status'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn--ghost btn--sm"
-                                      disabled={checkingOrderId === ord.displayId}
-                                      onClick={() =>
-                                        ord.kind === 'coins'
-                                          ? cancelLegacyCoinsOrder(ord.displayId)
-                                          : cancelDiamondOrder(ord.displayId)
-                                      }
-                                    >
-                                      Batal
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              {currentUser && (
+                <UnifiedOrderHistoryPanel
+                  orders={combinedPaymentOrders}
+                  checkingOrderId={checkingOrderId}
+                  onOpenInstruction={openOrderInstruction}
+                  onVerifyOrder={verifyOrderFromHistory}
+                  onCancelOrder={cancelOrderFromHistory}
+                />
               )}
             </div>
           )}
@@ -2099,61 +2073,38 @@ export default function ShopModal({
           {/* ================= TAB 4: COINS TOP-UP ================= */}
           {activeTab === 'coins' && (
             <section className="mp-section" aria-label="Top Up Coins">
-              <section className="card mp-section-card">
-                <div className="mp-card-head mp-card-head--topup">
-                  <div>
-                    <h3 className="shop__group-title">
-                      <Icon name="coin" size={18} />
-                      <span>Top Up Coins PlayGo (Reguler)</span>
-                    </h3>
-                    <p className="shop__group-desc">Coins dipakai untuk beli item arena, Hints Jawaban kuis, dan perlengkapan game.</p>
-                  </div>
-                  <span className="badge badge--diamond">Proses Otomatis</span>
-                </div>
+              <UnifiedTopupSection
+                mode="coins"
+                packages={legacyPackages}
+                selectedPkg={selectedCoinPkg}
+                onSelectPkg={setSelectedCoinPkgId}
+                methods={duitkuMethods}
+                selectedMethodCode={paymentMethod}
+                onSelectMethod={setPaymentMethod}
+                selectedMethodObj={selectedMethodObj}
+                activePayment={activePayment}
+                verifyingPayment={verifyingPayment}
+                checkingOrderId={checkingOrderId}
+                copiedField={copiedField}
+                onCopy={copyToClipboard}
+                onCheckStatus={verifyLegacyCoinsOrder}
+                onCancelOrder={cancelLegacyCoinsOrder}
+                onBackPayment={() => setActivePayment(null)}
+                currentUser={currentUser}
+                onOpenAuth={onOpenAuth}
+                submitting={Boolean(selectedCoinPkg && topupLegacyId === selectedCoinPkg.id)}
+                onSubmitTopup={handleLegacyTopup}
+              />
 
-                {activePayment?.mode === 'coins' ? (
-                  <DuitkuPaymentPanel
-                    payment={activePayment}
-                    verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
-                    cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
-                    copiedField={copiedField}
-                    onCopy={copyToClipboard}
-                    onCheckStatus={() => verifyLegacyCoinsOrder(activePayment.orderId, false)}
-                    onCancelOrder={() => cancelLegacyCoinsOrder(activePayment.orderId)}
-                    onBack={() => setActivePayment(null)}
-                  />
-                ) : (
-                  <>
-                    <div className="mp-coins-method-bar">
-                      <label htmlFor="coins-duitku-method" className="muted">
-                        Metode Pembayaran:
-                      </label>
-                      <select
-                        id="coins-duitku-method"
-                        className="input input--sm duitku-method-select"
-                        value={paymentMethod}
-                        onChange={e => setPaymentMethod(e.target.value)}
-                      >
-                        {duitkuMethods.map(m => (
-                          <option key={m.code} value={m.code}>{m.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <ul className="mp-pkg-grid">
-                      {legacyPackages.map(pkg => (
-                        <LegacyTopupCard
-                          key={pkg.id}
-                          pkg={pkg}
-                          currentUser={currentUser}
-                          topupLoadingId={topupLegacyId}
-                          onTopup={handleLegacyTopup}
-                        />
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </section>
+              {currentUser && (
+                <UnifiedOrderHistoryPanel
+                  orders={combinedPaymentOrders}
+                  checkingOrderId={checkingOrderId}
+                  onOpenInstruction={openOrderInstruction}
+                  onVerifyOrder={verifyOrderFromHistory}
+                  onCancelOrder={cancelOrderFromHistory}
+                />
+              )}
             </section>
           )}
 

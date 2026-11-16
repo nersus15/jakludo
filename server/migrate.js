@@ -18,19 +18,27 @@ const DEFAULT_DATA_DIR = process.env.JAKLUDO_DATA_DIR || path.join(__dirname, 'd
 // Kunci advisory lock khusus JakLudo agar migrasi paralel antar container aman
 const MIGRATION_LOCK_ID = 74656231;
 
+const ENV_FILE = path.join(__dirname, '../.env');
+let lastEnvMtimeMs = 0;
+
 function loadDotEnv(force = false) {
-  const envFile = path.join(__dirname, '../.env');
+  try {
+    if (fs.existsSync(ENV_FILE)) {
+      lastEnvMtimeMs = fs.statSync(ENV_FILE).mtimeMs;
+    }
+  } catch {}
+
   if (!force && typeof process.loadEnvFile === 'function') {
     try {
-      process.loadEnvFile(envFile);
+      process.loadEnvFile(ENV_FILE);
       return;
     } catch {
       // Lanjut ke parser manual
     }
   }
   try {
-    if (!fs.existsSync(envFile)) return;
-    const content = fs.readFileSync(envFile, 'utf8');
+    if (!fs.existsSync(ENV_FILE)) return;
+    const content = fs.readFileSync(ENV_FILE, 'utf8');
     for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -50,6 +58,20 @@ function loadDotEnv(force = false) {
   } catch {
     // Abaikan jika .env tidak ada
   }
+}
+
+// Baca ulang .env secara otomatis saat file diubah tanpa perlu restart server (dinonaktifkan saat test)
+function reloadDotEnvIfChanged() {
+  if (process.env.NODE_ENV === 'test') return false;
+  try {
+    if (!fs.existsSync(ENV_FILE)) return false;
+    const mtimeMs = fs.statSync(ENV_FILE).mtimeMs;
+    if (mtimeMs !== lastEnvMtimeMs) {
+      loadDotEnv(true);
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 // Parse URL PostgreSQL secara aman walaupun password mengandung karakter spesial (@, #, !, :, /, %)
@@ -565,6 +587,7 @@ if (require.main === module) {
 
 module.exports = {
   loadDotEnv,
+  reloadDotEnvIfChanged,
   parseDatabaseUrl,
   getPoolConfig,
   ensureDatabaseExists,

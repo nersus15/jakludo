@@ -14,7 +14,7 @@ const { registerSnakesRoutes } = require('../snakes/routes');
 const { registerEconomyRoutes } = require('../economy/routes');
 const quizEngine = require('../quiz/engine');
 const social = require('../social/store');
-const duitku = require('../lib/duitku');
+const paymentGateway = require('../lib/paymentGateway');
 const economy = require('../economy/store');
 const recaptcha = require('../lib/recaptcha');
 
@@ -254,25 +254,25 @@ function createApiRouter() {
   }));
 
   // ==========================================
-  // TOPUP COINS (DUITKU DIRECT REST API v2)
+  // TOPUP COINS (MULTI-GATEWAY: DOKU / DUITKU)
   // ==========================================
 
   api.get('/topup/config', asyncRoute(async (req, res) => {
-    const config = duitku.getDuitkuConfig();
+    const config = paymentGateway.getActiveConfig();
     const packages = await db.queryDiamondPackages();
     res.json({
       success: true,
-      gateway: 'duitku',
+      gateway: config.gateway,
       mode: 'direct_api',
       packages,
-      paymentMethods: duitku.DUITKU_PAYMENT_METHODS,
-      merchantCode: config.merchantCode,
+      paymentMethods: paymentGateway.getPaymentMethodsCatalog(config.gateway),
+      merchantCode: config.merchantCode || config.clientId || '',
       isProduction: config.isProduction,
       isConfigured: config.isConfigured
     });
   }));
 
-  // Buat transaksi pembayaran Duitku Direct API v2 Inquiry
+  // Buat transaksi pembayaran via gateway aktif (DOKU atau Duitku sesuai .env)
   api.post(['/topup/create', '/topup/charge'], asyncRoute(async (req, res) => {
     const user = requireUser(req, res, 'Silakan login terlebih dahulu untuk melakukan topup Coins.');
     if (!user) return;
@@ -289,7 +289,9 @@ function createApiRouter() {
 
     try {
       const host = req.get('host') || '';
-      const duitkuRes = await duitku.createInvoice({
+      const activeGateway = paymentGateway.getActiveGatewayName();
+      const gwRes = await paymentGateway.createInvoice({
+        gateway: activeGateway,
         orderId,
         pkg,
         user,
@@ -304,29 +306,30 @@ function createApiRouter() {
         packageId: pkg.id,
         diamonds: pkg.diamonds,
         grossAmount: pkg.price,
-        snapToken: duitkuRes.reference,
-        paymentType: duitkuRes.paymentMethod || selectedMethod,
-        paymentDetails: duitkuRes
+        snapToken: gwRes.reference,
+        paymentType: gwRes.paymentMethod || selectedMethod,
+        paymentDetails: gwRes
       });
 
       res.json({
         success: true,
+        gateway: gwRes.gateway || activeGateway,
         orderId,
         package: pkg,
-        reference: duitkuRes.reference,
-        paymentUrl: duitkuRes.paymentUrl,
-        vaNumber: duitkuRes.vaNumber || null,
-        qrString: duitkuRes.qrString || null,
-        qrCodeUrl: duitkuRes.qrCodeUrl || null,
-        paymentMethod: duitkuRes.paymentMethod || selectedMethod,
-        paymentMethodName: duitkuRes.paymentMethodName || null,
-        paymentCategory: duitkuRes.paymentCategory || null,
-        bank: duitkuRes.bank || null,
-        payment: duitkuRes,
-        isSimulation: duitkuRes.isSimulation || false
+        reference: gwRes.reference,
+        paymentUrl: gwRes.paymentUrl,
+        vaNumber: gwRes.vaNumber || null,
+        qrString: gwRes.qrString || null,
+        qrCodeUrl: gwRes.qrCodeUrl || null,
+        paymentMethod: gwRes.paymentMethod || selectedMethod,
+        paymentMethodName: gwRes.paymentMethodName || null,
+        paymentCategory: gwRes.paymentCategory || null,
+        bank: gwRes.bank || null,
+        payment: gwRes,
+        isSimulation: gwRes.isSimulation || false
       });
     } catch (err) {
-      console.error('[TOPUP DUITKU ERROR]', err.message);
+      console.error('[TOPUP GATEWAY ERROR]', err.message);
       res.status(500).json({ success: false, error: err.message || 'Gagal memproses pembayaran.' });
     }
   }));
@@ -343,18 +346,23 @@ function createApiRouter() {
     res.json({ success: true, order });
   }));
 
-  // Webhook notifikasi Duitku (Callback URL)
+  // Webhook notifikasi Payment Gateway (DOKU / Duitku Callback URL)
   api.post('/topup/notification', asyncRoute(async (req, res) => {
     const notif = req.body || {};
-    const orderId = String(notif.merchantOrderId || notif.merchant_order_id || notif.order_id || '').trim();
+    const headers = {
+      ...(req.headers || {}),
+      'x-resolved-target': String(req.originalUrl || '/api/topup/notification').split('?')[0]
+    };
+    const preNormalized = paymentGateway.normalizeCallback(notif, headers);
+    const orderId = preNormalized.merchantOrderId;
 
     if (!orderId) {
       return res.status(400).send('Bad Parameter: missing merchantOrderId');
     }
 
-    // Delegasikan callback order Diamonds (PGD_*) ke economy store jika DUITKU_CALLBACK_URL diarahkan ke endpoint ini
+    // Delegasikan callback order Diamonds (PGD_*) ke economy store jika Callback URL diarahkan ke endpoint ini
     if (orderId.startsWith('PGD_')) {
-      const result = await economy.handleDuitkuDiamondCallback(notif);
+      const result = await economy.handleDuitkuDiamondCallback(notif, headers);
       if (result.httpStatus && result.httpStatus >= 400) {
         return res.status(result.httpStatus).send(result.error || 'Bad Callback');
       }
@@ -363,29 +371,31 @@ function createApiRouter() {
 
     const order = await db.getTopupOrder(orderId);
     if (!order) {
-      console.warn('[DUITKU NOTIFICATION] Order not found:', orderId);
+      console.warn('[PAYMENT NOTIFICATION] Order not found:', orderId);
       return res.status(404).send('Bad Parameter: order not found');
     }
 
-    const isValid = duitku.verifyDuitkuCallback(notif);
+    const orderGateway = order.paymentDetails?.gateway || preNormalized.gateway;
+    const normalized = paymentGateway.normalizeCallback(notif, headers, orderGateway);
+    const isValid = paymentGateway.verifyCallback(notif, headers, orderGateway);
     if (!isValid) {
-      console.warn('[DUITKU NOTIFICATION] Invalid signature for order', orderId);
+      console.warn(`[${String(orderGateway).toUpperCase()} NOTIFICATION] Invalid signature for order`, orderId);
       return res.status(400).send('Bad Signature');
     }
 
-    const resultCode = String(notif.resultCode || '');
+    const resultCode = String(normalized.resultCode || '');
     if (resultCode === '00') {
-      const paidAmount = Number(notif.amount);
+      const paidAmount = Number(normalized.amount);
       if (!Number.isFinite(paidAmount) || paidAmount <= 0 || paidAmount !== Number(order.grossAmount)) {
-        console.warn('[DUITKU NOTIFICATION] Amount mismatch for order', orderId, 'expected', order.grossAmount, 'got', notif.amount);
+        console.warn(`[${String(orderGateway).toUpperCase()} NOTIFICATION] Amount mismatch for order`, orderId, 'expected', order.grossAmount, 'got', normalized.amount);
         return res.status(400).send('Bad Parameter: amount mismatch');
       }
-      const paymentMethod = notif.paymentMethod || notif.payment_method || 'duitku';
+      const paymentMethod = normalized.paymentMethod || orderGateway || 'doku';
       await db.completeTopupOrder(orderId, paymentMethod);
-      console.log('[DUITKU NOTIFICATION] Order completed successfully:', orderId);
+      console.log(`[${String(orderGateway).toUpperCase()} NOTIFICATION] Order completed successfully:`, orderId);
     }
 
-    // Duitku callback standar mengharapkan balasan HTTP 200 dengan text "OK"
+    // Gateway callback standar mengharapkan balasan HTTP 200 dengan text "OK"
     res.status(200).send('OK');
   }));
 
@@ -409,24 +419,25 @@ function createApiRouter() {
       return res.json({ success: true, status: 'success', user: withKing(freshUser), diamonds: order.diamonds, coins: order.diamonds });
     }
 
-    // Coba polling status ke Duitku Status API secara realtime
+    // Coba polling status ke Payment Gateway Status API secara realtime
     try {
-      const duitkuStatus = await duitku.checkDuitkuStatus(orderId);
-      if (duitkuStatus) {
-        const isDuitkuSuccess =
-          duitkuStatus.statusCode === '00' ||
-          duitkuStatus.status === '00' ||
-          duitkuStatus.resultCode === '00';
+      const orderGateway = order.paymentDetails?.gateway || paymentGateway.getActiveGatewayName();
+      const gwStatus = await paymentGateway.checkStatus(orderId, orderGateway);
+      if (gwStatus) {
+        const isGwSuccess =
+          gwStatus.statusCode === '00' ||
+          gwStatus.status === '00' ||
+          gwStatus.resultCode === '00';
 
-        if (isDuitkuSuccess) {
-          if (duitkuStatus.amount !== undefined && duitkuStatus.amount !== null && String(duitkuStatus.amount).trim() !== '') {
-            const gwAmount = Number(duitkuStatus.amount);
+        if (isGwSuccess) {
+          if (gwStatus.amount !== undefined && gwStatus.amount !== null && String(gwStatus.amount).trim() !== '') {
+            const gwAmount = Number(gwStatus.amount);
             if (!Number.isFinite(gwAmount) || gwAmount <= 0 || gwAmount !== Number(order.grossAmount)) {
-              console.warn('[TOPUP VERIFY DUITKU AMOUNT MISMATCH]', orderId, 'expected', order.grossAmount, 'got', duitkuStatus.amount);
+              console.warn('[TOPUP VERIFY GATEWAY AMOUNT MISMATCH]', orderId, 'expected', order.grossAmount, 'got', gwStatus.amount);
               return res.status(400).json({ success: false, error: 'Nominal pembayaran tidak sesuai dengan pesanan.' });
             }
           }
-          const completed = await db.completeTopupOrder(orderId, 'duitku');
+          const completed = await db.completeTopupOrder(orderId, orderGateway);
           return res.json({
             success: true,
             status: 'success',
@@ -437,7 +448,7 @@ function createApiRouter() {
         }
       }
     } catch (err) {
-      console.warn('[TOPUP VERIFY DUITKU STATUS ERROR]', err.message);
+      console.warn('[TOPUP VERIFY GATEWAY STATUS ERROR]', err.message);
     }
 
     res.json({ success: true, status: order.status, message: 'Transaksi masih menunggu pembayaran.' });

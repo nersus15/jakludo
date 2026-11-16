@@ -812,161 +812,193 @@ test('Google reCAPTCHA v3: config endpoint dan verifikasi token login / register
   assert.equal(loginBody.user.id, regBody.user.id);
 });
 
-test('topup diamonds dengan duitku payment gateway (config, reference, verify, notification, simulate, points award)', async () => {
-  // 1. GET /api/topup/config
-  const cfgRes = await fetch(`${url}/api/topup/config`);
-  assert.equal(cfgRes.status, 200);
-  const cfg = await cfgRes.json();
-  assert.equal(cfg.success, true);
-  assert.equal(cfg.gateway, 'duitku');
-  assert.equal(cfg.mode, 'direct_api');
-  assert.equal(cfg.packages.length, 6);
-  assert.ok(Array.isArray(cfg.paymentMethods) && cfg.paymentMethods.length > 0);
-  assert.equal(cfg.popJsUrl, undefined);
+test('topup diamonds multi-gateway (switch DOKU <-> Duitku di .env, webhook verify & points award)', async () => {
+  const prevEnv = {
+    PAYMENT_GATEWAY: process.env.PAYMENT_GATEWAY,
+    DOKU_CLIENT_ID: process.env.DOKU_CLIENT_ID,
+    DOKU_SECRET_KEY: process.env.DOKU_SECRET_KEY,
+    DOKU_MERCHANT_CODE: process.env.DOKU_MERCHANT_CODE
+  };
 
-  const p50 = cfg.packages.find(p => p.diamonds === 50);
-  const p120 = cfg.packages.find(p => p.diamonds === 120);
-  const p260 = cfg.packages.find(p => p.diamonds === 260);
-  const p700 = cfg.packages.find(p => p.diamonds === 700);
-  const p1500 = cfg.packages.find(p => p.diamonds === 1500);
-  const p3250 = cfg.packages.find(p => p.diamonds === 3250);
+  try {
+    // A. Pastikan default / PAYMENT_GATEWAY=doku aktif dengan DOKU
+    process.env.PAYMENT_GATEWAY = 'doku';
+    const cfgRes = await fetch(`${url}/api/topup/config`);
+    assert.equal(cfgRes.status, 200);
+    const cfg = await cfgRes.json();
+    assert.equal(cfg.success, true);
+    assert.equal(cfg.gateway, 'doku');
+    assert.equal(cfg.mode, 'direct_api');
+    assert.equal(cfg.packages.length, 6);
+    assert.ok(Array.isArray(cfg.paymentMethods) && cfg.paymentMethods.length === 6);
+    assert.equal(cfg.popJsUrl, undefined);
 
-  assert.ok(p50, 'Paket 50 diamond harus ada');
-  assert.equal(p50.price, 5000, '50 diamonds = Rp 5.000');
-  assert.ok(p120, 'Paket 120 diamond harus ada');
-  assert.equal(p120.price, 10000, '120 diamonds = Rp 10.000');
-  assert.equal(p120.badge, 'Populer');
-  assert.ok(p260, 'Paket 260 diamond harus ada');
-  assert.equal(p260.price, 20000, '260 diamonds = Rp 20.000');
-  assert.ok(p700, 'Paket 700 diamond harus ada');
-  assert.equal(p700.price, 50000, '700 diamonds = Rp 50.000');
-  assert.equal(p700.badge, 'Bonus 100');
-  assert.ok(p1500, 'Paket 1.500 diamond harus ada');
-  assert.equal(p1500.price, 100000, '1.500 diamonds = Rp 100.000');
-  assert.equal(p1500.badge, 'Bonus 250');
-  assert.ok(p3250, 'Paket 3.250 diamond harus ada');
-  assert.equal(p3250.price, 200000, '3.250 diamonds = Rp 200.000');
-  assert.equal(p3250.badge, 'Bonus 750');
+    const p50 = cfg.packages.find(p => p.diamonds === 50);
+    const p120 = cfg.packages.find(p => p.diamonds === 120);
+    const p260 = cfg.packages.find(p => p.diamonds === 260);
+    const p700 = cfg.packages.find(p => p.diamonds === 700);
+    const p1500 = cfg.packages.find(p => p.diamonds === 1500);
+    const p3250 = cfg.packages.find(p => p.diamonds === 3250);
 
-  // 2. Register user untuk topup
-  const topupUser = 'tp_' + Math.random().toString(36).slice(2, 8);
-  const reg = await register(topupUser);
-  const token = reg.token;
-  const initialPoints = reg.user.points; // default starter points (200)
+    assert.ok(p50 && p50.price === 5000);
+    assert.ok(p120 && p120.price === 10000 && p120.badge === 'Populer');
+    assert.ok(p260 && p260.price === 20000);
+    assert.ok(p700 && p700.price === 50000 && p700.badge === 'Bonus 100');
+    assert.ok(p1500 && p1500.price === 100000 && p1500.badge === 'Bonus 250');
+    assert.ok(p3250 && p3250.price === 200000 && p3250.badge === 'Bonus 750');
 
-  // 3. Create Duitku transaction untuk paket 120 coins via Direct API (BCA VA)
-  const duitkuRes = await fetch(`${url}/api/topup/create`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ packageId: 'diamond_120', paymentMethod: 'BC' })
-  });
-  assert.equal(duitkuRes.status, 200);
-  const duitkuBody = await duitkuRes.json();
-  assert.equal(duitkuBody.success, true);
-  assert.ok(duitkuBody.orderId);
-  assert.ok(duitkuBody.reference);
-  assert.equal(duitkuBody.popJsUrl, undefined);
-  assert.equal(duitkuBody.paymentMethod, 'BC');
-  assert.ok(duitkuBody.vaNumber);
-  assert.equal(duitkuBody.package.diamonds, 120);
+    // 2. Register user untuk topup
+    const topupUser = 'tp_' + Math.random().toString(36).slice(2, 8);
+    const reg = await register(topupUser);
+    const token = reg.token;
+    const initialPoints = reg.user.points;
 
-  // 4. Simulasi pembayaran topup (simulate)
-  const simRes = await fetch(`${url}/api/topup/simulate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ orderId: duitkuBody.orderId })
-  });
-  assert.equal(simRes.status, 200);
-  const simBody = await simRes.json();
-  assert.equal(simBody.success, true);
-  assert.equal(simBody.diamondsAwarded, 120);
-  assert.equal(simBody.user.points, initialPoints + 120);
+    // 3. Create transaksi via DOKU (BCA VA)
+    const dokuRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_120', paymentMethod: 'BC' })
+    });
+    assert.equal(dokuRes.status, 200);
+    const dokuBody = await dokuRes.json();
+    assert.equal(dokuBody.success, true);
+    assert.equal(dokuBody.gateway, 'doku');
+    assert.ok(dokuBody.orderId);
+    assert.ok(dokuBody.reference.startsWith('doku_ref_'));
+    assert.equal(dokuBody.paymentMethod, 'BC');
+    assert.ok(dokuBody.vaNumber);
+    assert.equal(dokuBody.package.diamonds, 120);
 
-  // 5. Cek verify endpoint
-  const verifyRes = await fetch(`${url}/api/topup/verify`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ orderId: duitkuBody.orderId })
-  });
-  assert.equal(verifyRes.status, 200);
-  const verifyBody = await verifyRes.json();
-  assert.equal(verifyBody.success, true);
-  assert.equal(verifyBody.status, 'success');
-  assert.equal(verifyBody.user.points, initialPoints + 120);
+    // 4. Simulasi pembayaran topup
+    const simRes = await fetch(`${url}/api/topup/simulate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ orderId: dokuBody.orderId })
+    });
+    assert.equal(simRes.status, 200);
+    const simBody = await simRes.json();
+    assert.equal(simBody.diamondsAwarded, 120);
+    assert.equal(simBody.user.points, initialPoints + 120);
 
-  // 6. Test paket 3.250 diamonds (Paket Sultan)
-  const sultanRes = await fetch(`${url}/api/topup/charge`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ packageId: 'diamond_3250' })
-  });
-  const sultanBody = await sultanRes.json();
-  assert.equal(sultanBody.success, true);
-  assert.ok(sultanBody.reference || sultanBody.token);
+    // 5. Cek verify endpoint
+    const verifyRes = await fetch(`${url}/api/topup/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ orderId: dokuBody.orderId })
+    });
+    assert.equal(verifyRes.status, 200);
+    const verifyBody = await verifyRes.json();
+    assert.equal(verifyBody.status, 'success');
+    assert.equal(verifyBody.user.points, initialPoints + 120);
 
-  const simSultanRes = await fetch(`${url}/api/topup/simulate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ orderId: sultanBody.orderId })
-  });
-  const simSultanBody = await simSultanRes.json();
-  assert.equal(simSultanBody.diamondsAwarded, 3250);
-  assert.equal(simSultanBody.user.points, initialPoints + 120 + 3250);
+    // 6. Webhook Notifikasi Resmi DOKU Jokul (HMACSHA256) untuk paket 3.250
+    const dokuClientId = 'BRN-TEST-TOPUP';
+    const dokuSecret = 'SK-TEST-TOPUP-SECRET';
+    process.env.DOKU_CLIENT_ID = dokuClientId;
+    process.env.DOKU_SECRET_KEY = dokuSecret;
+    process.env.DOKU_MERCHANT_CODE = dokuClientId;
 
-  // 7. Test Webhook Notifikasi Duitku untuk paket 260 diamonds
-  const notifOrderRes = await fetch(`${url}/api/topup/create`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ packageId: 'diamond_260' })
-  });
-  const notifOrderBody = await notifOrderRes.json();
-  assert.equal(notifOrderBody.success, true);
+    const sultanRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_3250', paymentMethod: 'SP' })
+    });
+    const sultanBody = await sultanRes.json();
+    assert.equal(sultanBody.success, true);
+    assert.equal(sultanBody.gateway, 'doku');
 
-  const crypto = require('crypto');
-  const mCode = cfg.merchantCode || 'DS37928';
-  const mKey = process.env.DUITKU_API_KEY || '';
-  const validSig = crypto.createHash('md5').update(`${mCode}20000${notifOrderBody.orderId}${mKey}`).digest('hex');
+    const dokuLib = require('./lib/doku');
+    const jokulPayloadObj = {
+      order: { invoice_number: sultanBody.orderId, amount: 200000 },
+      transaction: { status: 'SUCCESS', original_request_id: 'REQ-DOKU-SULTAN' },
+      channel: { id: 'QRIS' }
+    };
+    const rawJokulBody = JSON.stringify(jokulPayloadObj);
+    const reqId = 'req-srv-1';
+    const reqTs = new Date().toISOString().slice(0, 19) + 'Z';
+    const dokuSig = dokuLib.generateDokuSignature({
+      clientId: dokuClientId,
+      requestId: reqId,
+      requestTimestamp: reqTs,
+      requestTarget: '/api/topup/notification',
+      digest: dokuLib.generateDigest(rawJokulBody),
+      secretKey: dokuSecret
+    });
 
-  const duitkuNotifRes = await fetch(`${url}/api/topup/notification`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      merchantCode: mCode,
-      merchantOrderId: notifOrderBody.orderId,
-      amount: '20000',
-      resultCode: '00',
-      paymentMethod: 'VC',
-      reference: 'mock_ref_123',
-      signature: validSig
-    })
-  });
-  assert.equal(duitkuNotifRes.status, 200);
+    const dokuWebhookRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Client-Id': dokuClientId,
+        'Request-Id': reqId,
+        'Request-Timestamp': reqTs,
+        Signature: dokuSig
+      },
+      body: rawJokulBody
+    });
+    assert.equal(dokuWebhookRes.status, 200);
+    assert.equal(await dokuWebhookRes.text(), 'OK');
 
-  const finalUserRes = await fetch(`${url}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  const finalUserData = await finalUserRes.json();
-  assert.equal(finalUserData.user.points, initialPoints + 120 + 3250 + 260);
+    // B. Switch gateway ke Duitku lewat env PAYMENT_GATEWAY=duitku
+    process.env.PAYMENT_GATEWAY = 'duitku';
+    const duitkuCfg = await (await fetch(`${url}/api/topup/config`)).json();
+    assert.equal(duitkuCfg.gateway, 'duitku');
+
+    const notifOrderRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_260', paymentMethod: 'BC' })
+    });
+    const notifOrderBody = await notifOrderRes.json();
+    assert.equal(notifOrderBody.success, true);
+    assert.equal(notifOrderBody.gateway, 'duitku');
+
+    const crypto = require('crypto');
+    const mCode = duitkuCfg.merchantCode || 'DS37928';
+    const mKey = process.env.DUITKU_API_KEY || '';
+    const validSig = crypto.createHash('md5').update(`${mCode}20000${notifOrderBody.orderId}${mKey}`).digest('hex');
+
+    const duitkuNotifRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        merchantCode: mCode,
+        merchantOrderId: notifOrderBody.orderId,
+        amount: '20000',
+        resultCode: '00',
+        paymentMethod: 'BC',
+        reference: 'mock_ref_123',
+        signature: validSig
+      })
+    });
+    assert.equal(duitkuNotifRes.status, 200);
+
+    const finalUserRes = await fetch(`${url}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const finalUserData = await finalUserRes.json();
+    assert.equal(finalUserData.user.points, initialPoints + 120 + 3250 + 260);
+  } finally {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
 
 test('GET /ads.txt mengembalikan text/plain dengan publisher Google AdSense', async () => {

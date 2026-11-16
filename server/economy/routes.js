@@ -1,8 +1,8 @@
-// REST API Dual Currency (Coins + Diamonds), Konversi, Duitku Top-Up, Ludo Skin Shop & Admin Economy.
+// REST API Dual Currency (Coins + Diamonds), Konversi, Multi-Gateway Top-Up (DOKU/Duitku), Ludo Skin Shop & Admin Economy.
 const express = require('express');
 const db = require('../db');
 const economy = require('./store');
-const duitku = require('../lib/duitku');
+const paymentGateway = require('../lib/paymentGateway');
 const { createLimiter } = require('../lib/limiter');
 
 function bearerToken(req) {
@@ -113,15 +113,17 @@ function registerEconomyRoutes(api) {
   }));
 
   // ==========================================
-  // DIAMOND TOP-UP & DUITKU PAYMENT GATEWAY
+  // DIAMOND TOP-UP & MULTI-GATEWAY (DOKU / DUITKU)
   // ==========================================
 
   router.get('/economy/packages', asyncRoute(async (req, res) => {
     const user = resolveUser(req);
+    const activeGateway = paymentGateway.getActiveGatewayName();
     res.json({
       success: true,
+      gateway: activeGateway,
       packages: economy.listDiamondPackages({ includeInactive: false }),
-      paymentMethods: duitku.DUITKU_PAYMENT_METHODS,
+      paymentMethods: paymentGateway.getPaymentMethodsCatalog(activeGateway),
       settings: economy.getEconomySettings(),
       wallet: user ? economy.formatWalletResponse(user.id) : null
     });
@@ -129,7 +131,7 @@ function registerEconomyRoutes(api) {
 
   router.get('/economy/payment-methods', asyncRoute(async (req, res) => {
     const amount = Number(req.query?.amount || 10000);
-    const result = await duitku.getPaymentMethods(amount);
+    const result = await paymentGateway.getPaymentMethods(amount);
     res.json(result);
   }));
 
@@ -157,10 +159,14 @@ function registerEconomyRoutes(api) {
     res.json(result);
   }));
 
-  // Server-to-server Duitku callback webhook (NEVER trust frontend redirect!)
+  // Server-to-server payment gateway callback webhook (DOKU / Duitku)
   router.post('/economy/topup/callback', asyncRoute(async (req, res) => {
     const payload = req.body || {};
-    const result = await economy.handleDuitkuDiamondCallback(payload);
+    const headers = {
+      ...(req.headers || {}),
+      'x-resolved-target': String(req.originalUrl || '/api/economy/topup/callback').split('?')[0]
+    };
+    const result = await economy.handleDuitkuDiamondCallback(payload, headers);
     res.status(result.httpStatus || 200).json(result);
   }));
 

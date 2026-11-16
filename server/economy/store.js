@@ -1,4 +1,4 @@
-// Store Ekonomi Dual Currency (Coins + Diamonds), Konversi, Top-Up Duitku,
+// Store Ekonomi Dual Currency (Coins + Diamonds), Konversi, Top-Up DOKU & Duitku,
 // Ludo Skin Shop & Dashboard Admin PlayGo.
 // Semua mutasi saldo & kepemilikan skin berjalan aman dengan per-user / per-order lock
 // dan transaksi PostgreSQL (plus fallback lokal untuk pengujian tanpa PG).
@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const duitku = require('../lib/duitku');
+const paymentGateway = require('../lib/paymentGateway');
 
 const DATA_DIR = process.env.JAKLUDO_DATA_DIR || path.join(__dirname, '..', 'data');
 const LOCAL_ECONOMY_FILE = path.join(DATA_DIR, 'economy-state.json');
@@ -838,7 +838,7 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
 }
 
 // ==========================================
-// PAKET TOP-UP & DUITKU PAYMENT GATEWAY
+// PAKET TOP-UP & MULTI-GATEWAY (DOKU / DUITKU)
 // ==========================================
 
 function listDiamondPackages({ includeInactive = false } = {}) {
@@ -868,10 +868,13 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
     const resolvedMethod = String(paymentMethod || 'SP').trim().toUpperCase().slice(0, 16) || 'SP';
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const activeGateway = paymentGateway.getActiveGatewayName();
 
-    const invoice = await duitku.createInvoice({
+    const invoice = await paymentGateway.createInvoice({
+      gateway: activeGateway,
       orderId,
       pkg: {
+        id: pkg.id,
         name: pkg.name,
         price: amountIdr,
         priceIdr: amountIdr,
@@ -883,6 +886,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
       callbackPath: '/api/economy/topup/callback',
       paymentMethod: resolvedMethod
     });
+    const orderGateway = invoice.gateway || activeGateway;
 
     const order = {
       id: orderId,
@@ -900,7 +904,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
       vaNumber: invoice.vaNumber || null,
       qrString: invoice.qrString || null,
       qrCodeUrl: invoice.qrCodeUrl || null,
-      gateway: 'duitku',
+      gateway: orderGateway,
       gatewayReference: invoice.reference || null,
       paymentUrl: invoice.paymentUrl || null,
       status: 'PENDING',
@@ -917,7 +921,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
       await pool.query(
         `INSERT INTO payment_orders
            (id, user_id, package_id, package_name, diamonds, bonus_diamonds, total_diamonds, amount_idr, payment_method, gateway, gateway_reference, payment_url, status, expires_at, raw_create_response, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'duitku', $10, $11, 'PENDING', $12, $13, $14, $14)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'PENDING', $13, $14, $15, $15)`,
         [
           order.id,
           order.userId,
@@ -928,6 +932,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
           order.totalDiamonds,
           order.amountIdr,
           order.paymentMethod,
+          order.gateway,
           order.gatewayReference,
           order.paymentUrl,
           order.expiresAt,
@@ -945,6 +950,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
       order,
       invoice: {
         orderId: order.id,
+        gateway: order.gateway,
         reference: order.gatewayReference,
         paymentUrl: order.paymentUrl,
         vaNumber: order.vaNumber,
@@ -966,6 +972,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
 
 function recordCallbackLog({
   orderId = null,
+  gateway = paymentGateway.getActiveGatewayName(),
   merchantCode = null,
   amountRaw = null,
   resultCode = null,
@@ -978,7 +985,7 @@ function recordCallbackLog({
   const entry = Object.freeze({
     id: 'cb_' + crypto.randomUUID(),
     orderId: orderId ? String(orderId) : null,
-    gateway: 'duitku',
+    gateway: String(gateway || 'doku'),
     merchantCode: merchantCode ? String(merchantCode) : null,
     amountRaw: amountRaw !== undefined && amountRaw !== null ? String(amountRaw) : null,
     resultCode: resultCode !== undefined && resultCode !== null ? String(resultCode) : null,
@@ -995,10 +1002,11 @@ function recordCallbackLog({
     getDb().execPg(
       `INSERT INTO payment_callback_logs
          (id, order_id, gateway, merchant_code, amount_raw, result_code, signature_received, signature_valid, processing_status, notes, payload, created_at)
-       VALUES ($1, $2, 'duitku', $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         entry.id,
         entry.orderId,
+        entry.gateway,
         entry.merchantCode,
         entry.amountRaw,
         entry.resultCode,
@@ -1157,7 +1165,14 @@ async function markOrderNonPaidStatus(order, nextStatus, reason = '') {
   return order;
 }
 
-async function handleDuitkuDiamondCallback(payload) {
+async function handleDuitkuDiamondCallback(payload, headers = {}) {
+  const preNorm = paymentGateway.normalizeCallback(payload, headers);
+  const existingOrder = preNorm.merchantOrderId
+    ? state.paymentOrders.get(String(preNorm.merchantOrderId))
+    : null;
+  const gateway = existingOrder?.gateway || preNorm.gateway || paymentGateway.getActiveGatewayName();
+  const norm = paymentGateway.normalizeCallback(payload, headers, existingOrder?.gateway || gateway);
+
   const {
     merchantCode,
     amount,
@@ -1166,27 +1181,29 @@ async function handleDuitkuDiamondCallback(payload) {
     reference,
     statusMessage,
     signature
-  } = payload || {};
+  } = norm;
 
-  const sigValid = duitku.verifyDuitkuCallback(payload);
+  const sigValid = paymentGateway.verifyCallback(payload, headers, existingOrder?.gateway || gateway);
   if (!sigValid) {
     recordCallbackLog({
       orderId: merchantOrderId,
+      gateway,
       merchantCode,
       amountRaw: amount,
       resultCode,
       signatureReceived: signature,
       signatureValid: false,
       processingStatus: 'REJECTED_INVALID_SIGNATURE',
-      notes: 'Signature callback Duitku tidak valid atau merchantCode tidak cocok.',
+      notes: `Signature callback ${gateway.toUpperCase()} tidak valid atau merchantCode tidak cocok.`,
       payload
     });
-    return { httpStatus: 400, success: false, error: 'Invalid Duitku callback signature.' };
+    return { httpStatus: 400, success: false, error: `Invalid ${gateway.toUpperCase()} callback signature.` };
   }
 
   if (!merchantOrderId) {
     recordCallbackLog({
       orderId: null,
+      gateway,
       merchantCode,
       amountRaw: amount,
       resultCode,
@@ -1204,6 +1221,7 @@ async function handleDuitkuDiamondCallback(payload) {
     if (!order) {
       recordCallbackLog({
         orderId: merchantOrderId,
+        gateway,
         merchantCode,
         amountRaw: amount,
         resultCode,
@@ -1216,10 +1234,12 @@ async function handleDuitkuDiamondCallback(payload) {
       return { httpStatus: 404, success: false, error: 'Order top-up tidak ditemukan.' };
     }
 
+    const orderGw = order.gateway || gateway;
     const parsedAmount = Number(amount);
     if (!Number.isFinite(parsedAmount) || parsedAmount !== Number(order.amountIdr)) {
       recordCallbackLog({
         orderId: order.id,
+        gateway: orderGw,
         merchantCode,
         amountRaw: amount,
         resultCode,
@@ -1243,6 +1263,7 @@ async function handleDuitkuDiamondCallback(payload) {
       await markOrderNonPaidStatus(order, 'EXPIRED', 'Batas waktu pembayaran order telah berakhir.');
       recordCallbackLog({
         orderId: order.id,
+        gateway: orderGw,
         merchantCode,
         amountRaw: amount,
         resultCode: code,
@@ -1259,6 +1280,7 @@ async function handleDuitkuDiamondCallback(payload) {
       if (order.status === 'PAID') {
         recordCallbackLog({
           orderId: order.id,
+          gateway: orderGw,
           merchantCode,
           amountRaw: amount,
           resultCode: code,
@@ -1281,6 +1303,7 @@ async function handleDuitkuDiamondCallback(payload) {
       if (order.status !== 'PENDING') {
         recordCallbackLog({
           orderId: order.id,
+          gateway: orderGw,
           merchantCode,
           amountRaw: amount,
           resultCode: code,
@@ -1299,9 +1322,10 @@ async function handleDuitkuDiamondCallback(payload) {
         };
       }
 
-      const creditRes = await applyOrderPaidCredit(order, 'duitku_callback');
+      const creditRes = await applyOrderPaidCredit(order, `${orderGw}_callback`);
       recordCallbackLog({
         orderId: order.id,
+        gateway: orderGw,
         merchantCode,
         amountRaw: amount,
         resultCode: code,
@@ -1328,6 +1352,7 @@ async function handleDuitkuDiamondCallback(payload) {
       persistLocalFallback();
       recordCallbackLog({
         orderId: order.id,
+        gateway: orderGw,
         merchantCode,
         amountRaw: amount,
         resultCode: code,
@@ -1349,9 +1374,10 @@ async function handleDuitkuDiamondCallback(payload) {
       finalStatus = 'CANCELLED';
     }
 
-    await markOrderNonPaidStatus(order, finalStatus, statusMessage || `Duitku resultCode: ${code}`);
+    await markOrderNonPaidStatus(order, finalStatus, statusMessage || `${orderGw.toUpperCase()} resultCode: ${code}`);
     recordCallbackLog({
       orderId: order.id,
+      gateway: orderGw,
       merchantCode,
       amountRaw: amount,
       resultCode: code,
@@ -1383,11 +1409,15 @@ async function getAndVerifyOrderStatus({ orderId, requesterUser }) {
     }
 
     if (order.status === 'PENDING') {
-      const gatewayRes = await duitku.checkDuitkuStatus(order.id);
+      const orderGw = order.gateway || paymentGateway.getActiveGatewayName();
+      const gatewayRes = await paymentGateway.checkStatus(order.id, orderGw);
       if (gatewayRes && gatewayRes.statusCode) {
-        const gwAmount = gatewayRes.amount !== undefined ? Number(gatewayRes.amount) : Number(order.amountIdr);
+        const gwAmount =
+          gatewayRes.amount !== undefined && gatewayRes.amount !== null && String(gatewayRes.amount).trim() !== ''
+            ? Number(gatewayRes.amount)
+            : Number(order.amountIdr);
         if (String(gatewayRes.statusCode) === '00' && gwAmount === Number(order.amountIdr)) {
-          const creditRes = await applyOrderPaidCredit(order, 'duitku_status_verify');
+          const creditRes = await applyOrderPaidCredit(order, `${orderGw}_status_verify`);
           return {
             order: enrichOrderFields(creditRes.order),
             verifiedWithGateway: true,
@@ -1397,7 +1427,7 @@ async function getAndVerifyOrderStatus({ orderId, requesterUser }) {
         if (String(gatewayRes.statusCode) === '02') {
           const msg = String(gatewayRes.statusMessage || '').toUpperCase();
           const st = msg.includes('EXPIRED') ? 'EXPIRED' : msg.includes('CANCEL') ? 'CANCELLED' : 'FAILED';
-          await markOrderNonPaidStatus(order, st, gatewayRes.statusMessage || 'Duitku status 02');
+          await markOrderNonPaidStatus(order, st, gatewayRes.statusMessage || `${orderGw.toUpperCase()} status 02`);
         }
       }
     }
@@ -2038,6 +2068,7 @@ module.exports = {
   listDiamondPackages,
   createDiamondTopupOrder,
   handleDuitkuDiamondCallback,
+  handlePaymentGatewayCallback: handleDuitkuDiamondCallback,
   getAndVerifyOrderStatus,
   cancelPendingOrder,
   listLudoSkins,

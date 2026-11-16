@@ -13,6 +13,7 @@ process.env.NODE_ENV = 'test';
 const { io: ioClient } = require('socket.io-client');
 const { server, rooms, shutdown } = require('../index');
 const db = require('../db');
+const doku = require('../lib/doku');
 const duitku = require('../lib/duitku');
 
 let url;
@@ -41,14 +42,16 @@ async function registerUser(username) {
   return data;
 }
 
-async function apiJson(route, { method = 'GET', token = '', body = undefined } = {}) {
-  const headers = {};
+async function apiJson(route, { method = 'GET', token = '', body = undefined, headers: extraHeaders = {} } = {}) {
+  const headers = { ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const rawBody =
+    body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
   const res = await fetch(`${url}${route}`, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined
+    body: rawBody
   });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
@@ -143,11 +146,17 @@ test('Coins & Diamonds: konversi valid, batas min/max, saldo kurang, input tidak
 });
 
 test('Duitku Diamond Top-Up: verifikasi signature ketat, amount mismatch, order tidak ditemukan, idempotency callback, & status gagal/expired/cancelled', async () => {
+  const prevGateway = process.env.PAYMENT_GATEWAY;
+  const prevDuitkuCode = process.env.DUITKU_MERCHANT_CODE;
+  const prevDuitkuKey = process.env.DUITKU_API_KEY;
+  process.env.PAYMENT_GATEWAY = 'duitku';
+
   const userAuth = await registerUser('econ_duitku');
   const token = userAuth.token;
 
   const pkgRes = await apiJson('/api/economy/packages', { token });
   assert.equal(pkgRes.status, 200);
+  assert.equal(pkgRes.data.gateway, 'duitku');
   assert.equal(pkgRes.data.packages.length >= 4, true);
   assert.equal(Array.isArray(pkgRes.data.paymentMethods) && pkgRes.data.paymentMethods.length > 0, true);
   const popularPkg = pkgRes.data.packages.find(p => p.id === 'pkg_popular');
@@ -173,6 +182,7 @@ test('Duitku Diamond Top-Up: verifikasi signature ketat, amount mismatch, order 
   assert.equal(createRes.status, 200);
   const order = createRes.data.order;
   const inv = createRes.data.invoice;
+  assert.equal(order.gateway, 'duitku');
   assert.equal(order.status, 'PENDING');
   assert.equal(order.amountIdr, 10000);
   assert.equal(order.totalDiamonds, 25);
@@ -369,8 +379,185 @@ test('Duitku Diamond Top-Up: verifikasi signature ketat, amount mismatch, order 
     w = await apiJson('/api/economy/wallet', { token });
     assert.equal(w.data.wallet.diamonds, 35);
   } finally {
-    delete process.env.DUITKU_MERCHANT_CODE;
-    delete process.env.DUITKU_API_KEY;
+    if (prevGateway === undefined) delete process.env.PAYMENT_GATEWAY;
+    else process.env.PAYMENT_GATEWAY = prevGateway;
+    if (prevDuitkuCode === undefined) delete process.env.DUITKU_MERCHANT_CODE;
+    else process.env.DUITKU_MERCHANT_CODE = prevDuitkuCode;
+    if (prevDuitkuKey === undefined) delete process.env.DUITKU_API_KEY;
+    else process.env.DUITKU_API_KEY = prevDuitkuKey;
+  }
+});
+
+test('DOKU Diamond Top-Up & Switch Gateway (.env): switch DOKU <-> Duitku, header HMACSHA256 webhook, penolakan signature palsu, & idempotency', async () => {
+  const prevEnv = {
+    PAYMENT_GATEWAY: process.env.PAYMENT_GATEWAY,
+    DOKU_CLIENT_ID: process.env.DOKU_CLIENT_ID,
+    DOKU_SECRET_KEY: process.env.DOKU_SECRET_KEY,
+    DOKU_MERCHANT_CODE: process.env.DOKU_MERCHANT_CODE
+  };
+
+  try {
+    process.env.PAYMENT_GATEWAY = 'doku';
+    const userAuth = await registerUser('econ_doku');
+    const token = userAuth.token;
+
+    // 1. Cek katalog & payment methods untuk gateway DOKU
+    const pkgDoku = await apiJson('/api/economy/packages', { token });
+    assert.equal(pkgDoku.status, 200);
+    assert.equal(pkgDoku.data.gateway, 'doku');
+    assert.deepEqual(
+      pkgDoku.data.paymentMethods.map(m => m.code),
+      ['SP', 'M2', 'BC', 'I1', 'SA', 'DA']
+    );
+
+    const pmDoku = await apiJson('/api/economy/payment-methods?amount=10000');
+    assert.equal(pmDoku.status, 200);
+    assert.equal(pmDoku.data.gateway, 'doku');
+
+    // 2. Uji switch dinamis ke Duitku lalu kembali ke DOKU via env PAYMENT_GATEWAY
+    process.env.PAYMENT_GATEWAY = 'duitku';
+    const pkgDuitku = await apiJson('/api/economy/packages', { token });
+    assert.equal(pkgDuitku.data.gateway, 'duitku');
+
+    process.env.PAYMENT_GATEWAY = 'doku';
+    const pkgBack = await apiJson('/api/economy/packages', { token });
+    assert.equal(pkgBack.data.gateway, 'doku');
+
+    // 3. Create order QRIS & BCA VA via DOKU
+    const qrisRes = await apiJson('/api/economy/topup/create', {
+      method: 'POST',
+      token,
+      body: { packageId: 'pkg_popular', paymentMethod: 'SP' }
+    });
+    assert.equal(qrisRes.status, 200);
+    const qrisOrder = qrisRes.data.order;
+    const qrisInv = qrisRes.data.invoice;
+    assert.equal(qrisOrder.gateway, 'doku');
+    assert.equal(qrisInv.gateway, 'doku');
+    assert.match(qrisInv.reference, /^doku_ref_/);
+    assert.equal(qrisInv.paymentMethod, 'SP');
+    assert.ok(qrisInv.qrString);
+    assert.ok(qrisInv.qrCodeUrl);
+
+    const vaRes = await apiJson('/api/economy/topup/create', {
+      method: 'POST',
+      token,
+      body: { packageId: 'pkg_starter', paymentMethod: 'BC' }
+    });
+    assert.equal(vaRes.status, 200);
+    assert.equal(vaRes.data.order.gateway, 'doku');
+    assert.equal(vaRes.data.invoice.paymentMethod, 'BC');
+    assert.ok(vaRes.data.invoice.vaNumber);
+
+    // 4. Aktifkan Client ID & Secret Key DOKU untuk verifikasi HMACSHA256 webhook resmi Jokul
+    const CLIENT_ID = 'BRN-TEST-DOKU-01';
+    const SECRET_KEY = 'SK-TEST-DOKU-SECRET';
+    process.env.DOKU_CLIENT_ID = CLIENT_ID;
+    process.env.DOKU_MERCHANT_CODE = CLIENT_ID;
+    process.env.DOKU_SECRET_KEY = SECRET_KEY;
+
+    const signDokuWebhook = ({ payloadObj, targetPath, clientId = CLIENT_ID, secretKey = SECRET_KEY, requestId = 'req-doku-1' }) => {
+      const rawBody = JSON.stringify(payloadObj);
+      const reqTs = new Date().toISOString().slice(0, 19) + 'Z';
+      const digest = doku.generateDigest(rawBody);
+      const sig = doku.generateDokuSignature({
+        clientId,
+        requestId,
+        requestTimestamp: reqTs,
+        requestTarget: targetPath,
+        digest,
+        secretKey
+      });
+      return {
+        rawBody,
+        headers: {
+          'Content-Type': 'application/json',
+          'Client-Id': clientId,
+          'Request-Id': requestId,
+          'Request-Timestamp': reqTs,
+          Signature: sig
+        }
+      };
+    };
+
+    const jokulSuccessPayload = {
+      order: { invoice_number: qrisOrder.id, amount: 10000 },
+      transaction: { status: 'SUCCESS', original_request_id: 'ORIG-DOKU-1' },
+      channel: { id: 'QRIS' }
+    };
+
+    // 4a. Tolak signature palsu
+    const badDokuRes = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      headers: {
+        'Client-Id': CLIENT_ID,
+        'Request-Id': 'req-bad-1',
+        'Request-Timestamp': new Date().toISOString().slice(0, 19) + 'Z',
+        Signature: 'HMACSHA256=invalidsignaturebase64=='
+      },
+      body: jokulSuccessPayload
+    });
+    assert.equal(badDokuRes.status, 400);
+
+    // 4b. Tolak Client-Id salah meski ditandatangani
+    const wrongClientSigned = signDokuWebhook({
+      payloadObj: jokulSuccessPayload,
+      targetPath: '/api/economy/topup/callback',
+      clientId: 'BRN-ATTACKER',
+      requestId: 'req-wrong-client'
+    });
+    const wrongClientRes = await apiJson('/api/economy/topup/callback', {
+      method: 'POST',
+      headers: wrongClientSigned.headers,
+      body: wrongClientSigned.rawBody
+    });
+    assert.equal(wrongClientRes.status, 400);
+
+    // 4c. Callback SUCCESS valid (concurrent 3x untuk menguji idempotensi kredit Diamonds)
+    const validSigned = signDokuWebhook({
+      payloadObj: jokulSuccessPayload,
+      targetPath: '/api/economy/topup/callback',
+      requestId: 'req-valid-1'
+    });
+    const [cb1, cb2, cb3] = await Promise.all([
+      apiJson('/api/economy/topup/callback', { method: 'POST', headers: validSigned.headers, body: validSigned.rawBody }),
+      apiJson('/api/economy/topup/callback', { method: 'POST', headers: validSigned.headers, body: validSigned.rawBody }),
+      apiJson('/api/economy/topup/callback', { method: 'POST', headers: validSigned.headers, body: validSigned.rawBody })
+    ]);
+    assert.equal(cb1.status, 200);
+    assert.equal(cb2.status, 200);
+    assert.equal(cb3.status, 200);
+
+    let w = await apiJson('/api/economy/wallet', { token });
+    assert.equal(w.data.wallet.diamonds, 25);
+    assert.equal(w.data.wallet.totalPurchased, 25);
+
+    // 5. Delegasi webhook DOKU via /api/topup/notification untuk order VA (PGD_*)
+    const vaPayload = {
+      order: { invoice_number: vaRes.data.order.id, amount: 5000 },
+      transaction: { status: 'SUCCESS', original_request_id: 'ORIG-DOKU-VA-1' },
+      channel: { id: 'VIRTUAL_ACCOUNT_BCA' }
+    };
+    const vaSigned = signDokuWebhook({
+      payloadObj: vaPayload,
+      targetPath: '/api/topup/notification',
+      requestId: 'req-va-notif-1'
+    });
+    const notifHttpRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: vaSigned.headers,
+      body: vaSigned.rawBody
+    });
+    assert.equal(notifHttpRes.status, 200);
+    assert.equal(await notifHttpRes.text(), 'OK');
+
+    w = await apiJson('/api/economy/wallet', { token });
+    assert.equal(w.data.wallet.diamonds, 35);
+  } finally {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 });
 

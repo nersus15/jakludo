@@ -5,6 +5,7 @@
 // - Check Transaction   : POST /webapi/api/merchant/transactionStatus
 // - Callback Validation : md5(merchantCode + amount + merchantOrderId + apiKey)
 const crypto = require('crypto');
+const { reloadDotEnvIfChanged } = require('../migrate');
 
 // 6 Paket Top Up Coins Reguler
 const DIAMOND_PACKAGES = {
@@ -134,6 +135,7 @@ function findPaymentMethodMeta(code) {
 }
 
 function getDuitkuConfig() {
+  reloadDotEnvIfChanged();
   const merchantCode = process.env.DUITKU_MERCHANT_CODE || '';
   const apiKey = process.env.DUITKU_API_KEY || '';
   const isProduction =

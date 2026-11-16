@@ -177,7 +177,7 @@ function createApiRouter() {
   api.patch('/auth/profile', handleUpdateProfile);
   api.post('/auth/profile', handleUpdateProfile);
 
-  // Room yang masih aktif milik user (dibuat atau diikuti), agar bisa masuk lagi dari perangkat mana pun
+  // Room yang masih aktif milik user (dibuat atau diikuti, termasuk yang sudah OUT agar tetap bisa menonton)
   api.get('/rooms/active', (req, res) => {
     const user = requireUser(req, res);
     if (!user) return;
@@ -185,14 +185,21 @@ function createApiRouter() {
     const list = [];
     for (const r of store.rooms.values()) {
       if (r.winner) continue;
-      const me = r.players.find(p => p.userId === user.id && !p.left && !p.isOut);
+      const me = r.players.find(p => p.userId === user.id);
       if (!me) continue;
       list.push({
         code: r.code,
         started: r.started,
         isCreator: r.creatorUserId === user.id,
+        isOut: Boolean(me.isOut),
         myColor: me.color,
-        players: r.players.map(p => ({ name: p.name, color: p.color, isBot: !!p.isBot, connected: !!p.isBot || !!p.connected })),
+        players: r.players.map(p => ({
+          name: p.name,
+          color: p.color,
+          isBot: !!p.isBot,
+          connected: !!p.isBot || !!p.connected,
+          isOut: !!p.isOut
+        })),
         updatedAt: r.updatedAt || 0
       });
     }

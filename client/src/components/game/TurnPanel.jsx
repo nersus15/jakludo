@@ -22,12 +22,17 @@ function turnStatus({ room, isTurn, currentTurnPlayer, movablePawns }) {
   return `Dapat ${room.dice}. Ketuk bidak di papan yang mau jalan.`;
 }
 
-// Panel giliran: dadu, aksi utama, reaksi, serta tombol chat & skor. Bidak dipilih langsung di papan.
-export default function TurnPanel({ room, isTurn, canAct, currentTurnPlayer, movablePawns, unreadChats, actions, onOpenChat, onOpenScores }) {
+// Panel giliran: dadu, aksi utama, mode menonton saat OUT, reaksi, serta tombol chat & skor. Bidak dipilih langsung di papan.
+export default function TurnPanel({ room, me = null, isTurn, canAct, currentTurnPlayer, movablePawns, unreadChats, actions, onOpenChat, onOpenScores }) {
   const status = turnStatus({ room, isTurn, currentTurnPlayer, movablePawns });
 
   return (
     <section className={`turn-panel card ${isTurn ? 'is-my-turn card--focus' : ''}`} aria-label="Giliran">
+      {me?.isOut && (
+        <p className="alert" role="status" style={{ background: 'rgba(14, 165, 233, 0.14)', color: 'var(--text)', marginBottom: '10px' }}>
+          👀 <strong>Mode Menonton</strong> — Kamu telah dinyatakan OUT, namun tetap bisa menonton pertandingan dan mengobrol di room.
+        </p>
+      )}
       <div className="turn-panel__main">
         <Dice3D
           value={room.dice}

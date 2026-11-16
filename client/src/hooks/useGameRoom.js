@@ -113,9 +113,6 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
         } else {
           hasCelebrated.current = false;
         }
-
-        const me = updated.players?.find(p => p.id === playerIdRef.current);
-        if (me?.isOut) storage.remove('active_room');
       },
 
       'room:chats': list => setChats(Array.isArray(list) ? list : []),
@@ -206,7 +203,7 @@ export function useGameRoom({ authToken, currentUser, onNeedLogin }) {
 
   const me = room?.players?.find(p => p.id === playerId) || null;
   const currentTurnPlayer = room?.players?.[room.turn] || null;
-  const isTurn = !!currentTurnPlayer && currentTurnPlayer.id === playerId;
+  const isTurn = !me?.isOut && !!currentTurnPlayer && currentTurnPlayer.id === playerId;
   const canAct = isTurn && room?.dice === null && !room?.rolling && !room?.animatingMove && !room?.pendingShield;
 
   // Bidak yang boleh dijalankan dihitung server (satu sumber aturan main)

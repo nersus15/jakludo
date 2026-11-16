@@ -35,6 +35,7 @@ const newDiceStats = () => ({ counts: [0, 0, 0, 0, 0, 0], total: 0, captureStrea
 function resetPlayerForGame(p) {
   p.autoPlayCount = 0;
   p.isOut = false;
+  p.left = false;
   p.finishedCount = 0;
   p.diceStats = newDiceStats();
   inventory.resetForMatch(p);
@@ -57,11 +58,14 @@ function startGame(r) {
   }
 }
 
-// Main lagi: hanya setelah ada pemenang. Pemain yang sudah menyerah tidak diikutkan.
+// Main lagi: hanya setelah ada pemenang. Pemain yang tetap berada di room (termasuk yang sempat OUT dan menonton) diikutkan.
 function restartGame(r) {
-  const remaining = r.players.filter(p => !p.left);
+  const remaining = r.players.filter(p => !p.left || p.connected);
   if (remaining.length < 2) return 'Butuh minimal 2 pemain untuk bermain lagi. Tambahkan bot atau ajak teman.';
-  for (const p of r.players) if (p.left) delete r.pawns[p.id];
+  for (const p of r.players) {
+    if (p.left && !p.connected) delete r.pawns[p.id];
+    else p.left = false;
+  }
   r.players = remaining;
   startGame(r);
   return null;
@@ -210,6 +214,7 @@ function executeAutoPlay(room, player) {
     addHistory(room, `❌ ${player.name} dinyatakan OUT (batas ${MAX_AUTO_PLAY}x auto-play tercapai tanpa respon).`);
     room.message = `❌ ${player.name} dinyatakan OUT!`;
     if (store.deleteIfAllHumansOut(room, `${player.name} dinyatakan OUT karena ${MAX_AUTO_PLAY}x tidak jalan. Room ditutup karena tidak ada pemain lain.`)) return;
+    if (room.host === player.id) store.reassignHost(room);
     advanceTurn(room);
     return;
   }

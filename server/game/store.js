@@ -263,7 +263,9 @@ function cancelCleanup(room) {
 }
 
 function reassignHost(room) {
-  const next = room.players.find(p => !p.isBot && p.connected && !p.left);
+  const next =
+    room.players.find(p => !p.isBot && p.connected && !p.isOut && !p.left) ||
+    room.players.find(p => !p.isBot && p.connected);
   if (!next) return;
   room.players.forEach(p => { p.isHost = p === next; });
   room.host = next.id;

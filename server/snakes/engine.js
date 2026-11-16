@@ -1214,12 +1214,14 @@ function joinPrivateRoom(socket, payload = {}) {
   const room = snakesRooms.get(rawCode.toUpperCase()) || roomsById.get(rawCode);
   if (!room) return { ok: false, error: 'Room tidak ditemukan atau sudah ditutup.' };
 
-  // Cek apakah pemain merupakan anggota room yang sedang reconnect
+  // Cek apakah pemain merupakan anggota room yang sedang reconnect (pertahankan status eliminated/left untuk mode menonton)
   const existingPlayer = room.players.find(p => p.player_type === 'human' && p.user_id === user.id);
   if (existingPlayer) {
     const wasDisconnected = !existingPlayer.connected;
     existingPlayer.connected = true;
-    existingPlayer.status = 'active';
+    if (existingPlayer.status !== 'eliminated' && existingPlayer.status !== 'left') {
+      existingPlayer.status = 'active';
+    }
     existingPlayer.disconnectedAt = null;
     existingPlayer.graceEndsAt = null;
     existingPlayer.socketId = socket?.id || existingPlayer.socketId;
@@ -1495,6 +1497,10 @@ function handleDisconnect(socket) {
 
   const now = Date.now();
   player.connected = false;
+  if (player.status === 'eliminated' || player.status === 'left') {
+    emitRoomState(room);
+    return;
+  }
   player.status = 'disconnected';
   player.disconnectedAt = now;
   player.graceEndsAt = now + timings.disconnectGraceMs;

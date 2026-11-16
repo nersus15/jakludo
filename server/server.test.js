@@ -1079,3 +1079,88 @@ test('SEO Global: robots.txt, sitemap.xml hreflang, dan SSR meta/JSON-LD untuk 4
   assert.match(ludoIdHtml, /<title>Main JakLudo Online \(Ludo 2–4 Pemain Realtime\)/);
   assert.ok(ludoIdHtml.includes(`<link rel="canonical" href="${url}/?game=jakludo&amp;hl=id" />`));
 });
+
+test('Pemain yang dinyatakan OUT tetap bisa masuk room untuk menonton (chat aktif, tidak bisa roll/ambil host)', async () => {
+  const ua = await register('spec_a_' + Date.now().toString(36).slice(-5));
+  const ub = await register('spec_b_' + Date.now().toString(36).slice(-5));
+  const uc = await register('spec_c_' + Date.now().toString(36).slice(-5));
+
+  const sockA = await connect();
+  sockA.emit('room:create', { token: ua.token });
+  const joinedA = await once(sockA, 'room:joined');
+  const code = joinedA.code;
+
+  const sockB = await connect();
+  sockB.emit('room:join', { code, token: ub.token });
+  await once(sockB, 'room:joined');
+
+  const sockC = await connect();
+  sockC.emit('room:join', { code, token: uc.token });
+  await once(sockC, 'room:joined');
+
+  const room = rooms.get(code);
+  sockA.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+
+  // 1. Pemain A menyerah/keluar di tengah match 3 orang -> A berstatus OUT, host berpindah ke B
+  sockA.emit('room:leave', { code });
+  await wait(100);
+  const playerA = room.players.find(p => p.userId === ua.user.id);
+  const playerB = room.players.find(p => p.userId === ub.user.id);
+  assert.equal(playerA.isOut, true);
+  assert.equal(playerB.isHost, true, 'host berpindah ke pemain aktif');
+
+  // 2. Room tetap tampil di /api/rooms/active dengan isOut: true agar A bisa masuk menonton
+  const activeRes = await fetch(`${url}/api/rooms/active`, {
+    headers: { Authorization: `Bearer ${ua.token}` }
+  });
+  const activeBody = await activeRes.json();
+  const listed = activeBody.rooms.find(r => r.code === code);
+  assert.ok(listed, 'room yang masih berlangsung tetap muncul bagi pemain OUT');
+  assert.equal(listed.isOut, true);
+
+  // 3. A masuk kembali memakai socket baru untuk menonton pertandingan
+  const specA = await connect();
+  const updatePromise = once(specA, 'room:update');
+  specA.emit('room:join', { code, token: ua.token });
+  const rejoinedA = await once(specA, 'room:joined');
+  const roomState = await updatePromise;
+  assert.equal(rejoinedA.reconnected, true);
+  assert.equal(rejoinedA.isOut, true);
+  assert.equal(roomState.code, code);
+  assert.equal(playerA.isHost, false, 'pemain OUT yang menonton tidak boleh merebut status host dari pemain aktif');
+
+  // 4. A sebagai penonton OUT bisa mengirim chat ke room
+  const chatPromise = once(sockB, 'room:chat_message');
+  specA.emit('room:chat', { text: 'Semangat kawan!' });
+  const receivedChat = await chatPromise;
+  assert.equal(receivedChat.text, 'Semangat kawan!');
+
+  // 5. A sebagai penonton OUT dilarang melempar dadu meski mengirim event game:roll
+  const turnBefore = room.turn;
+  specA.emit('game:roll');
+  await wait(80);
+  assert.equal(room.rolling, false);
+  assert.equal(room.dice, null);
+  assert.equal(room.turn, turnBefore);
+
+  // 6. Pemain B kena OUT 3x Auto-Play saat gilirannya -> tetap bisa reconnect & menonton tanpa re-aktifasi giliran
+  const engine = require('./game/engine');
+  room.turn = room.players.findIndex(p => p.userId === ub.user.id);
+  playerB.autoPlayCount = 3;
+  engine.executeAutoPlay(room, playerB);
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  assert.equal(playerB.isOut, true);
+
+  sockB.disconnect();
+  await wait(60);
+  const specB = await connect();
+  specB.emit('room:join', { code, token: ub.token });
+  const rejoinedB = await once(specB, 'room:joined');
+  assert.equal(rejoinedB.reconnected, true);
+  assert.equal(rejoinedB.isOut, true);
+
+  clearTimeout(room.turnTimer);
+});

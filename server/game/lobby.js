@@ -141,12 +141,8 @@ function joinRoom(socket, code, payload) {
   emitRoom(room);
 }
 
-// Pemain lama tersambung ulang (reload, sinyal putus, pindah perangkat, atau server restart)
+// Pemain lama tersambung ulang (reload, sinyal putus, pindah perangkat, server restart, atau masuk menonton setelah OUT)
 function rejoinPlayer(socket, room, player, user) {
-  if (player.isOut) {
-    return socket.emit('room:error', 'Kamu telah dinyatakan OUT dari pertandingan ini.');
-  }
-
   const oldSocketId = player.id;
   if (oldSocketId !== socket.id) {
     // Room dibuka di tab/perangkat lain: putuskan socket lama dari room
@@ -159,12 +155,19 @@ function rejoinPlayer(socket, room, player, user) {
     room.pawns[socket.id] = room.pawns[oldSocketId] || [0, 0, 0, 0];
     delete room.pawns[oldSocketId];
     if (room.winner === oldSocketId) room.winner = socket.id;
+    if (room.matchResult?.ranking) {
+      room.matchResult.ranking = room.matchResult.ranking.map(id => (id === oldSocketId ? socket.id : id));
+    }
+    if (room.matchResult?.awards && room.matchResult.awards[oldSocketId]) {
+      room.matchResult.awards[socket.id] = room.matchResult.awards[oldSocketId];
+      delete room.matchResult.awards[oldSocketId];
+    }
   }
 
   player.id = socket.id;
   player.connected = true;
   player.disconnectedAt = null;
-  if (room.turnClock && room.turnClock.playerId === oldSocketId) {
+  if (!player.isOut && room.turnClock && room.turnClock.playerId === oldSocketId) {
     room.turnClock.playerId = socket.id;
   }
   store.cancelLobbyRemoval(room, player);
@@ -177,9 +180,9 @@ function rejoinPlayer(socket, room, player, user) {
     player.equippedSkin = economyStore.getValidatedEquippedSkin(user.id);
   }
 
-  if (room.host === oldSocketId || store.isCreator(room, player)) {
-    room.host = socket.id; // Pembuat room selalu mendapatkan kembali peran host
-  } else if (!room.players.some(p => p.id === room.host && p.connected)) {
+  if (!player.isOut && (room.host === oldSocketId || store.isCreator(room, player))) {
+    room.host = socket.id; // Pembuat/pemain aktif mengambil kembali peran host
+  } else if (!room.players.some(p => p.id === room.host && p.connected && !p.isOut)) {
     store.reassignHost(room);
   }
   room.players.forEach(p => { p.isHost = p.id === room.host; });
@@ -189,12 +192,18 @@ function rejoinPlayer(socket, room, player, user) {
   socket.join(room.code);
   socket.data.room = room.code;
 
-  addHistory(room, `🎮 ${player.name} kembali masuk ke dalam room.`);
+  addHistory(
+    room,
+    player.isOut
+      ? `👀 ${player.name} kembali masuk untuk menonton pertandingan.`
+      : `🎮 ${player.name} kembali masuk ke dalam room.`
+  );
   socket.emit('room:joined', {
     code: room.code,
     playerId: socket.id,
     sessionId: player.sessionId,
     isLudoKing: player.isLudoKing,
+    isOut: Boolean(player.isOut),
     reconnected: true
   });
   socket.emit('room:chats', room.chats);
@@ -202,11 +211,12 @@ function rejoinPlayer(socket, room, player, user) {
     name: player.name,
     avatar: player.avatar,
     playerId: socket.id,
+    isOut: Boolean(player.isOut),
     reconnected: true
   });
   emitRoom(room);
 
-  if (room.started && room.players[room.turn]?.id === socket.id) {
+  if (room.started && !player.isOut && room.players[room.turn]?.id === socket.id) {
     engine.triggerTurn(room, { preserveClock: true });
   }
 }
@@ -293,8 +303,12 @@ function handleDeparture(socket, r, { intentional }) {
     const wasActive = !departing.isOut;
     departing.isOut = true;
     departing.left = true;
-    departing.sessionId = null;
-    addHistory(r, `🚪 ${departing.name} keluar dari permainan (menyerah).`);
+    addHistory(
+      r,
+      wasActive
+        ? `🚪 ${departing.name} keluar dari permainan (menyerah).`
+        : `👀 ${departing.name} keluar dari mode menonton.`
+    );
     // Pemain yang sedang ditanya soal perisai lalu menyerah: anggap tidak memakai perisai
     if (r.pendingShield?.playerId === departing.id) engine.resolvePendingShield(r, false);
 
@@ -307,13 +321,22 @@ function handleDeparture(socket, r, { intentional }) {
         engine.declareWinner(r, activeRemaining[0], { endReason: 'forfeit' });
       } else if (r.players[r.turn]?.id === departing.id) {
         engine.advanceTurn(r);
+      } else {
+        emitRoom(r);
       }
+    } else if (!wasActive) {
+      emitRoom(r);
     }
   } else {
     departing.disconnectedAt = Date.now();
-    addHistory(r, `⚠️ ${departing.name} keluar web/terputus (dimainkan bot sementara).`);
+    if (departing.isOut) {
+      addHistory(r, `👀 ${departing.name} menutup tampilan menonton.`);
+    } else {
+      addHistory(r, `⚠️ ${departing.name} keluar web/terputus (dimainkan bot sementara).`);
+    }
     if (r.host === socket.id) store.reassignHost(r);
-    if (!r.winner && r.players[r.turn]?.id === departing.id) engine.triggerTurn(r);
+    if (!r.winner && !departing.isOut && r.players[r.turn]?.id === departing.id) engine.triggerTurn(r);
+    else if (departing.isOut) emitRoom(r);
   }
 
   emitRoom(r);

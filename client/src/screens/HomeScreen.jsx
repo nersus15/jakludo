@@ -12,12 +12,22 @@ function ActiveRoomCard({ room, onJoin }) {
   const humans = room.players.filter(p => !p.isBot);
   const bots = room.players.length - humans.length;
   const online = humans.filter(p => p.connected).length;
+  const statusLabel = room.isOut
+    ? 'Kamu OUT · Masih bisa ditonton'
+    : room.started
+    ? 'Permainan masih berjalan'
+    : 'Ruang tunggu masih terbuka';
+  const btnLabel = room.isOut
+    ? 'Tonton permainan'
+    : room.started
+    ? 'Lanjutkan main'
+    : 'Masuk lagi';
   return (
     <article className="active-room card">
       <div className="active-room__info">
         <span className={`dot color-${room.myColor}`} style={{ background: 'var(--pc)' }} aria-hidden="true" />
         <div>
-          <strong>JakLudo · {room.started ? 'Permainan masih berjalan' : 'Ruang tunggu masih terbuka'}</strong>
+          <strong>JakLudo · {statusLabel}</strong>
           <p className="muted">
             Room <span className="code-text">{room.code}</span>
             {room.isCreator ? ' · buatanmu' : ''} · {humans.length} pemain{bots ? ` + ${bots} bot` : ''} · {online} online
@@ -25,7 +35,7 @@ function ActiveRoomCard({ room, onJoin }) {
         </div>
       </div>
       <button type="button" className="btn btn--primary" onClick={() => onJoin(room.code)}>
-        {room.started ? 'Lanjutkan main' : 'Masuk lagi'}
+        {btnLabel}
       </button>
     </article>
   );

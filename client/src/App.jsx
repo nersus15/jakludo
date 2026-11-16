@@ -311,6 +311,7 @@ export default function App() {
       {inGame && modal !== 'shop' ? (
         <GameHeader
           room={game.room}
+          isOut={!!game.me?.isOut}
           audio={audio}
           network={network}
           onOpenShop={open('shop')}

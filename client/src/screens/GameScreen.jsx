@@ -40,6 +40,7 @@ export default function GameScreen({ game, itemCatalog, sheet, onSheetChange, on
       <div className="game__panel">
         <TurnPanel
           room={room}
+          me={me}
           isTurn={isTurn}
           canAct={canAct}
           currentTurnPlayer={currentTurnPlayer}

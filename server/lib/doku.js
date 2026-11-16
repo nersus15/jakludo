@@ -364,8 +364,9 @@ async function createInvoice({
   const config = getDokuConfig();
   const unitPrice = Number(pkg?.price ?? pkg?.priceIdr ?? pkg?.amountIdr ?? 0);
   const totalDiamonds = Number(pkg?.totalDiamonds ?? pkg?.diamonds ?? pkg?.coins ?? 0);
-  const methodMeta = findPaymentMethodMeta(paymentMethod);
-  const selectedCode = methodMeta.code;
+  const isAllMethods = !paymentMethod || ['all', 'doku', 'snap', 'ALL', 'DOKU', 'SNAP'].includes(String(paymentMethod).trim());
+  const methodMeta = findPaymentMethodMeta(isAllMethods ? 'SP' : paymentMethod);
+  const selectedCode = isAllMethods ? 'ALL' : methodMeta.code;
 
   const shouldMockInTest =
     process.env.NODE_ENV === 'test' &&
@@ -385,15 +386,15 @@ async function createInvoice({
       orderId,
       merchantCode: config.clientId || config.merchantCode || 'BRN-TEST-DOKU',
       reference: `doku_ref_${orderId}`,
-      paymentUrl: isQris || isVa ? null : `https://sandbox.doku.com/checkout-link-v2/${orderId}`,
+      paymentUrl: `https://sandbox.doku.com/checkout-link-v2/${orderId}`,
       vaNumber: mockVaNumber,
       qrString: mockQrString,
       qrCodeUrl: buildQrImageUrl(mockQrString),
       paymentMethod: selectedCode,
-      paymentMethodName: methodMeta.label,
-      paymentCategory: methodMeta.category,
-      bank: methodMeta.bank || null,
-      dokuChannel: methodMeta.dokuChannel,
+      paymentMethodName: isAllMethods ? 'DOKU Snap Checkout' : methodMeta.label,
+      paymentCategory: isAllMethods ? 'all' : methodMeta.category,
+      bank: isAllMethods ? null : (methodMeta.bank || null),
+      dokuChannel: isAllMethods ? null : methodMeta.dokuChannel,
       statusCode: '00',
       statusMessage: 'SUCCESS',
       grossAmount: unitPrice,
@@ -424,8 +425,8 @@ async function createInvoice({
 
   let activeBaseUrl = config.baseUrl;
 
-  // 1. Utamakan DOKU Direct API v2 (Core API) untuk channel Virtual Account agar nomor VA tampil native tanpa redirect
-  if (methodMeta.category === 'va' && methodMeta.directTarget) {
+  // 1. Utamakan DOKU Direct API v2 (Core API) hanya jika user/test memilih channel Virtual Account tertentu
+  if (!isAllMethods && methodMeta.category === 'va' && methodMeta.directTarget) {
     const vaPayload = {
       order: {
         invoice_number: orderId,
@@ -526,7 +527,7 @@ async function createInvoice({
     },
     payment: {
       payment_due_date: 1440,
-      payment_method_types: [methodMeta.dokuChannel]
+      ...(isAllMethods ? {} : { payment_method_types: [methodMeta.dokuChannel] })
     },
     customer: {
       id: String(user?.id || cleanUsername).slice(0, 64),
@@ -583,7 +584,7 @@ async function createInvoice({
     data.payment?.url ||
     resp.paymentUrl ||
     null;
-  const paymentUrl = vaNumber || qrString ? null : rawPaymentUrl;
+  const paymentUrl = rawPaymentUrl;
   const reference =
     resp.order?.session_id ||
     resp.uuid ||
@@ -600,10 +601,10 @@ async function createInvoice({
     qrString,
     qrCodeUrl: buildQrImageUrl(qrString),
     paymentMethod: selectedCode,
-    paymentMethodName: methodMeta.label,
-    paymentCategory: methodMeta.category,
-    bank: methodMeta.bank || null,
-    dokuChannel: methodMeta.dokuChannel,
+    paymentMethodName: isAllMethods ? 'DOKU Snap Checkout' : methodMeta.label,
+    paymentCategory: isAllMethods ? 'all' : methodMeta.category,
+    bank: isAllMethods ? null : (methodMeta.bank || null),
+    dokuChannel: isAllMethods ? null : methodMeta.dokuChannel,
     statusCode: '00',
     statusMessage: 'SUCCESS',
     merchantCode: config.merchantCode || config.clientId,

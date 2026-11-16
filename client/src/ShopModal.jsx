@@ -113,6 +113,39 @@ const DEFAULT_DUITKU_METHODS = [
   }
 ];
 
+function openDokuCheckout(paymentUrl) {
+  if (!paymentUrl) return false;
+  if (typeof window.loadJokulCheckout === 'function') {
+    try {
+      window.loadJokulCheckout(paymentUrl);
+      return true;
+    } catch (e) {
+      console.warn('[DOKU] loadJokulCheckout failed:', e);
+    }
+  }
+
+  const isProd = !paymentUrl.includes('sandbox.doku.com');
+  const scriptUrl = isProd
+    ? 'https://jokul.doku.com/jokul-checkout-js/v1/jokul-checkout-1.0.0.js'
+    : 'https://sandbox.doku.com/jokul-checkout-js/v1/jokul-checkout-1.0.0.js';
+
+  let existing = document.querySelector(`script[src="${scriptUrl}"]`);
+  if (!existing) {
+    const script = document.createElement('script');
+    script.src = scriptUrl;
+    script.async = true;
+    script.onload = () => {
+      if (typeof window.loadJokulCheckout === 'function') {
+        try {
+          window.loadJokulCheckout(paymentUrl);
+        } catch {}
+      }
+    };
+    document.head.appendChild(script);
+  }
+  return false;
+}
+
 function DuitkuPaymentPanel({
   payment,
   verifying,
@@ -202,20 +235,31 @@ function DuitkuPaymentPanel({
           </div>
         )}
 
-        {!qrSrc && !payment.vaNumber && payment.paymentUrl && (
+        {payment.paymentUrl && (
           <div className="mp-payment-url-box">
-            <h4>Pembayaran via {payment.paymentMethodName || 'Payment Gateway'}</h4>
+            <h4>Pembayaran Resmi DOKU Snap</h4>
             <p className="muted mp-payment-hint">
-              Selesaikan pembayaran langsung di halaman PlayGo di bawah ini tanpa meninggalkan aplikasi.
+              Pop-up pembayaran DOKU Snap terbuka. Jika tertutup, klik tombol di bawah untuk membukanya kembali.
             </p>
-            <div className="mp-inline-checkout-wrap">
-              <iframe
-                src={payment.paymentUrl}
-                title="Pembayaran Instan PlayGo"
-                className="mp-inline-checkout-frame"
-                allow="clipboard-read; clipboard-write; payment"
-              />
+            <div className="mp-payment-actions" style={{ marginBottom: 'var(--space-2)' }}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => openDokuCheckout(payment.paymentUrl)}
+              >
+                Buka Pop-up Modal DOKU Snap ↗
+              </button>
             </div>
+            {!qrSrc && !payment.vaNumber && (
+              <div className="mp-inline-checkout-wrap">
+                <iframe
+                  src={payment.paymentUrl}
+                  title="Pembayaran Instan PlayGo"
+                  className="mp-inline-checkout-frame"
+                  allow="clipboard-read; clipboard-write; payment"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -323,36 +367,15 @@ function UnifiedTopupSection({
   onSubmitTopup
 }) {
   const isCoins = mode === 'coins';
-  const [checkoutPkg, setCheckoutPkg] = useState(null);
-  const [activeMethod, setActiveMethod] = useState(selectedMethodCode || 'SP');
-  const [localSubmitting, setLocalSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (selectedMethodCode) setActiveMethod(selectedMethodCode);
-  }, [selectedMethodCode]);
-
-  const handleOpenCheckout = pkg => {
+  const handleTopupClick = pkg => {
     if (!currentUser) {
       onOpenAuth?.();
       return;
     }
     sound.playClick();
     onSelectPkg?.(pkg.id);
-    setCheckoutPkg(pkg);
-  };
-
-  const handleConfirmCheckout = async () => {
-    if (!checkoutPkg || localSubmitting) return;
-    setLocalSubmitting(true);
-    try {
-      onSelectMethod?.(activeMethod);
-      const ok = await onSubmitTopup(checkoutPkg, activeMethod);
-      if (ok) {
-        setCheckoutPkg(null);
-      }
-    } catch {} finally {
-      setLocalSubmitting(false);
-    }
+    onSubmitTopup(pkg);
   };
 
   return (
@@ -365,8 +388,8 @@ function UnifiedTopupSection({
           </h3>
           <p className="shop__group-desc">
             {isCoins
-              ? 'Pilih paket Coins yang kamu butuhkan, bayar instan via QRIS, Virtual Account, atau E-Wallet.'
-              : 'Pilih paket Diamonds yang kamu butuhkan, bayar instan via QRIS, Virtual Account, atau E-Wallet.'}
+              ? 'Pilih paket Coins yang kamu butuhkan, bayar instan via DOKU Snap (QRIS, VA, E-Wallet).'
+              : 'Pilih paket Diamonds yang kamu butuhkan, bayar instan via DOKU Snap (QRIS, VA, E-Wallet).'}
           </p>
         </div>
         <span className="badge badge--diamond">Proses Otomatis</span>
@@ -387,7 +410,7 @@ function UnifiedTopupSection({
         <div className="mp-diamond-pkg-grid" role="list" aria-label={isCoins ? 'Pilihan paket Coins' : 'Pilihan paket Diamonds'}>
           {packages.map(pkg => {
             const totalD = Number(pkg.diamonds || 0) + Number(pkg.bonusDiamonds || 0);
-            const isBusy = (submitting || localSubmitting) && selectedPkg?.id === pkg.id;
+            const isBusy = submitting && selectedPkg?.id === pkg.id;
             return (
               <div key={pkg.id} className="mp-diamond-pkg">
                 <div className="mp-diamond-pkg__top">
@@ -421,7 +444,7 @@ function UnifiedTopupSection({
                     type="button"
                     className="btn btn--primary btn--sm"
                     disabled={isBusy}
-                    onClick={() => handleOpenCheckout(pkg)}
+                    onClick={() => handleTopupClick(pkg)}
                   >
                     {isBusy ? 'Memproses...' : !currentUser ? 'Login' : isCoins ? 'Top Up Coin' : 'Top Up Diamond'}
                   </button>
@@ -431,102 +454,6 @@ function UnifiedTopupSection({
           })}
         </div>
       )}
-
-      {/* Pop-up Modal Pemilihan Metode Pembayaran */}
-      <Modal
-        isOpen={!!checkoutPkg}
-        onClose={() => !localSubmitting && setCheckoutPkg(null)}
-        size="md"
-        title={isCoins ? 'Pilih Metode Pembayaran Coins' : 'Pilih Metode Pembayaran Diamonds'}
-        subtitle="Pilih metode pembayaran favoritmu. Pembayaran diproses secara instan dan aman."
-        footer={
-          checkoutPkg && (
-            <>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                disabled={localSubmitting}
-                onClick={() => setCheckoutPkg(null)}
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary"
-                disabled={localSubmitting}
-                onClick={handleConfirmCheckout}
-              >
-                {localSubmitting
-                  ? 'Membuat Tagihan...'
-                  : `Bayar Sekarang (${formatIdr(isCoins ? checkoutPkg.price : checkoutPkg.priceIdr)})`}
-              </button>
-            </>
-          )
-        }
-      >
-        {checkoutPkg && (
-          <div className="topup-checkout-popup">
-            <div className="topup-popup-summary">
-              <div className="topup-popup-summary__pkg">
-                <span className={`shop-item__icon ${isCoins ? '' : 'shop-item__icon--diamond'}`}>
-                  <Icon name={isCoins ? (checkoutPkg.icon === 'crown' ? 'crown' : 'coin') : 'diamond'} size={24} />
-                </span>
-                <div>
-                  <strong>{checkoutPkg.name}</strong>
-                  <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-xs)' }}>
-                    {isCoins
-                      ? checkoutPkg.description
-                      : `${Number(checkoutPkg.diamonds || 0) + Number(checkoutPkg.bonusDiamonds || 0)} Diamonds Premium`}
-                  </p>
-                </div>
-              </div>
-              <div className="topup-popup-summary__total">
-                <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Total Bayar</span>
-                <strong className="topup-price" style={{ fontSize: 'var(--fs-lg)' }}>
-                  {formatIdr(isCoins ? checkoutPkg.price : checkoutPkg.priceIdr)}
-                </strong>
-              </div>
-            </div>
-
-            <div className="topup-popup-methods-head">
-              <h4 style={{ margin: 0, fontSize: 'var(--fs-sm)' }}>Pilih Metode Pembayaran:</h4>
-            </div>
-
-            <div className="mp-method-grid mp-method-grid--popup" role="radiogroup" aria-label="Metode pembayaran">
-              {methods.map(method => {
-                const isSelected = activeMethod === method.code;
-                return (
-                  <button
-                    key={method.code}
-                    type="button"
-                    role="radio"
-                    aria-checked={isSelected}
-                    className={`mp-method-card ${isSelected ? 'is-selected' : ''}`}
-                    onClick={() => {
-                      sound.playClick();
-                      setActiveMethod(method.code);
-                    }}
-                  >
-                    <div className="mp-method-card__top">
-                      <span className="mp-method-tag">{methodCategoryLabel(method.category)}</span>
-                      {method.badge && (
-                        <span className={`badge ${method.badge === 'Instan' ? 'badge--success' : 'badge--popular'}`}>
-                          {method.badge}
-                        </span>
-                      )}
-                    </div>
-                    <strong className="mp-method-card__label">{method.label}</strong>
-                    <span className="muted mp-method-card__desc">{method.description}</span>
-                    {typeof method.totalFee === 'number' && method.totalFee > 0 && (
-                      <span className="mp-method-card__fee">Biaya admin: {formatIdr(method.totalFee)}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </Modal>
     </section>
   );
 }
@@ -1030,7 +957,7 @@ export default function ShopModal({
       setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk top-up Diamonds.' });
       return false;
     }
-    const chosenMethod = methodOverride || paymentMethod || 'SP';
+    const chosenMethod = methodOverride || 'all';
     setCreatingOrderPkgId(pkg.id);
     setFeedback(null);
     sound.playClick();
@@ -1046,6 +973,7 @@ export default function ShopModal({
       const order = data.order;
       const inv = data.invoice || {};
       const selectedMethodObj = duitkuMethods.find(m => m.code === (inv.paymentMethod || chosenMethod));
+      const payUrl = inv.paymentUrl || order.paymentUrl || null;
 
       setActivePayment({
         mode: 'diamonds',
@@ -1060,13 +988,17 @@ export default function ShopModal({
         vaNumber: inv.vaNumber || order.vaNumber || null,
         qrString: inv.qrString || order.qrString || null,
         qrCodeUrl: inv.qrCodeUrl || order.qrCodeUrl || null,
-        paymentUrl: inv.paymentUrl || order.paymentUrl || null,
+        paymentUrl: payUrl,
         status: order.status
       });
 
+      if (payUrl) {
+        openDokuCheckout(payUrl);
+      }
+
       setFeedback({
         type: 'info',
-        message: `Tagihan ${order.id} (${formatIdr(order.amountIdr)}) siap dibayar. Selesaikan pembayaran sesuai instruksi di bawah.`
+        message: `Tagihan ${order.id} (${formatIdr(order.amountIdr)}) siap dibayar.`
       });
       loadEconomyData();
       return true;
@@ -1085,6 +1017,7 @@ export default function ShopModal({
     const methodObj = duitkuMethods.find(m => m.code === ord.paymentMethod);
     const id = ord.id || ord.orderId;
     const isCoins = mode === 'coins';
+    const payUrl = ord.paymentUrl || raw.paymentUrl || null;
     setActiveTab(isCoins ? 'coins' : 'diamonds');
     setActivePayment({
       mode: isCoins ? 'coins' : 'diamonds',
@@ -1101,9 +1034,12 @@ export default function ShopModal({
       vaNumber: ord.vaNumber || raw.vaNumber || null,
       qrString: ord.qrString || raw.qrString || null,
       qrCodeUrl: ord.qrCodeUrl || raw.qrCodeUrl || null,
-      paymentUrl: ord.paymentUrl || raw.paymentUrl || null,
+      paymentUrl: payUrl,
       status: ord.status
     });
+    if (payUrl) {
+      openDokuCheckout(payUrl);
+    }
     window.scrollTo({ top: 180, behavior: 'smooth' });
   };
 
@@ -1224,7 +1160,7 @@ export default function ShopModal({
       setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu.' });
       return false;
     }
-    const chosenMethod = methodOverride || paymentMethod || 'SP';
+    const chosenMethod = methodOverride || 'all';
     setTopupLegacyId(pkg.id);
     setFeedback(null);
     sound.playClick();
@@ -1238,6 +1174,8 @@ export default function ShopModal({
       if (!res.ok || !data.success) throw new Error(data.error || 'Gagal membuat tagihan top up Coins.');
 
       const methodObj = duitkuMethods.find(m => m.code === (data.paymentMethod || chosenMethod));
+      const payUrl = data.paymentUrl || data.payment?.paymentUrl || null;
+
       setActivePayment({
         mode: 'coins',
         orderId: data.orderId,
@@ -1251,13 +1189,17 @@ export default function ShopModal({
         vaNumber: data.vaNumber || data.payment?.vaNumber || null,
         qrString: data.qrString || data.payment?.qrString || null,
         qrCodeUrl: data.qrCodeUrl || data.payment?.qrCodeUrl || null,
-        paymentUrl: data.paymentUrl || data.payment?.paymentUrl || null,
+        paymentUrl: payUrl,
         status: 'PENDING'
       });
 
+      if (payUrl) {
+        openDokuCheckout(payUrl);
+      }
+
       setFeedback({
         type: 'info',
-        message: `Tagihan Coins ${data.orderId} (${pkg.formattedPrice}) siap dibayar. Selesaikan pembayaran sesuai instruksi di bawah.`
+        message: `Tagihan Coins ${data.orderId} (${pkg.formattedPrice}) siap dibayar.`
       });
       loadEconomyData();
       return true;

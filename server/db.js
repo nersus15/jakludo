@@ -1802,6 +1802,65 @@ async function completeTopupOrder(orderId, paymentType = 'duitku') {
   };
 }
 
+function listUserTopupOrders(userId, limit = 30) {
+  if (!userId) return [];
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 30));
+  return Array.from(state.topupOrders.values())
+    .filter(o => o.userId === userId)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, safeLimit)
+    .map(o => {
+      const details = o.paymentDetails && typeof o.paymentDetails === 'object' ? o.paymentDetails : {};
+      return {
+        orderId: o.orderId,
+        id: o.orderId,
+        userId: o.userId,
+        packageId: o.packageId,
+        packageName: `${Number(o.diamonds || 0).toLocaleString('id-ID')} Coins`,
+        coins: Number(o.diamonds || 0),
+        diamonds: Number(o.diamonds || 0),
+        grossAmount: Number(o.grossAmount || 0),
+        amountIdr: Number(o.grossAmount || 0),
+        status: o.status || 'pending',
+        reference: o.snapToken || details.reference || null,
+        paymentMethod: o.paymentType || details.paymentMethod || null,
+        paymentMethodName: details.paymentMethodName || null,
+        paymentCategory: details.paymentCategory || null,
+        bank: details.bank || null,
+        vaNumber: details.vaNumber || null,
+        qrString: details.qrString || null,
+        qrCodeUrl: details.qrCodeUrl || null,
+        paymentUrl: details.paymentUrl || null,
+        gateway: details.gateway || null,
+        createdAt: o.createdAt,
+        updatedAt: o.updatedAt
+      };
+    });
+}
+
+async function cancelTopupOrder(orderId, userId) {
+  if (!orderId) return { error: 'Order ID wajib diisi.', status: 400 };
+  const order = await getTopupOrder(orderId);
+  if (!order) return { error: 'Order topup tidak ditemukan.', status: 404 };
+  if (order.userId !== userId) return { error: 'Tidak diizinkan membatalkan order pengguna lain.', status: 403 };
+  if (order.status === 'success') return { error: 'Order yang sudah dibayar tidak dapat dibatalkan.', status: 400 };
+
+  if (order.status === 'pending') {
+    const now = new Date().toISOString();
+    if (pool && !closed) {
+      await pool.query(
+        "UPDATE topup_orders SET status = 'cancelled', updated_at = $1 WHERE order_id = $2 AND status = 'pending'",
+        [now, orderId]
+      );
+    }
+    order.status = 'cancelled';
+    order.updatedAt = now;
+    state.topupOrders.set(orderId, order);
+    persistLocalFallback();
+  }
+  return { success: true, order };
+}
+
 
 // ==========================================
 // SNAPSHOT ROOM
@@ -1902,6 +1961,8 @@ module.exports = {
   awardUserPoints,
   createTopupOrder,
   getTopupOrder,
+  listUserTopupOrders,
+  cancelTopupOrder,
   completeTopupOrder,
   saveRoom,
   getPool,

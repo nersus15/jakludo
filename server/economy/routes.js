@@ -103,12 +103,19 @@ function registerEconomyRoutes(api) {
   router.post('/economy/convert', mutationLimiter, asyncRoute(async (req, res) => {
     const user = requireUser(req, res);
     if (!user) return;
-    const { diamonds, idempotencyKey } = req.body || {};
-    const result = await economy.convertCoinsToDiamonds({
-      userId: user.id,
-      diamonds,
-      idempotencyKey
-    });
+    const { diamonds, direction, idempotencyKey } = req.body || {};
+    const result =
+      String(direction || '').trim().toLowerCase() === 'coins_to_diamonds'
+        ? await economy.convertCoinsToDiamonds({
+            userId: user.id,
+            diamonds,
+            idempotencyKey
+          })
+        : await economy.convertDiamondsToCoins({
+            userId: user.id,
+            diamonds,
+            idempotencyKey
+          });
     res.json(result);
   }));
 

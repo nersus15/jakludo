@@ -398,19 +398,27 @@ async function hydrateFromPostgres() {
     }
 
     const convRes = await pool.query('SELECT * FROM coin_conversion_transactions ORDER BY created_at DESC LIMIT 1000');
-    state.coinConversions = (convRes.rows || []).reverse().map(r => Object.freeze({
-      id: r.id,
-      userId: r.user_id,
-      coinsSpent: Number(r.coins_spent),
-      diamondsReceived: Number(r.diamonds_received),
-      rateCoinsPerDiamond: Number(r.rate_coins_per_diamond),
-      previousCoins: Number(r.previous_coins),
-      newCoins: Number(r.new_coins),
-      previousDiamonds: Number(r.previous_diamonds),
-      newDiamonds: Number(r.new_diamonds),
-      idempotencyKey: r.idempotency_key || null,
-      createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
-    }));
+    state.coinConversions = (convRes.rows || []).reverse().map(r => {
+      const direction =
+        r.direction ||
+        (Number(r.new_diamonds) < Number(r.previous_diamonds) ? 'diamonds_to_coins' : 'coins_to_diamonds');
+      return Object.freeze({
+        id: r.id,
+        userId: r.user_id,
+        direction,
+        coinsSpent: Number(r.coins_spent || 0),
+        diamondsReceived: Number(r.diamonds_received || 0),
+        diamondsSpent: Number(r.diamonds_spent || r.diamonds_received || 0),
+        coinsReceived: Number(r.coins_received || r.coins_spent || 0),
+        rateCoinsPerDiamond: Number(r.rate_coins_per_diamond),
+        previousCoins: Number(r.previous_coins),
+        newCoins: Number(r.new_coins),
+        previousDiamonds: Number(r.previous_diamonds),
+        newDiamonds: Number(r.new_diamonds),
+        idempotencyKey: r.idempotency_key || null,
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
+      });
+    });
 
     const orderRes = await pool.query('SELECT * FROM payment_orders ORDER BY created_at DESC LIMIT 1500');
     state.paymentOrders.clear();
@@ -655,17 +663,17 @@ function listPaymentOrdersForUser(userId, { limit = 30 } = {}) {
 }
 
 // ==========================================
-// KONVERSI COINS KE DIAMONDS
+// KONVERSI DIAMONDS <-> COINS
 // ==========================================
 
-async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null }) {
+function validateConversionInput(userId, diamonds) {
   const db = getDb();
   const user = db.findUserById(userId);
   if (!user) throw makeError(404, 'Pengguna tidak ditemukan.');
 
   const settings = state.settings;
   if (!settings.conversionEnabled) {
-    throw makeError(400, 'Fitur konversi Coins ke Diamonds sedang dinonaktifkan sementara oleh admin.');
+    throw makeError(400, 'Fitur konversi Diamonds dan Coins sedang dinonaktifkan sementara oleh admin.');
   }
 
   const parsedDiamonds = Number(diamonds);
@@ -687,6 +695,11 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
     );
   }
 
+  return { db, user, settings, parsedDiamonds };
+}
+
+async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null }) {
+  const { db, user, settings, parsedDiamonds } = validateConversionInput(userId, diamonds);
   const cleanKey = idempotencyKey ? `conv:${userId}:${String(idempotencyKey).slice(0, 100)}` : null;
 
   return withUserLock(userId, async () => {
@@ -695,6 +708,7 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
       return {
         success: true,
         idempotentReplay: true,
+        direction: 'coins_to_diamonds',
         conversion: state.coinConversions.find(c => c.idempotencyKey === cleanKey) || null,
         transaction: existingTx,
         wallet: formatWalletResponse(userId),
@@ -730,7 +744,9 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
       idempotencyKey: cleanKey,
       description: `Konversi ${coinsRequired} Coins menjadi ${parsedDiamonds} Diamonds`,
       metadata: {
+        direction: 'coins_to_diamonds',
         coinsSpent: coinsRequired,
+        diamondsReceived: parsedDiamonds,
         rateCoinsPerDiamond: rate
       },
       createdAt: now
@@ -739,8 +755,11 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
     const convRecord = Object.freeze({
       id: convId,
       userId,
+      direction: 'coins_to_diamonds',
       coinsSpent: coinsRequired,
       diamondsReceived: parsedDiamonds,
+      diamondsSpent: 0,
+      coinsReceived: 0,
       rateCoinsPerDiamond: rate,
       previousCoins: prevCoins,
       newCoins: nextCoins,
@@ -781,8 +800,8 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
         );
         await client.query(
           `INSERT INTO coin_conversion_transactions
-             (id, user_id, coins_spent, diamonds_received, rate_coins_per_diamond, previous_coins, new_coins, previous_diamonds, new_diamonds, idempotency_key, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+             (id, user_id, direction, coins_spent, diamonds_received, diamonds_spent, coins_received, rate_coins_per_diamond, previous_coins, new_coins, previous_diamonds, new_diamonds, idempotency_key, created_at)
+           VALUES ($1, $2, 'coins_to_diamonds', $3, $4, 0, 0, $5, $6, $7, $8, $9, $10, $11)`,
           [
             convId,
             userId,
@@ -829,6 +848,168 @@ async function convertCoinsToDiamonds({ userId, diamonds, idempotencyKey = null 
     return {
       success: true,
       idempotentReplay: false,
+      direction: 'coins_to_diamonds',
+      conversion: convRecord,
+      transaction: tx,
+      wallet: formatWalletResponse(userId),
+      user: db.sanitizeUser(db.findUserById(userId))
+    };
+  });
+}
+
+async function convertDiamondsToCoins({ userId, diamonds, idempotencyKey = null }) {
+  const { db, user, settings, parsedDiamonds } = validateConversionInput(userId, diamonds);
+  const cleanKey = idempotencyKey ? `conv_d2c:${userId}:${String(idempotencyKey).slice(0, 100)}` : null;
+
+  return withUserLock(userId, async () => {
+    if (cleanKey && state.idempotencyIndex.has(cleanKey)) {
+      const existingTx = state.idempotencyIndex.get(cleanKey);
+      return {
+        success: true,
+        idempotentReplay: true,
+        direction: 'diamonds_to_coins',
+        conversion: state.coinConversions.find(c => c.idempotencyKey === cleanKey) || null,
+        transaction: existingTx,
+        wallet: formatWalletResponse(userId),
+        user: db.sanitizeUser(db.findUserById(userId))
+      };
+    }
+
+    const rate = Number(settings.coinsPerDiamond);
+    const coinsReceived = parsedDiamonds * rate;
+    const wallet = ensureWalletRecord(userId);
+    const prevDiamonds = Number(wallet.balance || 0);
+    if (prevDiamonds < parsedDiamonds) {
+      throw makeError(
+        400,
+        `Diamonds tidak mencukupi. Dibutuhkan ${parsedDiamonds} Diamonds untuk +${coinsReceived.toLocaleString('id-ID')} Coins (saldo kamu: ${prevDiamonds} Diamonds).`
+      );
+    }
+
+    const nextDiamonds = prevDiamonds - parsedDiamonds;
+    const prevCoins = db.getUserPoints(userId);
+    const nextCoins = prevCoins + coinsReceived;
+    const now = new Date().toISOString();
+    const convId = 'ccv_' + crypto.randomUUID();
+
+    const tx = buildDiamondTransaction({
+      userId,
+      txType: 'CONVERSION',
+      amount: -parsedDiamonds,
+      previousBalance: prevDiamonds,
+      newBalance: nextDiamonds,
+      referenceId: convId,
+      idempotencyKey: cleanKey,
+      description: `Konversi ${parsedDiamonds} Diamonds menjadi +${coinsReceived.toLocaleString('id-ID')} Coins`,
+      metadata: {
+        direction: 'diamonds_to_coins',
+        diamondsSpent: parsedDiamonds,
+        coinsReceived,
+        rateCoinsPerDiamond: rate
+      },
+      createdAt: now
+    });
+
+    const convRecord = Object.freeze({
+      id: convId,
+      userId,
+      direction: 'diamonds_to_coins',
+      diamondsSpent: parsedDiamonds,
+      coinsReceived,
+      coinsSpent: coinsReceived,
+      diamondsReceived: parsedDiamonds,
+      rateCoinsPerDiamond: rate,
+      previousCoins: prevCoins,
+      newCoins: nextCoins,
+      previousDiamonds: prevDiamonds,
+      newDiamonds: nextDiamonds,
+      idempotencyKey: cleanKey,
+      createdAt: now
+    });
+
+    const pool = getPool();
+    if (pool) {
+      await db.execPgTransaction(async client => {
+        await db.ensureGlobalLeaderboardRow(client, user);
+        await client.query(
+          `INSERT INTO diamond_wallets (user_id, balance, total_spent)
+           VALUES ($1, 0, 0) ON CONFLICT (user_id) DO NOTHING`,
+          [userId]
+        );
+        const walletRowRes = await client.query(
+          'SELECT balance FROM diamond_wallets WHERE user_id = $1 FOR UPDATE',
+          [userId]
+        );
+        const pgPrevDiamonds = Number(walletRowRes.rows[0].balance || 0);
+        if (pgPrevDiamonds < parsedDiamonds) {
+          throw makeError(400, 'Diamonds tidak mencukupi saat memproses transaksi konversi.');
+        }
+        const pgNextDiamonds = pgPrevDiamonds - parsedDiamonds;
+        await client.query(
+          `UPDATE diamond_wallets
+           SET balance = $1, total_spent = total_spent + $2, updated_at = NOW()
+           WHERE user_id = $3`,
+          [pgNextDiamonds, parsedDiamonds, userId]
+        );
+        const coinRes = await client.query(
+          'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2 RETURNING points',
+          [coinsReceived, userId]
+        );
+        const pgNextCoins = coinRes.rows?.[0] ? Number(coinRes.rows[0].points) : nextCoins;
+        const pgPrevCoins = Math.max(0, pgNextCoins - coinsReceived);
+
+        await client.query(
+          `INSERT INTO coin_conversion_transactions
+             (id, user_id, direction, coins_spent, diamonds_received, diamonds_spent, coins_received, rate_coins_per_diamond, previous_coins, new_coins, previous_diamonds, new_diamonds, idempotency_key, created_at)
+           VALUES ($1, $2, 'diamonds_to_coins', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            convId,
+            userId,
+            coinsReceived,
+            parsedDiamonds,
+            parsedDiamonds,
+            coinsReceived,
+            rate,
+            pgPrevCoins,
+            pgNextCoins,
+            pgPrevDiamonds,
+            pgNextDiamonds,
+            cleanKey,
+            now
+          ]
+        );
+        await client.query(
+          `INSERT INTO diamond_transactions
+             (id, user_id, tx_type, amount, previous_balance, new_balance, reference_id, idempotency_key, description, metadata, created_at)
+           VALUES ($1, $2, 'CONVERSION', $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            tx.id,
+            userId,
+            tx.amount,
+            pgPrevDiamonds,
+            pgNextDiamonds,
+            tx.referenceId,
+            tx.idempotencyKey,
+            tx.description,
+            JSON.stringify(tx.metadata),
+            now
+          ]
+        );
+      });
+    }
+
+    db.adjustUserPointsInState(userId, coinsReceived);
+    wallet.balance = nextDiamonds;
+    wallet.totalSpent = Number(wallet.totalSpent || 0) + parsedDiamonds;
+    wallet.updatedAt = now;
+    state.coinConversions.push(convRecord);
+    recordTxInMemory(tx);
+    persistLocalFallback();
+
+    return {
+      success: true,
+      idempotentReplay: false,
+      direction: 'diamonds_to_coins',
       conversion: convRecord,
       transaction: tx,
       wallet: formatWalletResponse(userId),
@@ -2065,6 +2246,7 @@ module.exports = {
   listUserTransactions,
   listPaymentOrdersForUser,
   convertCoinsToDiamonds,
+  convertDiamondsToCoins,
   listDiamondPackages,
   createDiamondTopupOrder,
   handleDuitkuDiamondCallback,

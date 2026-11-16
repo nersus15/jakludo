@@ -29,7 +29,7 @@ function txTypeLabel(type) {
     case 'TOPUP':
       return { label: 'Top-Up Diamonds', tone: 'success' };
     case 'CONVERSION':
-      return { label: 'Konversi Coins', tone: 'info' };
+      return { label: 'Konversi Diamonds → Coins', tone: 'info' };
     case 'SKIN_PURCHASE':
       return { label: 'Beli Skin Ludo', tone: 'warning' };
     case 'REFUND':
@@ -369,13 +369,15 @@ export default function ShopModal({
   const [skinQuery, setSkinQuery] = useState('');
   const [inspectedSkinId, setInspectedSkinId] = useState(null);
 
-  // Conversion & Duitku Direct API Top-Up State
+  // Conversion & Payment Gateway Direct API Top-Up State
   const [convertDiamonds, setConvertDiamonds] = useState(10);
   const [converting, setConverting] = useState(false);
+  const [topupCurrency, setTopupCurrency] = useState('diamonds'); // 'diamonds' | 'coins'
   const [duitkuMethods, setDuitkuMethods] = useState(DEFAULT_DUITKU_METHODS);
   const [methodCategoryFilter, setMethodCategoryFilter] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState('SP');
   const [selectedPkgId, setSelectedPkgId] = useState('');
+  const [selectedCoinPkgId, setSelectedCoinPkgId] = useState('');
   const [creatingOrderPkgId, setCreatingOrderPkgId] = useState('');
   const [checkingOrderId, setCheckingOrderId] = useState('');
   const [activePayment, setActivePayment] = useState(null);
@@ -387,6 +389,7 @@ export default function ShopModal({
   // Legacy Coins Shop & Coins Top-Up
   const [legacyCategory, setLegacyCategory] = useState(initialGame === 'quiz' ? 'quiz' : 'all');
   const [legacyPackages, setLegacyPackages] = useState([]);
+  const [coinPaymentOrders, setCoinPaymentOrders] = useState([]);
   const [buyingLegacyId, setBuyingLegacyId] = useState('');
   const [topupLegacyId, setTopupLegacyId] = useState('');
 
@@ -472,14 +475,16 @@ export default function ShopModal({
       }
 
       if (token) {
-        const [wRes, txRes, ordRes] = await Promise.all([
+        const [wRes, txRes, ordRes, coinOrdRes] = await Promise.all([
           fetch('/api/economy/wallet', { headers }),
           fetch(`/api/economy/transactions${txTypeFilter ? `?txType=${encodeURIComponent(txTypeFilter)}` : ''}`, { headers }),
-          fetch('/api/economy/topup/history', { headers })
+          fetch('/api/economy/topup/history', { headers }),
+          fetch('/api/topup/history', { headers })
         ]);
         const wData = await wRes.json().catch(() => ({}));
         const txData = await txRes.json().catch(() => ({}));
         const ordData = await ordRes.json().catch(() => ({}));
+        const coinOrdData = await coinOrdRes.json().catch(() => ({}));
         if (wRes.ok && wData.success) {
           setWallet(wData.wallet);
           if (wData.user) onUpdateUser?.(wData.user);
@@ -489,6 +494,9 @@ export default function ShopModal({
         }
         if (ordRes.ok && ordData.success) {
           setPaymentOrders(ordData.orders || []);
+        }
+        if (coinOrdRes.ok && coinOrdData.success) {
+          setCoinPaymentOrders(coinOrdData.orders || []);
         }
       }
     } catch {
@@ -501,7 +509,12 @@ export default function ShopModal({
       const res = await fetch('/api/topup/config');
       const data = await res.json().catch(() => ({}));
       if (data?.success) {
-        setLegacyPackages(data.packages || []);
+        const cPkgs = data.packages || [];
+        setLegacyPackages(cPkgs);
+        setSelectedCoinPkgId(prev => {
+          if (prev && cPkgs.some(p => p.id === prev)) return prev;
+          return cPkgs.find(p => p.id === 'diamond_120')?.id || cPkgs[0]?.id || '';
+        });
         if (Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0) {
           setDuitkuMethods(data.paymentMethods);
         }
@@ -553,12 +566,20 @@ export default function ShopModal({
     diamondPackages[0] ||
     null;
 
+  const selectedCoinPkg =
+    legacyPackages.find(p => p.id === selectedCoinPkgId) ||
+    legacyPackages[0] ||
+    null;
+
+  const activeTopupAmountIdr =
+    topupCurrency === 'coins' ? selectedCoinPkg?.price : selectedPkg?.priceIdr;
+
   useEffect(() => {
     if (!isOpen || activeTab !== 'diamonds') return;
-    if (selectedPkg?.priceIdr) {
-      loadLivePaymentMethods(selectedPkg.priceIdr);
+    if (activeTopupAmountIdr) {
+      loadLivePaymentMethods(activeTopupAmountIdr);
     }
-  }, [isOpen, activeTab, selectedPkg?.priceIdr, loadLivePaymentMethods]);
+  }, [isOpen, activeTab, activeTopupAmountIdr, loadLivePaymentMethods]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -687,11 +708,11 @@ export default function ShopModal({
     } catch {}
   };
 
-  // ---- CONVERSION HANDLER ----
+  // ---- CONVERSION HANDLER (DIAMONDS -> COINS) ----
   const handleConvert = async e => {
     e?.preventDefault?.();
     if (!currentUser) {
-      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk menukar Coins ke Diamonds.' });
+      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk menukar Diamonds ke Coins.' });
       return;
     }
     const qty = Number(convertDiamonds);
@@ -703,16 +724,18 @@ export default function ShopModal({
       const res = await fetch('/api/economy/convert', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ diamonds: qty, idempotencyKey })
+        body: JSON.stringify({ diamonds: qty, direction: 'diamonds_to_coins', idempotencyKey })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error || 'Konversi Coins gagal.');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Konversi Diamonds gagal.');
       sound.playShopPurchase();
       if (data.wallet) setWallet(data.wallet);
       if (data.user) onUpdateUser?.(data.user);
+      const spentD = data.conversion?.diamondsSpent ?? data.conversion?.diamondsReceived ?? qty;
+      const gotC = data.conversion?.coinsReceived ?? data.conversion?.coinsSpent ?? qty * Number(economySettings.coinsPerDiamond || 100);
       setFeedback({
         type: 'success',
-        message: `Berhasil menukar ${data.conversion?.coinsSpent?.toLocaleString('id-ID')} Coins menjadi +${data.conversion?.diamondsReceived} Diamonds!`
+        message: `Berhasil menukar ${spentD.toLocaleString('id-ID')} Diamonds menjadi +${Number(gotC).toLocaleString('id-ID')} Coins!`
       });
       loadEconomyData();
     } catch (err) {
@@ -774,17 +797,21 @@ export default function ShopModal({
     }
   };
 
-  const openOrderInstruction = ord => {
+  const openOrderInstruction = (ord, mode = 'diamonds') => {
     if (!ord) return;
     sound.playClick();
     const raw = ord.rawCreateResponse || {};
     const methodObj = duitkuMethods.find(m => m.code === ord.paymentMethod);
+    const id = ord.id || ord.orderId;
+    const isCoins = mode === 'coins';
     setActivePayment({
-      mode: 'diamonds',
-      orderId: ord.id,
-      reference: ord.gatewayReference || raw.reference || null,
-      title: `${ord.packageName} (${ord.totalDiamonds} Diamonds)`,
-      amountIdr: ord.amountIdr,
+      mode: isCoins ? 'coins' : 'diamonds',
+      orderId: id,
+      reference: ord.gatewayReference || ord.reference || raw.reference || null,
+      title: isCoins
+        ? ord.packageName || `${ord.coins} Coins`
+        : `${ord.packageName} (${ord.totalDiamonds} Diamonds)`,
+      amountIdr: ord.amountIdr ?? ord.grossAmount,
       paymentMethod: ord.paymentMethod || raw.paymentMethod,
       paymentMethodName: ord.paymentMethodName || raw.paymentMethodName || methodObj?.label || ord.paymentMethod,
       paymentCategory: ord.paymentCategory || raw.paymentCategory || methodObj?.category || 'va',
@@ -798,10 +825,10 @@ export default function ShopModal({
     window.scrollTo({ top: 180, behavior: 'smooth' });
   };
 
-  const cancelDiamondOrder = async orderId => {
+  const cancelOrderRequest = async (orderId, endpoint) => {
     setCheckingOrderId(orderId);
     try {
-      const res = await fetch('/api/economy/topup/cancel', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ orderId })
@@ -817,6 +844,9 @@ export default function ShopModal({
       setCheckingOrderId('');
     }
   };
+
+  const cancelDiamondOrder = orderId => cancelOrderRequest(orderId, '/api/economy/topup/cancel');
+  const cancelLegacyCoinsOrder = orderId => cancelOrderRequest(orderId, '/api/topup/cancel');
 
   // ---- LUDO SKIN PURCHASE & EQUIP ----
   const executeBuySkin = async skin => {
@@ -943,8 +973,9 @@ export default function ShopModal({
 
       setFeedback({
         type: 'info',
-        message: `Tagihan Coins ${data.orderId} (${pkg.formattedPrice}) siap dibayar.`
+        message: `Tagihan Coins ${data.orderId} (${pkg.formattedPrice}) siap dibayar. Selesaikan pembayaran sesuai instruksi di bawah.`
       });
+      loadEconomyData();
     } catch (err) {
       setFeedback({ type: 'error', message: err.message });
     } finally {
@@ -1086,8 +1117,32 @@ export default function ShopModal({
   const maxConv = Number(economySettings.maxConvertDiamonds || 50);
   const convRate = Number(economySettings.coinsPerDiamond || 100);
   const clampedConv = Math.max(minConv, Math.min(maxConv, Math.trunc(Number(convertDiamonds) || minConv)));
-  const coinsNeeded = clampedConv * convRate;
-  const canAffordConv = points >= coinsNeeded && Boolean(economySettings.conversionEnabled);
+  const diamondsNeeded = clampedConv;
+  const coinsReceived = clampedConv * convRate;
+  const canAffordConv = diamonds >= diamondsNeeded && Boolean(economySettings.conversionEnabled);
+
+  const combinedPaymentOrders = [
+    ...paymentOrders.map(ord => ({
+      ...ord,
+      kind: 'diamonds',
+      displayId: ord.id,
+      displayPackage: `${ord.packageName} (${ord.totalDiamonds} 💎)`,
+      displayAmount: ord.amountIdr,
+      displayStatus: String(ord.status || 'PENDING').toUpperCase()
+    })),
+    ...coinPaymentOrders.map(ord => {
+      const rawSt = String(ord.status || 'pending').toUpperCase();
+      return {
+        ...ord,
+        id: ord.orderId || ord.id,
+        kind: 'coins',
+        displayId: ord.orderId || ord.id,
+        displayPackage: `${ord.packageName || `${ord.coins} Coins`} 🪙`,
+        displayAmount: ord.grossAmount ?? ord.amountIdr,
+        displayStatus: rawSt === 'SUCCESS' ? 'PAID' : rawSt
+      };
+    })
+  ].sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
 
   const visibleMethods = duitkuMethods.filter(
     m => methodCategoryFilter === 'all' || m.category === methodCategoryFilter
@@ -1143,7 +1198,7 @@ export default function ShopModal({
             <div>
               <h1 className="mp-hero__title">PlayGo Marketplace</h1>
               <p className="mp-hero__subtitle">
-                Belanja Skin Bidak JakLudo, tukar Coins jadi Diamonds, Top-Up instan, dan lengkapi item permainanmu.
+                Belanja Skin Bidak JakLudo, tukar Diamonds jadi Coins, Top-Up Coins &amp; Diamonds instan, dan lengkapi item permainanmu.
               </p>
             </div>
           </div>
@@ -1174,8 +1229,8 @@ export default function ShopModal({
               className="btn btn--secondary btn--sm"
               onClick={() => {
                 sound.playClick();
-                setActiveTab('items');
-                setLegacyCategory('topup');
+                setActiveTab('diamonds');
+                setTopupCurrency('coins');
               }}
             >
               + Coins
@@ -1194,6 +1249,7 @@ export default function ShopModal({
               onClick={() => {
                 sound.playClick();
                 setActiveTab('diamonds');
+                setTopupCurrency('diamonds');
               }}
             >
               + Isi / Tukar 💎
@@ -1527,21 +1583,21 @@ export default function ShopModal({
             </section>
           )}
 
-          {/* ================= TAB 2: DIAMONDS (KONVERSI & TOP-UP DUITKU API) ================= */}
+          {/* ================= TAB 2: TOP-UP & KONVERSI ================= */}
           {activeTab === 'diamonds' && (
             <div className="mp-section">
-              {/* 1. Konversi Coins ke Diamonds */}
-              <section className="mp-convert-card card" aria-label="Konversi Coins ke Diamonds">
+              {/* 1. Konversi Diamonds ke Coins */}
+              <section className="mp-convert-card card" aria-label="Konversi Diamonds ke Coins">
                 <div className="mp-card-head">
                   <div>
                     <h3 className="shop__group-title">
-                      <Icon name="coin" size={18} />
-                      <span>→</span>
                       <Icon name="diamond" size={18} />
-                      <span>Konversi Coins ke Diamonds</span>
+                      <span>→</span>
+                      <Icon name="coin" size={18} />
+                      <span>Konversi Diamonds ke Coins</span>
                     </h3>
                     <p className="shop__group-desc">
-                      Tukar Coins hasil kemenangan menjadi Diamonds secara instan tanpa biaya tambahan.
+                      Tukar Diamonds milikmu menjadi Coins secara instan untuk membeli item taktik &amp; bantuan permainan.
                     </p>
                   </div>
                   <div className="shop-item__badges">
@@ -1565,7 +1621,7 @@ export default function ShopModal({
                             className={`btn btn--sm ${Number(convertDiamonds) === preset ? 'btn--primary' : 'btn--secondary'}`}
                             onClick={() => setConvertDiamonds(preset)}
                           >
-                            +{preset} 💎 ({(preset * convRate).toLocaleString('id-ID')})
+                            −{preset} 💎 (+{(preset * convRate).toLocaleString('id-ID')} Coins)
                           </button>
                         ))}
                     </div>
@@ -1607,16 +1663,16 @@ export default function ShopModal({
                   <div className="mp-convert-summary-box">
                     <div className="conv-summary">
                       <div>
-                        <span className="muted">Biaya Coins</span>
-                        <strong>{coinsNeeded.toLocaleString('id-ID')} Coins</strong>
+                        <span className="muted">Biaya Diamonds</span>
+                        <strong>{diamondsNeeded.toLocaleString('id-ID')} 💎</strong>
                       </div>
                       <div>
-                        <span className="muted">Sisa Coins</span>
-                        <strong>{Math.max(0, points - coinsNeeded).toLocaleString('id-ID')}</strong>
+                        <span className="muted">Sisa Diamonds</span>
+                        <strong>{Math.max(0, diamonds - diamondsNeeded).toLocaleString('id-ID')} 💎</strong>
                       </div>
                       <div>
-                        <span className="muted">Diamonds Nanti</span>
-                        <strong>{(diamonds + clampedConv).toLocaleString('id-ID')} 💎</strong>
+                        <span className="muted">Coins Diterima</span>
+                        <strong>+{coinsReceived.toLocaleString('id-ID')} Coins</strong>
                       </div>
                     </div>
 
@@ -1631,90 +1687,159 @@ export default function ShopModal({
                         ? 'Login Terlebih Dahulu'
                         : !economySettings.conversionEnabled
                         ? 'Konversi Ditutup Admin'
-                        : points < coinsNeeded
-                        ? `Coins Kurang (Butuh ${coinsNeeded.toLocaleString('id-ID')})`
-                        : `Tukar ${coinsNeeded.toLocaleString('id-ID')} Coins → ${clampedConv} 💎`}
+                        : diamonds < diamondsNeeded
+                        ? `Diamonds Kurang (Butuh ${diamondsNeeded.toLocaleString('id-ID')} 💎)`
+                        : `Tukar ${diamondsNeeded.toLocaleString('id-ID')} 💎 → +${coinsReceived.toLocaleString('id-ID')} Coins`}
                     </button>
                   </div>
                 </form>
               </section>
 
-              {/* 2. Top-Up Diamonds */}
-              <section className="card mp-topup-card" aria-label="Top-Up Diamonds">
+              {/* 2. Top-Up Diamonds & Coins via Payment Gateway */}
+              <section className="card mp-topup-card" aria-label="Top-Up Diamonds dan Coins">
                 <div className="mp-card-head mp-card-head--topup">
                   <div>
                     <h3 className="shop__group-title">
-                      <Icon name="diamond" size={18} />
-                      <span>Top-Up Diamonds</span>
+                      <Icon name={topupCurrency === 'coins' ? 'coin' : 'diamond'} size={18} />
+                      <span>{topupCurrency === 'coins' ? 'Top-Up Coins' : 'Top-Up Diamonds'}</span>
                     </h3>
                     <p className="shop__group-desc">
-                      Pilih paket Diamonds dan metode pembayaran favoritmu. Saldo otomatis bertambah setelah pembayaran selesai.
+                      Pilih paket {topupCurrency === 'coins' ? 'Coins' : 'Diamonds'} dan metode pembayaran favoritmu. Saldo otomatis bertambah setelah pembayaran selesai.
                     </p>
                   </div>
-                  <span className="badge badge--diamond">Proses Otomatis</span>
+                  <div className="skin-filter-pills" role="group" aria-label="Pilih mata uang top-up">
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${topupCurrency === 'diamonds' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => {
+                        sound.playClick();
+                        setTopupCurrency('diamonds');
+                      }}
+                    >
+                      💎 Paket Diamonds
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${topupCurrency === 'coins' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => {
+                        sound.playClick();
+                        setTopupCurrency('coins');
+                      }}
+                    >
+                      🪙 Paket Coins
+                    </button>
+                  </div>
                 </div>
 
-                {activePayment?.mode === 'diamonds' ? (
+                {activePayment?.mode === 'diamonds' || activePayment?.mode === 'coins' ? (
                   <DuitkuPaymentPanel
                     payment={activePayment}
                     verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
                     cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
                     copiedField={copiedField}
                     onCopy={copyToClipboard}
-                    onCheckStatus={() => verifyDiamondOrder(activePayment.orderId, false)}
-                    onCancelOrder={() => cancelDiamondOrder(activePayment.orderId)}
+                    onCheckStatus={() =>
+                      activePayment.mode === 'diamonds'
+                        ? verifyDiamondOrder(activePayment.orderId, false)
+                        : verifyLegacyCoinsOrder(activePayment.orderId, false)
+                    }
+                    onCancelOrder={() =>
+                      activePayment.mode === 'diamonds'
+                        ? cancelDiamondOrder(activePayment.orderId)
+                        : cancelLegacyCoinsOrder(activePayment.orderId)
+                    }
                     onBack={() => setActivePayment(null)}
                   />
                 ) : (
                   <>
-                    {/* Langkah 1: Pilih Paket Diamonds */}
+                    {/* Langkah 1: Pilih Paket Diamonds atau Coins */}
                     <div className="mp-step-block">
                       <div className="mp-step-head">
                         <span className="mp-step-num">1</span>
-                        <h4>Pilih Paket Diamonds</h4>
+                        <h4>{topupCurrency === 'coins' ? 'Pilih Paket Coins' : 'Pilih Paket Diamonds'}</h4>
                       </div>
 
-                      <div className="mp-diamond-pkg-grid" role="radiogroup" aria-label="Pilihan paket Diamonds">
-                        {diamondPackages.map(pkg => {
-                          const totalD = Number(pkg.diamonds) + Number(pkg.bonusDiamonds || 0);
-                          const isSelected = selectedPkg?.id === pkg.id;
-                          return (
-                            <button
-                              key={pkg.id}
-                              type="button"
-                              role="radio"
-                              aria-checked={isSelected}
-                              className={`mp-diamond-pkg ${isSelected ? 'is-selected' : ''}`}
-                              onClick={() => {
-                                sound.playClick();
-                                setSelectedPkgId(pkg.id);
-                              }}
-                            >
-                              <div className="mp-diamond-pkg__top">
-                                <span className="shop-item__icon shop-item__icon--diamond" aria-hidden="true">
-                                  <Icon name="diamond" size={22} />
-                                </span>
-                                <div className="shop-item__badges">
-                                  {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
-                                  {isSelected && <span className="badge badge--diamond">✓ Dipilih</span>}
+                      {topupCurrency === 'coins' ? (
+                        <div className="mp-diamond-pkg-grid" role="radiogroup" aria-label="Pilihan paket Coins">
+                          {legacyPackages.map(pkg => {
+                            const isSelected = selectedCoinPkg?.id === pkg.id;
+                            return (
+                              <button
+                                key={pkg.id}
+                                type="button"
+                                role="radio"
+                                aria-checked={isSelected}
+                                className={`mp-diamond-pkg ${isSelected ? 'is-selected' : ''}`}
+                                onClick={() => {
+                                  sound.playClick();
+                                  setSelectedCoinPkgId(pkg.id);
+                                }}
+                              >
+                                <div className="mp-diamond-pkg__top">
+                                  <span className="shop-item__icon" aria-hidden="true">
+                                    <Icon name={pkg.icon === 'crown' ? 'crown' : 'coin'} size={22} />
+                                  </span>
+                                  <div className="shop-item__badges">
+                                    {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
+                                    {isSelected && <span className="badge badge--diamond">✓ Dipilih</span>}
+                                  </div>
                                 </div>
-                              </div>
 
-                              <div className="mp-diamond-pkg__body">
-                                <div className="mp-diamond-pkg__qty">{totalD} Diamonds</div>
-                                <div className="mp-diamond-pkg__name">
-                                  {pkg.name}
-                                  {pkg.bonusDiamonds > 0 && ` (+${pkg.bonusDiamonds} Bonus)`}
+                                <div className="mp-diamond-pkg__body">
+                                  <div className="mp-diamond-pkg__qty">{pkg.name}</div>
+                                  <div className="mp-diamond-pkg__name">{pkg.description}</div>
                                 </div>
-                              </div>
 
-                              <div className="mp-diamond-pkg__foot">
-                                <strong className="topup-price">{formatIdr(pkg.priceIdr)}</strong>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                                <div className="mp-diamond-pkg__foot">
+                                  <strong className="topup-price">{pkg.formattedPrice || formatIdr(pkg.price)}</strong>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mp-diamond-pkg-grid" role="radiogroup" aria-label="Pilihan paket Diamonds">
+                          {diamondPackages.map(pkg => {
+                            const totalD = Number(pkg.diamonds) + Number(pkg.bonusDiamonds || 0);
+                            const isSelected = selectedPkg?.id === pkg.id;
+                            return (
+                              <button
+                                key={pkg.id}
+                                type="button"
+                                role="radio"
+                                aria-checked={isSelected}
+                                className={`mp-diamond-pkg ${isSelected ? 'is-selected' : ''}`}
+                                onClick={() => {
+                                  sound.playClick();
+                                  setSelectedPkgId(pkg.id);
+                                }}
+                              >
+                                <div className="mp-diamond-pkg__top">
+                                  <span className="shop-item__icon shop-item__icon--diamond" aria-hidden="true">
+                                    <Icon name="diamond" size={22} />
+                                  </span>
+                                  <div className="shop-item__badges">
+                                    {pkg.badge && <span className="badge badge--popular">{pkg.badge}</span>}
+                                    {isSelected && <span className="badge badge--diamond">✓ Dipilih</span>}
+                                  </div>
+                                </div>
+
+                                <div className="mp-diamond-pkg__body">
+                                  <div className="mp-diamond-pkg__qty">{totalD} Diamonds</div>
+                                  <div className="mp-diamond-pkg__name">
+                                    {pkg.name}
+                                    {pkg.bonusDiamonds > 0 && ` (+${pkg.bonusDiamonds} Bonus)`}
+                                  </div>
+                                </div>
+
+                                <div className="mp-diamond-pkg__foot">
+                                  <strong className="topup-price">{formatIdr(pkg.priceIdr)}</strong>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
 
                     {/* Langkah 2: Pilih Metode Pembayaran */}
@@ -1778,19 +1903,23 @@ export default function ShopModal({
                     </div>
 
                     {/* Langkah 3: Ringkasan & Buat Tagihan */}
-                    {selectedPkg && (
+                    {(topupCurrency === 'coins' ? selectedCoinPkg : selectedPkg) && (
                       <div className="mp-checkout-bar">
                         <div className="mp-checkout-bar__info">
                           <span className="muted">Ringkasan Tagihan</span>
                           <strong>
-                            {selectedPkg.name} ({Number(selectedPkg.diamonds) + Number(selectedPkg.bonusDiamonds || 0)} 💎)
+                            {topupCurrency === 'coins'
+                              ? `${selectedCoinPkg.name} 🪙`
+                              : `${selectedPkg.name} (${Number(selectedPkg.diamonds) + Number(selectedPkg.bonusDiamonds || 0)} 💎)`}
                             {selectedMethodObj ? ` · ${selectedMethodObj.label}` : ''}
                           </strong>
                         </div>
                         <div className="mp-checkout-bar__cta">
                           <div className="mp-checkout-bar__total">
                             <span className="muted">Total</span>
-                            <strong>{formatIdr(selectedPkg.priceIdr)}</strong>
+                            <strong>
+                              {formatIdr(topupCurrency === 'coins' ? selectedCoinPkg.price : selectedPkg.priceIdr)}
+                            </strong>
                           </div>
                           {!currentUser ? (
                             <button
@@ -1799,6 +1928,17 @@ export default function ShopModal({
                               onClick={() => onOpenAuth?.()}
                             >
                               Login untuk Top-Up
+                            </button>
+                          ) : topupCurrency === 'coins' ? (
+                            <button
+                              type="button"
+                              className="btn btn--primary"
+                              disabled={topupLegacyId === selectedCoinPkg.id}
+                              onClick={() => handleLegacyTopup(selectedCoinPkg)}
+                            >
+                              {topupLegacyId === selectedCoinPkg.id
+                                ? 'Membuat Tagihan...'
+                                : 'Buat Tagihan Pembayaran'}
                             </button>
                           ) : (
                             <button
@@ -1819,12 +1959,12 @@ export default function ShopModal({
                 )}
               </section>
 
-              {/* 3. Riwayat Order Pembayaran Top-Up */}
-              {currentUser && paymentOrders.length > 0 && (
+              {/* 3. Riwayat Order Pembayaran Top-Up (Diamonds & Coins) */}
+              {currentUser && combinedPaymentOrders.length > 0 && (
                 <div className="econ-orders-panel card">
                   <div className="section-head">
                     <h3>Riwayat Order Pembayaran Top-Up</h3>
-                    <span className="muted">{paymentOrders.length} pesanan terbaru</span>
+                    <span className="muted">{combinedPaymentOrders.length} pesanan terbaru</span>
                   </div>
                   <div className="tx-table-wrap">
                     <table className="tx-table">
@@ -1840,27 +1980,27 @@ export default function ShopModal({
                         </tr>
                       </thead>
                       <tbody>
-                        {paymentOrders.slice(0, 15).map(ord => (
-                          <tr key={ord.id}>
-                            <td className="code-text">{ord.id}</td>
-                            <td>{ord.packageName} ({ord.totalDiamonds} 💎)</td>
+                        {combinedPaymentOrders.slice(0, 20).map(ord => (
+                          <tr key={ord.displayId}>
+                            <td className="code-text">{ord.displayId}</td>
+                            <td>{ord.displayPackage}</td>
                             <td>{ord.paymentMethodName || ord.paymentMethod || '-'}</td>
-                            <td>{formatIdr(ord.amountIdr)}</td>
+                            <td>{formatIdr(ord.displayAmount)}</td>
                             <td>
-                              <span className={`badge badge--${orderStatusTone(ord.status)}`}>
-                                {ord.status}
+                              <span className={`badge badge--${orderStatusTone(ord.displayStatus)}`}>
+                                {ord.displayStatus}
                               </span>
                             </td>
                             <td>{formatDateTime(ord.createdAt)}</td>
                             <td>
                               <div className="tx-actions">
-                                {ord.status === 'PENDING' && (
+                                {ord.displayStatus === 'PENDING' && (
                                   <>
                                     {(ord.vaNumber || ord.qrCodeUrl || ord.qrString || ord.paymentUrl) && (
                                       <button
                                         type="button"
                                         className="btn btn--primary btn--sm"
-                                        onClick={() => openOrderInstruction(ord)}
+                                        onClick={() => openOrderInstruction(ord, ord.kind)}
                                       >
                                         Lihat Instruksi
                                       </button>
@@ -1868,16 +2008,24 @@ export default function ShopModal({
                                     <button
                                       type="button"
                                       className="btn btn--secondary btn--sm"
-                                      disabled={checkingOrderId === ord.id}
-                                      onClick={() => verifyDiamondOrder(ord.id)}
+                                      disabled={checkingOrderId === ord.displayId}
+                                      onClick={() =>
+                                        ord.kind === 'coins'
+                                          ? verifyLegacyCoinsOrder(ord.displayId)
+                                          : verifyDiamondOrder(ord.displayId)
+                                      }
                                     >
-                                      {checkingOrderId === ord.id ? '...' : 'Cek Status'}
+                                      {checkingOrderId === ord.displayId ? '...' : 'Cek Status'}
                                     </button>
                                     <button
                                       type="button"
                                       className="btn btn--ghost btn--sm"
-                                      disabled={checkingOrderId === ord.id}
-                                      onClick={() => cancelDiamondOrder(ord.id)}
+                                      disabled={checkingOrderId === ord.displayId}
+                                      onClick={() =>
+                                        ord.kind === 'coins'
+                                          ? cancelLegacyCoinsOrder(ord.displayId)
+                                          : cancelDiamondOrder(ord.displayId)
+                                      }
                                     >
                                       Batal
                                     </button>
@@ -1926,7 +2074,7 @@ export default function ShopModal({
                         <Icon name="coin" size={18} />
                         <span>Top Up Coins PlayGo (Reguler)</span>
                       </h3>
-                      <p className="shop__group-desc">Coins dipakai untuk beli item arena atau ditukar menjadi Diamonds.</p>
+                      <p className="shop__group-desc">Coins dipakai untuk beli item arena, Hints Jawaban kuis, dan perlengkapan game.</p>
                     </div>
                     <span className="badge badge--diamond">Proses Otomatis</span>
                   </div>
@@ -1935,10 +2083,11 @@ export default function ShopModal({
                     <DuitkuPaymentPanel
                       payment={activePayment}
                       verifying={verifyingPayment && checkingOrderId === activePayment.orderId}
-                      cancelling={false}
+                      cancelling={checkingOrderId === activePayment.orderId && !verifyingPayment}
                       copiedField={copiedField}
                       onCopy={copyToClipboard}
                       onCheckStatus={() => verifyLegacyCoinsOrder(activePayment.orderId, false)}
+                      onCancelOrder={() => cancelLegacyCoinsOrder(activePayment.orderId)}
                       onBack={() => setActivePayment(null)}
                     />
                   ) : (
@@ -2049,7 +2198,7 @@ export default function ShopModal({
                       >
                         <option value="">Semua Transaksi</option>
                         <option value="TOPUP">Top-Up Diamonds</option>
-                        <option value="CONVERSION">Konversi Coins</option>
+                        <option value="CONVERSION">Konversi 💎 ↔ 🪙</option>
                         <option value="SKIN_PURCHASE">Beli Skin Ludo</option>
                         <option value="REFUND">Refund</option>
                         <option value="ADMIN_ADJUSTMENT">Penyesuaian Admin</option>
@@ -2148,7 +2297,7 @@ export default function ShopModal({
 
               {adminSubTab === 'config' && (
                 <form className="card admin-econ-form" onSubmit={saveAdminSettings}>
-                  <h3>Pengaturan Konversi Coins → Diamonds</h3>
+                  <h3>Pengaturan Konversi Diamonds → Coins</h3>
                   <div className="admin-form-grid">
                     <label>
                       <span>Coins per 1 Diamond</span>

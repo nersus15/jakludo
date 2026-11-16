@@ -71,45 +71,52 @@ function connectSocket(token) {
   return new Promise(resolve => c.on('connect', () => resolve(c)));
 }
 
-test('Coins & Diamonds: konversi valid, batas min/max, saldo kurang, input tidak valid, idempotency, & proteksi race condition', async () => {
+test('Diamonds & Coins: konversi Diamonds ke Coins valid, batas min/max, saldo kurang, input tidak valid, idempotency, & proteksi race condition', async () => {
   const aliceAuth = await registerUser('econ_alice');
   const aliceId = aliceAuth.user.id;
   const aliceToken = aliceAuth.token;
 
-  // Beri tambahan +9.800 Coins sehingga total menjadi 10.000 Coins (200 starter + 9800)
-  db.awardUserPoints(aliceId, 9800);
+  // Beri Alice 50 Diamonds via konversi Coins -> Diamonds (5.000 Coins -> 50 Diamonds)
+  db.awardUserPoints(aliceId, 5000);
+  const setupConv = await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token: aliceToken,
+    body: { diamonds: 50, direction: 'coins_to_diamonds', idempotencyKey: 'setup-alice-d' }
+  });
+  assert.equal(setupConv.status, 200);
 
   const walletBefore = await apiJson('/api/economy/wallet', { token: aliceToken });
   assert.equal(walletBefore.status, 200);
-  assert.equal(walletBefore.data.wallet.coins, 10000);
-  assert.equal(walletBefore.data.wallet.diamonds, 0);
+  assert.equal(walletBefore.data.wallet.coins, 200);
+  assert.equal(walletBefore.data.wallet.diamonds, 50);
 
-  // Konversi valid 20 Diamonds (biaya = 2.000 Coins, abaikan nilai palsu dari klien jika ada)
+  // Konversi valid 20 Diamonds -> +2.000 Coins (abaikan nilai palsu dari klien jika ada)
   const convRes = await apiJson('/api/economy/convert', {
     method: 'POST',
     token: aliceToken,
     body: {
       diamonds: 20,
-      coinsRequired: 1, // manipulasi klien harus diabaikan
-      idempotencyKey: 'conv-alice-1'
+      coinsReceived: 999999, // manipulasi klien harus diabaikan
+      idempotencyKey: 'conv-alice-d2c-1'
     }
   });
   assert.equal(convRes.status, 200);
-  assert.equal(convRes.data.wallet.coins, 8000);
-  assert.equal(convRes.data.wallet.diamonds, 20);
-  assert.equal(convRes.data.conversion.coinsSpent, 2000);
-  assert.equal(convRes.data.conversion.diamondsReceived, 20);
+  assert.equal(convRes.data.direction, 'diamonds_to_coins');
+  assert.equal(convRes.data.wallet.diamonds, 30);
+  assert.equal(convRes.data.wallet.coins, 2200);
+  assert.equal(convRes.data.conversion.diamondsSpent, 20);
+  assert.equal(convRes.data.conversion.coinsReceived, 2000);
 
-  // Replay dengan idempotencyKey sama tidak mendebit Coins atau menambah Diamonds lagi
+  // Replay dengan idempotencyKey sama tidak mendebit Diamonds atau menambah Coins lagi
   const convReplay = await apiJson('/api/economy/convert', {
     method: 'POST',
     token: aliceToken,
-    body: { diamonds: 20, idempotencyKey: 'conv-alice-1' }
+    body: { diamonds: 20, idempotencyKey: 'conv-alice-d2c-1' }
   });
   assert.equal(convReplay.status, 200);
   assert.equal(convReplay.data.idempotentReplay, true);
-  assert.equal(convReplay.data.wallet.coins, 8000);
-  assert.equal(convReplay.data.wallet.diamonds, 20);
+  assert.equal(convReplay.data.wallet.diamonds, 30);
+  assert.equal(convReplay.data.wallet.coins, 2200);
 
   // Tolak batas min (<10) dan batas max (>50), desimal, nol, negatif
   for (const invalidVal of [9, 51, 10.5, 0, -5, 'abc']) {
@@ -121,7 +128,7 @@ test('Coins & Diamonds: konversi valid, batas min/max, saldo kurang, input tidak
     assert.equal(r.status, 400, `Harusnya menolak jumlah konversi: ${invalidVal}`);
   }
 
-  // Tolak saldo Coins tidak cukup
+  // Tolak saldo Diamonds tidak cukup (saldo = 0 Diamonds)
   const poorAuth = await registerUser('econ_poor');
   const poorRes = await apiJson('/api/economy/convert', {
     method: 'POST',
@@ -131,9 +138,14 @@ test('Coins & Diamonds: konversi valid, batas min/max, saldo kurang, input tidak
   assert.equal(poorRes.status, 400);
   assert.equal(db.getUserPoints(poorAuth.user.id), 200);
 
-  // Race-condition test: bob punya 2.000 Coins pas; kirim 2 request konversi 20 Diamonds paralel
+  // Race-condition test: bob punya 20 Diamonds pas; kirim 2 request konversi 20 Diamonds -> Coins paralel
   const bobAuth = await registerUser('econ_race_bob');
-  db.awardUserPoints(bobAuth.user.id, 1800); // 200 starter + 1800 = 2000 Coins
+  db.awardUserPoints(bobAuth.user.id, 2000);
+  await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token: bobAuth.token,
+    body: { diamonds: 20, direction: 'coins_to_diamonds' }
+  });
   const [r1, r2] = await Promise.all([
     apiJson('/api/economy/convert', { method: 'POST', token: bobAuth.token, body: { diamonds: 20 } }),
     apiJson('/api/economy/convert', { method: 'POST', token: bobAuth.token, body: { diamonds: 20 } })
@@ -141,8 +153,8 @@ test('Coins & Diamonds: konversi valid, batas min/max, saldo kurang, input tidak
   const statuses = [r1.status, r2.status].sort();
   assert.deepEqual(statuses, [200, 400]);
   const bobWallet = await apiJson('/api/economy/wallet', { token: bobAuth.token });
-  assert.equal(bobWallet.data.wallet.coins, 0);
-  assert.equal(bobWallet.data.wallet.diamonds, 20);
+  assert.equal(bobWallet.data.wallet.diamonds, 0);
+  assert.equal(bobWallet.data.wallet.coins, 2200);
 });
 
 test('Duitku Diamond Top-Up: verifikasi signature ketat, amount mismatch, order tidak ditemukan, idempotency callback, & status gagal/expired/cancelled', async () => {
@@ -565,9 +577,13 @@ test('JakLudo Skin Shop & Integrasi Bidak: beli skin, validasi kepemilikan, equi
   const playerAuth = await registerUser('econ_skinner');
   const token = playerAuth.token;
 
-  // Konversi 20 Diamonds dari Coins (2.000 Coins)
+  // Konversi 20 Diamonds dari Coins (2.000 Coins -> 20 Diamonds)
   db.awardUserPoints(playerAuth.user.id, 3000);
-  await apiJson('/api/economy/convert', { method: 'POST', token, body: { diamonds: 20 } });
+  await apiJson('/api/economy/convert', {
+    method: 'POST',
+    token,
+    body: { diamonds: 20, direction: 'coins_to_diamonds' }
+  });
 
   const catalogRes = await apiJson('/api/economy/skins', { token });
   assert.equal(catalogRes.status, 200);
@@ -663,16 +679,21 @@ test('Admin Economy Dashboard & Keamanan: RBAC, kurs dinamis, CRUD paket/skin, &
   assert.equal(updSettings.status, 200);
   assert.equal(updSettings.data.settings.coinsPerDiamond, 50);
 
-  // Pemain reguler menguji kurs baru (200 starter Coins cukup untuk 4? Tidak, min 5 = 250 Coins; beri +100 Coins)
-  db.awardUserPoints(regularAuth.user.id, 100); // 300 Coins
+  // Beri pemain reguler 10 Diamonds lewat admin adjustment lalu uji konversi 5 Diamonds -> +250 Coins (kurs 50)
+  const seedAdj = await apiJson('/api/admin/economy/wallets/adjust', {
+    method: 'POST',
+    token: adminAuth.token,
+    body: { userId: regularAuth.user.id, amount: 10, txType: 'ADMIN_ADJUSTMENT', reason: 'Modal uji konversi' }
+  });
+  assert.equal(seedAdj.status, 200);
   const convNewRate = await apiJson('/api/economy/convert', {
     method: 'POST',
     token: regularAuth.token,
     body: { diamonds: 5 }
   });
   assert.equal(convNewRate.status, 200);
-  assert.equal(convNewRate.data.wallet.coins, 50);
   assert.equal(convNewRate.data.wallet.diamonds, 5);
+  assert.equal(convNewRate.data.wallet.coins, 450);
 
   // Admin menambah paket Diamond & mengedit skin Ludo (harga wajib 10–50 Diamonds)
   const addPkg = await apiJson('/api/admin/economy/packages', {

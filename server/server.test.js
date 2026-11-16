@@ -993,6 +993,38 @@ test('topup diamonds multi-gateway (switch DOKU <-> Duitku di .env, webhook veri
     });
     const finalUserData = await finalUserRes.json();
     assert.equal(finalUserData.user.points, initialPoints + 120 + 3250 + 260);
+
+    // 7. Riwayat & pembatalan order Top-Up Coins via Payment Gateway
+    const pendingCoinRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_50', paymentMethod: 'I1' })
+    });
+    const pendingCoinBody = await pendingCoinRes.json();
+    assert.equal(pendingCoinBody.success, true);
+
+    const histRes = await fetch(`${url}/api/topup/history`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(histRes.status, 200);
+    const histBody = await histRes.json();
+    assert.equal(histBody.success, true);
+    assert.ok(histBody.orders.some(o => o.orderId === pendingCoinBody.orderId && o.status === 'pending'));
+
+    const cancelCoinRes = await fetch(`${url}/api/topup/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ orderId: pendingCoinBody.orderId })
+    });
+    assert.equal(cancelCoinRes.status, 200);
+    const cancelCoinBody = await cancelCoinRes.json();
+    assert.equal(cancelCoinBody.order.status, 'cancelled');
   } finally {
     for (const [k, v] of Object.entries(prevEnv)) {
       if (v === undefined) delete process.env[k];

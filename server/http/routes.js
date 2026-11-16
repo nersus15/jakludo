@@ -391,6 +391,9 @@ function createApiRouter() {
     }
 
     const resultCode = String(normalized.resultCode || '');
+    if (order.status === 'cancelled') {
+      return res.status(200).send('OK');
+    }
     if (resultCode === '00') {
       const paidAmount = Number(normalized.amount);
       if (!Number.isFinite(paidAmount) || paidAmount <= 0 || paidAmount !== Number(order.grossAmount)) {
@@ -404,6 +407,28 @@ function createApiRouter() {
 
     // Gateway callback standar mengharapkan balasan HTTP 200 dengan text "OK"
     res.status(200).send('OK');
+  }));
+
+  // Riwayat & pembatalan order top-up Coins milik pemain
+  api.get('/topup/history', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const limit = Number(req.query?.limit || 30);
+    res.json({
+      success: true,
+      orders: db.listUserTopupOrders(user.id, limit)
+    });
+  }));
+
+  api.post('/topup/cancel', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const orderId = String(req.body?.orderId || '').trim();
+    const result = await db.cancelTopupOrder(orderId, user.id);
+    if (result.error) {
+      return res.status(result.status || 400).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, order: result.order });
   }));
 
   // Verifikasi status order oleh client (polling berkala selama pembayaran aktif)
@@ -424,6 +449,9 @@ function createApiRouter() {
     if (order.status === 'success') {
       const freshUser = db.sanitizeUser(db.getUserById(user.id));
       return res.json({ success: true, status: 'success', user: withKing(freshUser), diamonds: order.diamonds, coins: order.diamonds });
+    }
+    if (order.status !== 'pending') {
+      return res.json({ success: true, status: order.status, message: `Pesanan top-up berstatus ${order.status}.` });
     }
 
     // Coba polling status ke Payment Gateway Status API secara realtime

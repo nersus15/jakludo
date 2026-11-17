@@ -1263,6 +1263,101 @@ function getReferralInfo(userId) {
   };
 }
 
+async function claimReferral({ userId, referralCode }) {
+  if (!userId) return { error: 'Silakan login terlebih dahulu.' };
+  if (!referralCode || typeof referralCode !== 'string') {
+    return { error: 'Kode referral wajib diisi.' };
+  }
+  const cleanCode = referralCode.trim();
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return { error: 'Kode referral harus berupa 6 digit angka.' };
+  }
+
+  const user = findUserById(userId);
+  if (!user) return { error: 'User tidak ditemukan.' };
+
+  // Pastikan user belum pernah klaim kode referral
+  if (user.referredBy) {
+    return { error: 'Anda sudah pernah menggunakan kode referral.' };
+  }
+
+  for (const ref of state.referrals.values()) {
+    if (ref.referredUserId === user.id) {
+      return { error: 'Anda sudah pernah menggunakan kode referral.' };
+    }
+  }
+
+  const referrer = findUserByReferralCode(cleanCode);
+  if (!referrer) {
+    return { error: 'Kode referral tidak valid atau tidak ditemukan.' };
+  }
+  if (referrer.id === user.id || referrer.username.toLowerCase() === user.username.toLowerCase()) {
+    return { error: 'Tidak dapat menggunakan kode referral milik sendiri.' };
+  }
+
+  const createdAt = new Date().toISOString();
+  const refId = 'ref_' + crypto.randomUUID();
+
+  if (pool && !closed) {
+    try {
+      await execPgTransaction(async client => {
+        await client.query(
+          `INSERT INTO referrals (id, referrer_id, referred_user_id, referral_code, reward_points, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (referred_user_id) DO NOTHING`,
+          [refId, referrer.id, user.id, cleanCode, REFERRAL_REWARD_COINS, createdAt]
+        );
+        await client.query(
+          'UPDATE users SET referred_by = $1 WHERE id = $2 AND referred_by IS NULL',
+          [referrer.id, user.id]
+        );
+        await client.query(
+          'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+          [REFERRAL_REWARD_COINS, referrer.id]
+        );
+      });
+    } catch (err) {
+      if (String(err.code) === '23505' || String(err.message).includes('unique')) {
+        return { error: 'Anda sudah pernah menggunakan kode referral.' };
+      }
+      throw err;
+    }
+  }
+
+  // Update in-memory state
+  const row = state.usersById.get(user.id);
+  if (row) {
+    row.referredBy = referrer.id;
+  }
+
+  const refRecord = {
+    id: refId,
+    referrerId: referrer.id,
+    referredUserId: user.id,
+    referralCode: cleanCode,
+    rewardPoints: REFERRAL_REWARD_COINS,
+    createdAt
+  };
+  recordReferralInState(refRecord);
+
+  const referrerEntry = state.leaderboard.get(referrer.id);
+  if (referrerEntry) {
+    referrerEntry.points += REFERRAL_REWARD_COINS;
+  }
+
+  persistLocalFallback();
+
+  return {
+    success: true,
+    message: `Berhasil! Kode referral dari ${referrer.name} diterapkan. Hadiah +50 Coins telah dikirimkan ke ${referrer.name}!`,
+    user: sanitizeUser(findUserById(user.id)),
+    referrer: {
+      username: referrer.username,
+      name: referrer.name
+    }
+  };
+}
+
 function updateUserAvatar(userId, avatarUrl) {
   const row = state.usersById.get(userId);
   if (!row) return null;
@@ -2167,6 +2262,7 @@ module.exports = {
   REFERRAL_REWARD_COINS,
   findUserByReferralCode,
   getReferralInfo,
+  claimReferral,
   deleteRoom,
   loadRooms,
   close

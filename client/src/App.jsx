@@ -16,6 +16,8 @@ import ChessMasterScreen from './screens/ChessMasterScreen';
 import SnakesLaddersScreen from './screens/SnakesLaddersScreen';
 import AudioSettingsModal from './AudioSettingsModal';
 import PlayerProfileModal from './social/PlayerProfileModal';
+import ReferralPromptModal from './components/ReferralPromptModal';
+import { storage } from './storage';
 import { useAuth } from './hooks/useAuth';
 import { useGameRoom } from './hooks/useGameRoom';
 import { useSocial } from './hooks/useSocial';
@@ -56,6 +58,7 @@ export default function App() {
   const [profileUserId, setProfileUserId] = useState('');
   const [initialChatFriendId, setInitialChatFriendId] = useState('');
   const [cropRequest, setCropRequest] = useState(null);
+  const [showReferralPrompt, setShowReferralPrompt] = useState(false);
   const [audio, setAudio] = useState(sound.getState());
   const [sheet, setSheet] = useState(null); // bottom sheet di layar permainan: 'chat' | 'scores'
   const [leaveRequest, setLeaveRequest] = useState(0); // Back saat bermain Ludo membuka konfirmasi keluar
@@ -185,6 +188,44 @@ export default function App() {
     const activeCode = game.room?.code || quiz.room?.code || chess.room?.code || snakes.room?.code || null;
     applySeo({ gameMode: activeMode, modal, roomCode: activeCode });
   }, [gameMode, game.screen, game.room?.code, quiz.room?.code, chess.room?.code, snakes.room?.code, modal]);
+
+  // Tangkap ?ref=... dari link referral
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const refParam = params.get('ref');
+        if (refParam && /^\d{6}$/.test(refParam.trim())) {
+          storage.set('pending_referral', refParam.trim());
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Munculkan popup referral saat user pertama kali login dan masuk ke platform
+  useEffect(() => {
+    if (auth.currentUser && !auth.checking && !auth.currentUser.referredBy) {
+      const seenKey = `ref_prompt_seen_${auth.currentUser.id}`;
+      if (!storage.get(seenKey)) {
+        setShowReferralPrompt(true);
+      }
+    }
+  }, [auth.currentUser, auth.checking]);
+
+  const handleCloseReferralPrompt = useCallback(() => {
+    if (auth.currentUser?.id) {
+      storage.set(`ref_prompt_seen_${auth.currentUser.id}`, '1');
+    }
+    setShowReferralPrompt(false);
+  }, [auth.currentUser?.id]);
+
+  const handleReferralClaimSuccess = useCallback(updatedUser => {
+    if (updatedUser) {
+      auth.setCurrentUser(updatedUser);
+      storage.set(`ref_prompt_seen_${updatedUser.id}`, '1');
+    }
+    storage.remove('pending_referral');
+  }, [auth]);
 
   useEffect(() => {
     const st = window.history.state?.playgo ? window.history.state : {};
@@ -577,6 +618,9 @@ export default function App() {
             onLoginSuccess={(user, token) => {
               auth.loginSuccess(user, token);
               close();
+              if (!user?.referredBy && !storage.get(`ref_prompt_seen_${user?.id}`)) {
+                setShowReferralPrompt(true);
+              }
             }}
           />
         )}
@@ -644,6 +688,12 @@ export default function App() {
           setCropRequest(null);
           req?.resolve(croppedFile);
         }}
+      />
+      <ReferralPromptModal
+        isOpen={showReferralPrompt && !!auth.currentUser && !auth.currentUser.referredBy}
+        onClose={handleCloseReferralPrompt}
+        authToken={auth.authToken}
+        onSuccess={handleReferralClaimSuccess}
       />
     </div>
   );

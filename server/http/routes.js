@@ -185,6 +185,23 @@ function createApiRouter() {
     res.json({ success: true, ...info });
   });
 
+  // Klaim/hubungkan kode referral saat user pertama kali login dan masuk ke platform
+  api.post('/referral/claim', asyncRoute(async (req, res) => {
+    const user = requireUser(req, res, 'Silakan login terlebih dahulu untuk mengklaim kode referral.');
+    if (!user) return;
+    const { referralCode } = req.body || {};
+    const result = await db.claimReferral({ userId: user.id, referralCode });
+    if (result.error) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    return res.json({
+      success: true,
+      message: result.message,
+      user: withKing(result.user),
+      referrer: result.referrer
+    });
+  }));
+
   const handleUpdateProfile = asyncRoute(async (req, res) => {
     const user = requireUser(req, res);
     if (!user) return;

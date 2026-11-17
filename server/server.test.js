@@ -1282,4 +1282,77 @@ test('Sistem Kode Referral: pendaftar baru memakai kode referral dan pemberi kod
   assert.equal(infoData.history.length, 1);
   assert.equal(infoData.history[0].username, guestUname);
   assert.equal(infoData.history[0].rewardPoints, 50);
+
+  // 7. Test alur modal first-login: user mendaftar biasa, lalu klaim via POST /api/referral/claim
+  const claimerUname = 'ref_claimer_' + ts;
+  const claimerReg = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: claimerUname, password: 'Password123!', name: 'Claimer Player' })
+  });
+  const claimerData = await claimerReg.json();
+  assert.equal(claimerData.success, true);
+  assert.equal(claimerData.user.referredBy, null, 'Pendaftar biasa awalnya belum memiliki referredBy');
+
+  // Coba klaim dengan kode sendiri -> harus ditolak
+  const selfClaimRes = await fetch(`${url}/api/referral/claim`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${claimerData.token}`
+    },
+    body: JSON.stringify({ referralCode: claimerData.user.referralCode })
+  });
+  const selfClaimData = await selfClaimRes.json();
+  assert.equal(selfClaimData.success, false);
+  assert.match(selfClaimData.error, /sendiri/i);
+
+  // Coba klaim dengan kode tidak valid
+  const invalidClaimRes = await fetch(`${url}/api/referral/claim`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${claimerData.token}`
+    },
+    body: JSON.stringify({ referralCode: '111111' })
+  });
+  const invalidClaimData = await invalidClaimRes.json();
+  assert.equal(invalidClaimData.success, false);
+  assert.match(invalidClaimData.error, /tidak valid|tidak ditemukan/i);
+
+  // Klaim kode referral milik host
+  const validClaimRes = await fetch(`${url}/api/referral/claim`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${claimerData.token}`
+    },
+    body: JSON.stringify({ referralCode: hostRefCode })
+  });
+  const validClaimData = await validClaimRes.json();
+  assert.equal(validClaimData.success, true);
+  assert.equal(validClaimData.user.referredBy, hostData.user.id);
+  assert.equal(validClaimData.referrer.username, hostUname);
+
+  // Coba klaim lagi -> harus ditolak karena sudah pernah klaim
+  const repeatClaimRes = await fetch(`${url}/api/referral/claim`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${claimerData.token}`
+    },
+    body: JSON.stringify({ referralCode: hostRefCode })
+  });
+  const repeatClaimData = await repeatClaimRes.json();
+  assert.equal(repeatClaimData.success, false);
+  assert.match(repeatClaimData.error, /pernah/i);
+
+  // Verifikasi host mendapatkan reward tambahan (+50 coins lagi, total +100 coins)
+  const hostMeRes = await fetch(`${url}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${hostData.token}` }
+  });
+  const hostMeData = await hostMeRes.json();
+  assert.equal(hostMeData.user.points, initialHostPoints + 100);
+  assert.equal(hostMeData.user.referralCount, 2);
+  assert.equal(hostMeData.user.referralBonusCoins, 100);
 });

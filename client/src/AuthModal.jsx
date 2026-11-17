@@ -118,6 +118,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleConfig, setGoogleConfig] = useState({ enabled: false, clientId: '' });
@@ -125,7 +126,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
   const [googleHelpOpen, setGoogleHelpOpen] = useState(false);
   const [gisReady, setGisReady] = useState(false);
   const googleBtnRef = useRef(null);
-  const ids = { user: useId(), pass: useId(), confirm: useId(), rules: useId(), hint: useId() };
+  const ids = { user: useId(), pass: useId(), confirm: useId(), rules: useId(), hint: useId(), referral: useId() };
 
   // Ambil konfigurasi Google Client ID & reCAPTCHA v3 dari server saat modal terbuka
   useEffect(() => {
@@ -231,8 +232,18 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       setError('');
       setConfirmPassword('');
       setGoogleHelpOpen(false);
+      try {
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          const refParam = params.get('ref');
+          if (refParam) {
+            setReferralCode(refParam.trim().toUpperCase());
+            setTab('register');
+          }
+        }
+      } catch {}
     }
-  }, [isOpen, tab]);
+  }, [isOpen]);
 
   const rules = useMemo(() => PASSWORD_RULES.map(r => ({ ...r, ok: r.test(password) })), [password]);
   const passwordOk = rules.every(r => r.ok);
@@ -294,7 +305,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       const recaptchaToken = await executeRecaptcha(recaptchaConfig.siteKey, action);
 
       const payload = isRegister
-        ? { username: name, password, name, recaptchaToken }
+        ? { username: name, password, name, recaptchaToken, referralCode: referralCode.trim() || undefined }
         : { username: name, password, recaptchaToken };
 
       const data = await postJson(isRegister ? '/api/auth/register' : '/api/auth/login', payload);
@@ -414,6 +425,25 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                 {matches ? 'Password sudah sama.' : 'Password belum sama.'}
               </p>
             )}
+
+            <div className="field">
+              <label htmlFor={ids.referral}>
+                Kode Referral <span className="muted" style={{ fontWeight: 'normal', fontSize: 'var(--fs-xs)' }}>(Opsional)</span>
+              </label>
+              <input
+                id={ids.referral}
+                className="input"
+                value={referralCode}
+                onChange={e => setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                maxLength={20}
+                placeholder="Contoh: PLAYGO123"
+                autoCapitalize="characters"
+                disabled={loading}
+              />
+              <p className="field__hint">
+                Punya kode referral dari teman? Masukkan di sini (temanmu akan mendapatkan +50 Coins!).
+              </p>
+            </div>
           </>
         )}
 

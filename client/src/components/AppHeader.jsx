@@ -149,6 +149,45 @@ function AccountMenu({
                 {avatarFeedback.text}
               </p>
             )}
+
+            {user.referralCode && (
+              <div className="account__referral-box card card--flat" style={{ marginTop: 'var(--space-2)', padding: 'var(--space-2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 'bold' }}>🎁 Kode Referral:</span>
+                  <code style={{ fontSize: 'var(--fs-xs)', fontWeight: 'bold', color: 'var(--color-primary)' }}>{user.referralCode}</code>
+                </div>
+                <p className="muted" style={{ fontSize: '11px', margin: '0 0 var(--space-2) 0', lineHeight: 1.3 }}>
+                  Ajak teman baru = kamu dapat <strong>+50 Coins</strong>!
+                </p>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--xs"
+                    style={{ flex: 1 }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      navigator.clipboard?.writeText(user.referralCode);
+                      setAvatarFeedback({ type: 'success', text: `Kode ${user.referralCode} disalin!` });
+                    }}
+                  >
+                    Salin Kode
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--xs"
+                    style={{ flex: 1 }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      const refUrl = `${window.location.origin}/?ref=${encodeURIComponent(user.referralCode)}`;
+                      navigator.clipboard?.writeText(refUrl);
+                      setAvatarFeedback({ type: 'success', text: 'Link undangan disalin!' });
+                    }}
+                  >
+                    Salin Link
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           {onViewProfile && (
             <button

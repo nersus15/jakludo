@@ -24,6 +24,7 @@ const LOCAL_STATE_FILE = path.join(DATA_DIR, 'jakludo-state.json');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
 const STARTER_POINTS = 200;
+const REFERRAL_REWARD_COINS = 50; // Hadiah 50 coins saat kode referral digunakan oleh pendaftar baru
 // Poin per peringkat, menurut jumlah pemain di room (bot ikut dihitung). Peringkat terakhir selalu 5,
 // supaya pemain yang kalah di permainan 2 orang tidak dapat poin hampir sebesar pemenangnya.
 // Bonus harian: sekali per hari (WIB) untuk pemain yang menyelesaikan minimal 1 pertandingan tanpa OUT
@@ -211,17 +212,20 @@ const DEFAULT_SHOP_ITEMS = [
 ];
 
 const state = {
-  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, googleId, createdAt }
+  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, googleId, createdAt, referralCode, referredBy }
   usersByUsername: new Map(), // lower(username) -> id
   usersByGoogleId: new Map(), // googleId -> id
   usersByEmail: new Map(),    // lower(email) -> id
+  usersByReferralCode: new Map(), // upper(referralCode) -> id
   userItems: new Map(),       // userId -> { [itemId]: quantity }
   sessions: new Map(),        // tokenHash -> { tokenHash, userId, createdAt, expiresAt }
   leaderboard: new Map(),     // userId -> { userId, username, name, avatar, wins, matchesPlayed, points, authType }
   rooms: new Map(),           // code -> { code, state, updatedAt }
   topupOrders: new Map(),     // orderId -> { orderId, userId, packageId, diamonds, grossAmount, status, snapToken, paymentType, createdAt, updatedAt }
   shopItems: new Map(),       // id -> shop item record dari database
-  diamondPackages: new Map()  // id -> diamond package record dari database
+  diamondPackages: new Map(), // id -> diamond package record dari database
+  referrals: new Map(),       // id -> referral record
+  referralsByReferrer: new Map() // referrerId -> Array of referral records
 };
 
 let pool = null;
@@ -274,7 +278,8 @@ function persistLocalFallback() {
       userItems: Object.fromEntries(state.userItems.entries()),
       sessions: Array.from(state.sessions.values()),
       leaderboard: Array.from(state.leaderboard.values()),
-      rooms: Array.from(state.rooms.values())
+      rooms: Array.from(state.rooms.values()),
+      referrals: Array.from(state.referrals.values())
     };
     fs.writeFileSync(LOCAL_STATE_FILE, JSON.stringify(dump));
   } catch (err) {
@@ -304,7 +309,55 @@ function isUserAdmin(userOrRow) {
   return resolveUserRole(userOrRow.role, userOrRow.username) === 'admin';
 }
 
+function generateUniqueReferralCode(username) {
+  const clean = String(username || 'PLAY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  const base = clean.length >= 3 ? clean : ('PLAY' + clean).slice(0, 8);
+  if (!state.usersByReferralCode.has(base)) {
+    return base;
+  }
+  for (let i = 0; i < 200; i++) {
+    const suffix = crypto.randomInt(100, 999).toString();
+    const candidate = (base.slice(0, 8 - suffix.length) + suffix).toUpperCase();
+    if (!state.usersByReferralCode.has(candidate)) {
+      return candidate;
+    }
+  }
+  return ('REF' + crypto.randomBytes(3).toString('hex')).toUpperCase();
+}
+
+function findUserByReferralCode(code) {
+  if (!code || typeof code !== 'string') return null;
+  const clean = code.trim().toUpperCase();
+  const id = state.usersByReferralCode.get(clean);
+  return id ? findUserById(id) : null;
+}
+
+function recordReferralInState(ref) {
+  if (!ref || !ref.id) return;
+  const normalized = {
+    id: ref.id,
+    referrerId: ref.referrerId || ref.referrer_id,
+    referredUserId: ref.referredUserId || ref.referred_user_id,
+    referralCode: (ref.referralCode || ref.referral_code || '').toUpperCase(),
+    rewardPoints: Number(ref.rewardPoints || ref.reward_points || REFERRAL_REWARD_COINS),
+    createdAt: ref.createdAt || ref.created_at || new Date().toISOString()
+  };
+  state.referrals.set(normalized.id, normalized);
+  if (!state.referralsByReferrer.has(normalized.referrerId)) {
+    state.referralsByReferrer.set(normalized.referrerId, []);
+  }
+  const arr = state.referralsByReferrer.get(normalized.referrerId);
+  if (!arr.some(r => r.id === normalized.id)) {
+    arr.push(normalized);
+  }
+}
+
 function setUserInState(u) {
+  let referralCode = u.referralCode || u.referral_code || null;
+  if (!referralCode && u.username) {
+    referralCode = generateUniqueReferralCode(u.username);
+  }
+  const referredBy = u.referredBy || u.referred_by || null;
   const row = {
     id: u.id,
     username: u.username,
@@ -315,6 +368,8 @@ function setUserInState(u) {
     email: u.email || null,
     googleId: u.googleId || u.google_id || null,
     role: resolveUserRole(u.role, u.username),
+    referralCode,
+    referredBy,
     createdAt: u.createdAt || u.created_at || new Date().toISOString()
   };
   state.usersById.set(row.id, row);
@@ -324,6 +379,9 @@ function setUserInState(u) {
   }
   if (row.email) {
     state.usersByEmail.set(String(row.email).toLowerCase(), row.id);
+  }
+  if (referralCode) {
+    state.usersByReferralCode.set(referralCode.toUpperCase(), row.id);
   }
 }
 
@@ -356,6 +414,7 @@ function bootstrapLocalState() {
       }
       for (const e of dump.leaderboard || []) state.leaderboard.set(e.userId, e);
       for (const r of dump.rooms || []) state.rooms.set(r.code, r);
+      for (const ref of dump.referrals || []) recordReferralInState(ref);
     } catch {
       // Abaikan jika gagal dibaca
     }
@@ -463,22 +522,27 @@ function bootstrapLocalState() {
 async function hydrateFromPostgres(activePool) {
   state.usersById.clear();
   state.usersByUsername.clear();
+  state.usersByReferralCode.clear();
+  state.referrals.clear();
+  state.referralsByReferrer.clear();
   state.userItems.clear();
   state.sessions.clear();
   state.leaderboard.clear();
   state.rooms.clear();
   state.topupOrders.clear();
 
-  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes, topupRes] = await Promise.all([
+  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes, topupRes, refRes] = await Promise.all([
     activePool.query('SELECT * FROM users'),
     activePool.query('SELECT user_id, item_id, quantity FROM user_items WHERE quantity > 0'),
     activePool.query('SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE expires_at > $1', [Date.now()]),
     activePool.query('SELECT * FROM leaderboard'),
     activePool.query('SELECT code, state, updated_at FROM rooms'),
-    activePool.query('SELECT * FROM topup_orders ORDER BY created_at DESC LIMIT 500').catch(() => ({ rows: [] }))
+    activePool.query('SELECT * FROM topup_orders ORDER BY created_at DESC LIMIT 500').catch(() => ({ rows: [] })),
+    activePool.query('SELECT * FROM referrals ORDER BY created_at ASC').catch(() => ({ rows: [] }))
   ]);
 
   for (const r of usersRes.rows) setUserInState(r);
+  for (const r of refRes.rows || []) recordReferralInState(r);
   for (const r of itemsRes.rows) setItemInState(r.user_id, r.item_id, Number(r.quantity));
   for (const r of sessionsRes.rows) {
     state.sessions.set(r.token_hash, {
@@ -651,6 +715,8 @@ function buildUserObject(row) {
     email: row.email || undefined,
     googleId: row.googleId || undefined,
     role: resolveUserRole(row.role, row.username),
+    referralCode: row.referralCode,
+    referredBy: row.referredBy,
     createdAt: row.createdAt,
     inventory: getUserItems(row.id)
   };
@@ -777,7 +843,7 @@ async function verifyPassword(password, storedHash) {
 // MANAJEMEN USER
 // ==========================================
 
-async function registerUser({ username, password, name }) {
+async function registerUser({ username, password, name, referralCode }) {
   const userValid = validateUsername(username);
   if (!userValid.valid) return { error: userValid.message };
 
@@ -786,6 +852,21 @@ async function registerUser({ username, password, name }) {
 
   if (findUserByUsername(userValid.cleanUsername)) {
     return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+  }
+
+  let referrer = null;
+  let cleanRefCode = null;
+  if (referralCode && typeof referralCode === 'string') {
+    cleanRefCode = referralCode.trim().toUpperCase();
+    if (cleanRefCode) {
+      referrer = findUserByReferralCode(cleanRefCode);
+      if (!referrer) {
+        return { error: 'Kode referral tidak valid atau tidak ditemukan.' };
+      }
+      if (referrer.username.toLowerCase() === userValid.cleanUsername.toLowerCase()) {
+        return { error: 'Tidak dapat menggunakan kode referral milik sendiri.' };
+      }
+    }
   }
 
   const passwordHash = await hashPassword(password);
@@ -797,14 +878,16 @@ async function registerUser({ username, password, name }) {
   const displayName = (typeof name === 'string' ? name.trim().slice(0, 18) : '') || userValid.cleanUsername;
   const id = 'user_' + crypto.randomUUID();
   const createdAt = new Date().toISOString();
+  const myReferralCode = generateUniqueReferralCode(userValid.cleanUsername);
+  const referredByUserId = referrer ? referrer.id : null;
 
   if (pool && !closed) {
     try {
       await execPgTransaction(async client => {
         await client.query(
-          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at)
-           VALUES ($1, $2, $3, $4, 'password', '🎯', $5)`,
-          [id, userValid.cleanUsername, displayName, passwordHash, createdAt]
+          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at, referral_code, referred_by)
+           VALUES ($1, $2, $3, $4, 'password', '🎯', $5, $6, $7)`,
+          [id, userValid.cleanUsername, displayName, passwordHash, createdAt, myReferralCode, referredByUserId]
         );
         await client.query(
           `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
@@ -812,6 +895,19 @@ async function registerUser({ username, password, name }) {
            ON CONFLICT (user_id) DO NOTHING`,
           [id, userValid.cleanUsername, displayName, STARTER_POINTS]
         );
+        if (referrer) {
+          const refId = 'ref_' + crypto.randomUUID();
+          await client.query(
+            `INSERT INTO referrals (id, referrer_id, referred_user_id, referral_code, reward_points, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (referred_user_id) DO NOTHING`,
+            [refId, referrer.id, id, cleanRefCode, REFERRAL_REWARD_COINS, createdAt]
+          );
+          await client.query(
+            'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+            [REFERRAL_REWARD_COINS, referrer.id]
+          );
+        }
       });
     } catch (err) {
       if (String(err.code) === '23505' || String(err.message).includes('unique')) {
@@ -828,7 +924,9 @@ async function registerUser({ username, password, name }) {
     passwordHash,
     authType: 'password',
     avatar: '🎯',
-    createdAt
+    createdAt,
+    referralCode: myReferralCode,
+    referredBy: referredByUserId
   });
   state.leaderboard.set(id, {
     userId: id,
@@ -840,6 +938,23 @@ async function registerUser({ username, password, name }) {
     points: STARTER_POINTS,
     authType: 'password'
   });
+
+  if (referrer) {
+    const refRecord = {
+      id: 'ref_' + crypto.randomUUID(),
+      referrerId: referrer.id,
+      referredUserId: id,
+      referralCode: cleanRefCode,
+      rewardPoints: REFERRAL_REWARD_COINS,
+      createdAt
+    };
+    recordReferralInState(refRecord);
+    const referrerEntry = state.leaderboard.get(referrer.id);
+    if (referrerEntry) {
+      referrerEntry.points += REFERRAL_REWARD_COINS;
+    }
+  }
+
   persistLocalFallback();
 
   return { user: sanitizeUser(findUserById(id)), token: createSession(id) };
@@ -860,7 +975,7 @@ async function loginUser({ username, password }) {
   return { user: sanitizeUser(user), token: createSession(user.id) };
 }
 
-async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
+async function loginOrRegisterGoogleUser({ googleId, email, name, avatar, referralCode }) {
   if (!googleId && !email) {
     return { error: 'Identitas akun Google tidak lengkap.' };
   }
@@ -893,6 +1008,15 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
   }
 
   // 3. User baru: buat username yang unik
+  let referrer = null;
+  let cleanRefCode = null;
+  if (referralCode && typeof referralCode === 'string') {
+    cleanRefCode = referralCode.trim().toUpperCase();
+    if (cleanRefCode) {
+      referrer = findUserByReferralCode(cleanRefCode);
+    }
+  }
+
   const rawBase = (email ? email.split('@')[0] : '') || (name || 'player');
   let cleanUsername = rawBase.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 15);
   if (cleanUsername.length < 3) cleanUsername = 'player_' + crypto.randomInt(100, 999);
@@ -911,14 +1035,16 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
   const userAvatar = (typeof avatar === 'string' && avatar.trim()) ? avatar.trim() : '🎯';
   const userEmail = (typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : null;
   const userGoogleId = googleId ? String(googleId) : null;
+  const myReferralCode = generateUniqueReferralCode(finalUsername);
+  const referredByUserId = referrer ? referrer.id : null;
 
   if (pool && !closed) {
     try {
       await execPgTransaction(async client => {
         await client.query(
-          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, email, google_id, created_at)
-           VALUES ($1, $2, $3, NULL, 'google', $4, $5, $6, $7)`,
-          [id, finalUsername, displayName, userAvatar, userEmail, userGoogleId, createdAt]
+          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, email, google_id, created_at, referral_code, referred_by)
+           VALUES ($1, $2, $3, NULL, 'google', $4, $5, $6, $7, $8, $9)`,
+          [id, finalUsername, displayName, userAvatar, userEmail, userGoogleId, createdAt, myReferralCode, referredByUserId]
         );
         await client.query(
           `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
@@ -926,6 +1052,19 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
            ON CONFLICT (user_id) DO NOTHING`,
           [id, finalUsername, displayName, userAvatar, STARTER_POINTS]
         );
+        if (referrer) {
+          const refId = 'ref_' + crypto.randomUUID();
+          await client.query(
+            `INSERT INTO referrals (id, referrer_id, referred_user_id, referral_code, reward_points, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (referred_user_id) DO NOTHING`,
+            [refId, referrer.id, id, cleanRefCode, REFERRAL_REWARD_COINS, createdAt]
+          );
+          await client.query(
+            'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+            [REFERRAL_REWARD_COINS, referrer.id]
+          );
+        }
       });
     } catch (err) {
       if (String(err.code) === '23505' || String(err.message).includes('unique')) {
@@ -951,7 +1090,9 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
     avatar: userAvatar,
     email: userEmail,
     googleId: userGoogleId,
-    createdAt
+    createdAt,
+    referralCode: myReferralCode,
+    referredBy: referredByUserId
   });
 
   state.leaderboard.set(id, {
@@ -964,6 +1105,22 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
     points: STARTER_POINTS,
     authType: 'google'
   });
+
+  if (referrer) {
+    const refRecord = {
+      id: 'ref_' + crypto.randomUUID(),
+      referrerId: referrer.id,
+      referredUserId: id,
+      referralCode: cleanRefCode,
+      rewardPoints: REFERRAL_REWARD_COINS,
+      createdAt
+    };
+    recordReferralInState(refRecord);
+    const referrerEntry = state.leaderboard.get(referrer.id);
+    if (referrerEntry) {
+      referrerEntry.points += REFERRAL_REWARD_COINS;
+    }
+  }
 
   persistLocalFallback();
 
@@ -1058,6 +1215,10 @@ function sanitizeUser(u) {
     // Abaikan jika modul economy belum dimuat
   }
   const role = resolveUserRole(u.role, u.username);
+  const myRefs = state.referralsByReferrer.get(u.id) || [];
+  const referralCount = myRefs.length;
+  const referralBonusCoins = myRefs.reduce((acc, r) => acc + (Number(r.rewardPoints || r.reward_points) || REFERRAL_REWARD_COINS), 0);
+
   return {
     id: u.id,
     username: u.username,
@@ -1070,9 +1231,41 @@ function sanitizeUser(u) {
     points,
     coins: points,
     diamonds,
+    referralCode: u.referralCode,
+    referredBy: u.referredBy,
+    referralCount,
+    referralBonusCoins,
     equippedLudoSkin,
     ownedLudoSkins,
     inventory: { ...u.inventory }
+  };
+}
+
+function getReferralInfo(userId) {
+  const user = findUserById(userId);
+  if (!user) return null;
+  const rawRefs = state.referralsByReferrer.get(user.id) || [];
+  const history = rawRefs.map(r => {
+    const u = findUserById(r.referredUserId);
+    return {
+      id: r.id,
+      userId: r.referredUserId,
+      username: u ? u.username : 'Pemain',
+      name: u ? u.name : 'Pemain',
+      avatar: u ? u.avatar : '🎯',
+      rewardPoints: Number(r.rewardPoints || r.reward_points) || REFERRAL_REWARD_COINS,
+      createdAt: r.createdAt
+    };
+  }).reverse();
+
+  const totalCoinsEarned = history.reduce((sum, h) => sum + h.rewardPoints, 0);
+
+  return {
+    referralCode: user.referralCode,
+    rewardCoins: REFERRAL_REWARD_COINS,
+    totalReferrals: history.length,
+    totalCoinsEarned,
+    history
   };
 }
 
@@ -1977,6 +2170,9 @@ module.exports = {
   isUserAdmin,
   setUserRole,
   syncUserRoleInState,
+  REFERRAL_REWARD_COINS,
+  findUserByReferralCode,
+  getReferralInfo,
   deleteRoom,
   loadRooms,
   close

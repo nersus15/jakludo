@@ -1196,3 +1196,89 @@ test('Pemain yang dinyatakan OUT tetap bisa masuk room untuk menonton (chat akti
 
   clearTimeout(room.turnTimer);
 });
+
+test('Sistem Kode Referral: pendaftar baru memakai kode referral dan pemberi kode mendapat 50 coins', async () => {
+  const ts = Date.now().toString(36).slice(-5);
+  const hostUname = 'ref_host_' + ts;
+  const guestUname = 'ref_guest_' + ts;
+
+  // 1. Host mendaftar
+  const hostRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: hostUname, password: 'Password123!', name: 'Host Referral' })
+  });
+  const hostData = await hostRes.json();
+  assert.equal(hostData.success, true);
+  assert.ok(hostData.user.referralCode, 'User harus memiliki referralCode otomatis');
+  const hostRefCode = hostData.user.referralCode;
+  const initialHostPoints = hostData.user.points; // 200 (STARTER_POINTS)
+
+  // 2. Cek endpoint validasi kode referral
+  const checkValidRes = await fetch(`${url}/api/referral/check/${hostRefCode}`);
+  const checkValidData = await checkValidRes.json();
+  assert.equal(checkValidData.success, true);
+  assert.equal(checkValidData.valid, true);
+  assert.equal(checkValidData.referrer.username, hostUname);
+
+  const checkInvalidRes = await fetch(`${url}/api/referral/check/KODEPALSU99`);
+  const checkInvalidData = await checkInvalidRes.json();
+  assert.equal(checkInvalidData.valid, false);
+
+  // 3. Pendaftar baru mencoba kode referral tidak ada -> harus gagal
+  const badRegRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'ref_bad_' + ts,
+      password: 'Password123!',
+      name: 'Bad Guest',
+      referralCode: 'TIDAK_ADA_CODE'
+    })
+  });
+  const badRegData = await badRegRes.json();
+  assert.equal(badRegData.success, false);
+  assert.match(badRegData.error, /referral/i);
+
+  // 4. Pendaftar baru mendaftar dengan kode referral milik host
+  const guestRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: guestUname,
+      password: 'Password123!',
+      name: 'Guest Teman',
+      referralCode: hostRefCode.toLowerCase() // test case-insensitivity
+    })
+  });
+  const guestData = await guestRes.json();
+  assert.equal(guestData.success, true, 'Registrasi dengan kode referral harus sukses');
+  assert.equal(guestData.user.referredBy, hostData.user.id);
+
+  // 5. Verifikasi host mendapatkan reward +50 coins
+  const meRes = await fetch(`${url}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${hostData.token}` }
+  });
+  const meData = await meRes.json();
+  assert.equal(meData.success, true);
+  assert.equal(
+    meData.user.points,
+    initialHostPoints + 50,
+    `Host harus bertambah 50 coins (awal: ${initialHostPoints}, sekarang: ${meData.user.points})`
+  );
+  assert.equal(meData.user.referralCount, 1);
+  assert.equal(meData.user.referralBonusCoins, 50);
+
+  // 6. Cek endpoint GET /api/referral/info untuk host
+  const infoRes = await fetch(`${url}/api/referral/info`, {
+    headers: { Authorization: `Bearer ${hostData.token}` }
+  });
+  const infoData = await infoRes.json();
+  assert.equal(infoData.success, true);
+  assert.equal(infoData.referralCode, hostRefCode);
+  assert.equal(infoData.totalReferrals, 1);
+  assert.equal(infoData.totalCoinsEarned, 50);
+  assert.equal(infoData.history.length, 1);
+  assert.equal(infoData.history[0].username, guestUname);
+  assert.equal(infoData.history[0].rewardPoints, 50);
+});

@@ -43,7 +43,7 @@ function createApiRouter() {
     if (!registerLimiter(req.ip)) {
       return res.status(429).json({ success: false, error: 'Terlalu banyak pendaftaran dari jaringan ini. Coba lagi nanti.' });
     }
-    const { username, password, name, recaptchaToken } = req.body || {};
+    const { username, password, name, recaptchaToken, referralCode } = req.body || {};
 
     const captchaRes = await recaptcha.verifyRecaptchaToken({
       token: recaptchaToken,
@@ -54,7 +54,7 @@ function createApiRouter() {
       return res.status(400).json({ success: false, error: captchaRes.error });
     }
 
-    const result = await db.registerUser({ username, password, name });
+    const result = await db.registerUser({ username, password, name, referralCode });
     if (result.error) return res.status(400).json({ success: false, error: result.error });
     res.json({ success: true, user: withKing(result.user), token: result.token });
   }));
@@ -104,7 +104,7 @@ function createApiRouter() {
       return res.status(429).json({ success: false, error: 'Terlalu banyak percobaan login Google. Coba lagi nanti.' });
     }
     loadDotEnv(true);
-    const { credential, code, redirectUri, testUser } = req.body || {};
+    const { credential, code, redirectUri, testUser, referralCode } = req.body || {};
 
     let googleProfile;
     if (testUser && process.env.NODE_ENV === 'test') {
@@ -130,7 +130,8 @@ function createApiRouter() {
       googleId: googleProfile.googleId,
       email: googleProfile.email,
       name: googleProfile.name,
-      avatar: googleProfile.picture
+      avatar: googleProfile.picture,
+      referralCode
     });
 
     if (result.error) {
@@ -154,6 +155,34 @@ function createApiRouter() {
     const user = requireUser(req, res, 'Unauthorized / Sesi telah kedaluwarsa.');
     if (!user) return;
     res.json({ success: true, user: withKing(db.sanitizeUser(user)) });
+  });
+
+  // Cek validitas kode referral
+  api.get('/referral/check/:code', (req, res) => {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    if (!code) return res.status(400).json({ success: false, valid: false, error: 'Kode referral kosong.' });
+    const referrer = db.findUserByReferralCode(code);
+    if (!referrer) {
+      return res.json({ success: false, valid: false, error: 'Kode referral tidak ditemukan.' });
+    }
+    return res.json({
+      success: true,
+      valid: true,
+      referrer: {
+        username: referrer.username,
+        name: referrer.name,
+        avatar: referrer.avatar
+      }
+    });
+  });
+
+  // Informasi dan riwayat referral pengguna yang sedang login
+  api.get('/referral/info', (req, res) => {
+    const user = requireUser(req, res, 'Silakan login terlebih dahulu.');
+    if (!user) return;
+    const info = db.getReferralInfo(user.id);
+    if (!info) return res.status(404).json({ success: false, error: 'Data referral tidak ditemukan.' });
+    res.json({ success: true, ...info });
   });
 
   const handleUpdateProfile = asyncRoute(async (req, res) => {

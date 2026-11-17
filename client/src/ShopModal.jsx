@@ -2083,6 +2083,61 @@ export default function ShopModal({
                     </div>
                   </div>
 
+                  {/* Kartu Program Kode Referral */}
+                  {currentUser?.referralCode && (
+                    <div className="card mp-section-card" style={{ marginBottom: 'var(--space-4)' }}>
+                      <div className="section-head">
+                        <div>
+                          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Icon name="crown" size={18} />
+                            <span>Program Kode Referral</span>
+                            <span className="badge badge--success">+50 Coins / Pendaftar</span>
+                          </h3>
+                          <p className="muted" style={{ margin: '4px 0 0', fontSize: 'var(--fs-xs)' }}>
+                            Ajak teman bermain di PlayGo! Setiap pemain baru yang mendaftar menggunakan kodemu akan memberimu hadiah 50 Coins secara instan.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="wallet-kpi-grid" style={{ marginTop: 'var(--space-3)' }}>
+                        <div className="wallet-kpi card">
+                          <span className="muted">Kode Referral Kamu</span>
+                          <strong style={{ letterSpacing: '1px', color: 'var(--color-primary)' }}>{currentUser.referralCode}</strong>
+                        </div>
+                        <div className="wallet-kpi card">
+                          <span className="muted">Teman Berhasil Diajak</span>
+                          <strong>{currentUser.referralCount || 0} Orang</strong>
+                        </div>
+                        <div className="wallet-kpi card">
+                          <span className="muted">Total Hadiah Referral</span>
+                          <strong>+{(currentUser.referralBonusCoins || 0).toLocaleString('id-ID')} Coins</strong>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(currentUser.referralCode);
+                            setFeedback({ type: 'success', message: `Kode referral "${currentUser.referralCode}" berhasil disalin!` });
+                          }}
+                        >
+                          Salin Kode ({currentUser.referralCode})
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--primary btn--sm"
+                          onClick={() => {
+                            const link = `${window.location.origin}/?ref=${encodeURIComponent(currentUser.referralCode)}`;
+                            navigator.clipboard?.writeText(link);
+                            setFeedback({ type: 'success', message: 'Link pendaftaran referral berhasil disalin ke clipboard!' });
+                          }}
+                        >
+                          Salin Link Undangan 🔗
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="card mp-section-card">
                     <div className="section-head">
                       <h3>Riwayat Transaksi Diamonds</h3>

@@ -1211,6 +1211,7 @@ test('Sistem Kode Referral: pendaftar baru memakai kode referral dan pemberi kod
   const hostData = await hostRes.json();
   assert.equal(hostData.success, true);
   assert.ok(hostData.user.referralCode, 'User harus memiliki referralCode otomatis');
+  assert.match(hostData.user.referralCode, /^\d{6}$/, 'Kode referral harus berupa angka acak 6 digit');
   const hostRefCode = hostData.user.referralCode;
   const initialHostPoints = hostData.user.points; // 200 (STARTER_POINTS)
 

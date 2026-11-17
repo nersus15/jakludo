@@ -309,20 +309,14 @@ function isUserAdmin(userOrRow) {
   return resolveUserRole(userOrRow.role, userOrRow.username) === 'admin';
 }
 
-function generateUniqueReferralCode(username) {
-  const clean = String(username || 'PLAY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-  const base = clean.length >= 3 ? clean : ('PLAY' + clean).slice(0, 8);
-  if (!state.usersByReferralCode.has(base)) {
-    return base;
-  }
-  for (let i = 0; i < 200; i++) {
-    const suffix = crypto.randomInt(100, 999).toString();
-    const candidate = (base.slice(0, 8 - suffix.length) + suffix).toUpperCase();
-    if (!state.usersByReferralCode.has(candidate)) {
-      return candidate;
+function generateUniqueReferralCode() {
+  for (let i = 0; i < 500; i++) {
+    const code = String(crypto.randomInt(100000, 1000000));
+    if (!state.usersByReferralCode.has(code)) {
+      return code;
     }
   }
-  return ('REF' + crypto.randomBytes(3).toString('hex')).toUpperCase();
+  return String(Date.now()).slice(-6);
 }
 
 function findUserByReferralCode(code) {
@@ -355,7 +349,7 @@ function recordReferralInState(ref) {
 function setUserInState(u) {
   let referralCode = u.referralCode || u.referral_code || null;
   if (!referralCode && u.username) {
-    referralCode = generateUniqueReferralCode(u.username);
+    referralCode = generateUniqueReferralCode();
   }
   const referredBy = u.referredBy || u.referred_by || null;
   const row = {
@@ -878,7 +872,7 @@ async function registerUser({ username, password, name, referralCode }) {
   const displayName = (typeof name === 'string' ? name.trim().slice(0, 18) : '') || userValid.cleanUsername;
   const id = 'user_' + crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  const myReferralCode = generateUniqueReferralCode(userValid.cleanUsername);
+  const myReferralCode = generateUniqueReferralCode();
   const referredByUserId = referrer ? referrer.id : null;
 
   if (pool && !closed) {
@@ -1035,7 +1029,7 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar, referr
   const userAvatar = (typeof avatar === 'string' && avatar.trim()) ? avatar.trim() : '🎯';
   const userEmail = (typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : null;
   const userGoogleId = googleId ? String(googleId) : null;
-  const myReferralCode = generateUniqueReferralCode(finalUsername);
+  const myReferralCode = generateUniqueReferralCode();
   const referredByUserId = referrer ? referrer.id : null;
 
   if (pool && !closed) {

@@ -428,20 +428,22 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
 
             <div className="field">
               <label htmlFor={ids.referral}>
-                Kode Referral <span className="muted" style={{ fontWeight: 'normal', fontSize: 'var(--fs-xs)' }}>(Opsional)</span>
+                Kode Referral <span className="muted" style={{ fontWeight: 'normal', fontSize: 'var(--fs-xs)' }}>(6 Digit Angka, Opsional)</span>
               </label>
               <input
                 id={ids.referral}
                 className="input"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={referralCode}
-                onChange={e => setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
-                maxLength={20}
-                placeholder="Contoh: PLAYGO123"
-                autoCapitalize="characters"
+                onChange={e => setReferralCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                maxLength={6}
+                placeholder="Contoh: 123456"
                 disabled={loading}
               />
               <p className="field__hint">
-                Punya kode referral dari teman? Masukkan di sini (temanmu akan mendapatkan +50 Coins!).
+                Punya 6 digit kode referral dari teman? Masukkan di sini (temanmu akan mendapatkan +50 Coins!).
               </p>
             </div>
           </>

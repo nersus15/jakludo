@@ -239,6 +239,8 @@ export default function ChessMasterScreen({
     chats = [],
     unreadChats = 0,
     chatOpen = false,
+    hint = null,
+    hintLoading = false,
     actions
   } = chess;
 
@@ -570,6 +572,7 @@ export default function ChessMasterScreen({
                 myColor={myColor}
                 interactive={room.phase === 'playing' && isLiveBoard}
                 lastMove={displayedLastMove}
+                hintMove={room.phase === 'playing' && isLiveBoard ? hint : null}
                 onMove={actions.submitMove}
               />
             </div>
@@ -813,6 +816,26 @@ export default function ChessMasterScreen({
 
               {room.phase === 'playing' && (
                 <>
+                  {/* Item Hint Langkah: stok dari inventaris akun; stok habis -> buka toko */}
+                  {(() => {
+                    const hintStock = Number(currentUser?.inventory?.chessHint || 0);
+                    return (
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm cm-hint-btn"
+                        disabled={hintLoading || (hintStock > 0 && !isMyTurn)}
+                        title={hintStock > 0 ? 'Rekomendasi langkah terbaik untuk posisi saat ini' : 'Beli Hint Langkah di Toko'}
+                        onClick={hintStock > 0 ? actions.useHint : onOpenShop}
+                      >
+                        <span>💡 {hintLoading ? 'Menganalisis...' : `Hint (${hintStock})`}</span>
+                      </button>
+                    );
+                  })()}
+                  {hint && isLiveBoard && (
+                    <span className="cm-hint-label" role="status">
+                      Saran: <strong>{hint.san}</strong>
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="btn btn--ghost btn--sm"

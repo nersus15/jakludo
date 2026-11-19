@@ -459,4 +459,30 @@ test('AI Bot: automatic bot fallback when no human in queue + direct Play vs Bot
   }
 });
 
+test('Item Hint Langkah: dibeli 100 Coins, hanya saat giliran sendiri, menyarankan langkah legal', async () => {
+  const u = await registerUser('hint');
+  const c = await connect();
+  const bought = await fetch(`${url}/api/shop/buy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${u.token}` },
+    body: JSON.stringify({ itemId: 'chessHint' })
+  }).then(r => r.json());
+  assert.equal(bought.success, true, bought.error);
+  assert.equal(bought.user.inventory.chessHint, 1);
+
+  const start = await emitAck(c, 'chess:bot:play', { token: u.token, timeControl: '5+0', preferredSide: 'w', difficulty: 'easy' });
+  assert.equal(start.ok, true);
+  const room = chessEngine.chessRooms.get(start.roomCode);
+
+  const res = await emitAck(c, 'chess:hint:use', { code: start.roomCode, token: u.token });
+  assert.equal(res.ok, true, res.error);
+  const legal = new Chess(room.match.currentFen).moves({ verbose: true });
+  assert.ok(legal.some(mv => mv.from === res.hint.from && mv.to === res.hint.to), 'rekomendasi harus langkah legal');
+  assert.equal(res.remainingHints, 0);
+
+  // Stok habis: ditolak tanpa mengubah apa pun
+  const again = await emitAck(c, 'chess:hint:use', { code: start.roomCode, token: u.token });
+  assert.equal(again.ok, false);
+  await emitAck(c, 'chess:room:leave', { code: start.roomCode, token: u.token });
+});
 

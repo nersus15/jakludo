@@ -24,6 +24,9 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Rekomendasi item Hint Langkah: { from, to, san, moveVersion }. Hanya berlaku untuk posisi saat dipakai.
+  const [hint, setHint] = useState(null);
+  const [hintLoading, setHintLoading] = useState(false);
   const [matchResult, setMatchResult] = useState(null);
 
   // Jam berjalan realtime yang disinkronkan dari timestamp server
@@ -608,6 +611,33 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     [ensureAuth, socket, room, showError]
   );
 
+  const useHint = useCallback(() => {
+    const token = ensureAuth();
+    if (!token || !socket || !room || room.phase !== 'playing' || hintLoading) return;
+    sound.playClick();
+    setHintLoading(true);
+    socket.emit('chess:hint:use', { code: room.code, matchId: room.match?.id, token }, res => {
+      setHintLoading(false);
+      if (!res?.ok) {
+        showError(res?.error || 'Hint gagal dipakai.');
+        return;
+      }
+      setHint(res.hint);
+      if (res.user) onUpdateUser?.(res.user);
+      sound.playJoinNotification();
+    });
+  }, [ensureAuth, socket, room, hintLoading, showError, onUpdateUser]);
+
+  // Hint kedaluwarsa begitu posisi berubah (ada langkah baru) atau pertandingan berganti
+  const currentMoveVersion = room?.match?.moveVersion;
+  const currentMatchId = room?.match?.id;
+  useEffect(() => {
+    setHint(prev => (prev && prev.moveVersion !== currentMoveVersion ? null : prev));
+  }, [currentMoveVersion]);
+  useEffect(() => {
+    setHint(null);
+  }, [currentMatchId]);
+
   const offerDraw = useCallback(() => {
     const token = ensureAuth();
     if (!token || !socket || !room || room.phase !== 'playing') return;
@@ -777,6 +807,8 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     unreadChats,
     chatToast,
     chatOpen,
+    hint,
+    hintLoading,
     actions: {
       startMatchmaking,
       cancelMatchmaking,
@@ -786,6 +818,7 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
       updateRoomConfig,
       toggleReady,
       submitMove,
+      useHint,
       offerDraw,
       acceptDraw,
       declineDraw,

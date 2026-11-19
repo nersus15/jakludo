@@ -469,7 +469,7 @@ export default function App() {
             currentUser={auth.currentUser}
             onUpdateUser={auth.setCurrentUser}
             authToken={auth.authToken}
-            initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
+            initialGame={gameMode === 'quiz' || gameMode === 'chess' ? gameMode : 'all'}
             onOpenAuth={open('auth')}
           />
         </Suspense>

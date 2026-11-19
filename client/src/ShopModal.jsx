@@ -553,7 +553,7 @@ export default function ShopModal({
   const token = authToken || storage.get('token') || '';
   const isAdmin = Boolean(currentUser?.isAdmin || currentUser?.role === 'admin');
 
-  const [activeTab, setActiveTab] = useState(initialGame === 'quiz' ? 'items' : 'skins');
+  const [activeTab, setActiveTab] = useState(initialGame === 'quiz' || initialGame === 'chess' ? 'items' : 'skins');
   const [feedback, setFeedback] = useState(null);
 
   // Dual currency economy state
@@ -592,7 +592,9 @@ export default function ShopModal({
   const [skinActionId, setSkinActionId] = useState('');
 
   // Legacy Coins Shop & Coins Top-Up
-  const [legacyCategory, setLegacyCategory] = useState(initialGame === 'quiz' ? 'quiz' : 'all');
+  const [legacyCategory, setLegacyCategory] = useState(
+    initialGame === 'quiz' || initialGame === 'chess' ? initialGame : 'all'
+  );
   const [legacyPackages, setLegacyPackages] = useState([]);
   const [coinPaymentOrders, setCoinPaymentOrders] = useState([]);
   const [buyingLegacyId, setBuyingLegacyId] = useState('');
@@ -1381,6 +1383,7 @@ export default function ShopModal({
   const catalogItems = Array.isArray(catalog?.items) ? catalog.items : [];
   const ludoItems = catalogItems.filter(i => (i.game || 'ludo') === 'ludo');
   const quizItems = catalogItems.filter(i => i.game === 'quiz');
+  const chessItems = catalogItems.filter(i => i.game === 'chess');
   const legacyGroups = [
     {
       key: 'ludo',
@@ -1397,6 +1400,14 @@ export default function ShopModal({
       icon: 'swords',
       badge: 'Coins',
       items: quizItems
+    },
+    {
+      key: 'chess',
+      name: 'Chess Master — Bantuan Analisis',
+      desc: 'Dipakai saat giliranmu di Chess Master lewat tombol Hint di bawah papan.',
+      icon: 'bulb',
+      badge: 'Coins',
+      items: chessItems
     }
   ].filter(g => g.items.length > 0 && (legacyCategory === 'all' || legacyCategory === g.key));
 
@@ -1968,7 +1979,8 @@ export default function ShopModal({
                   {[
                     { id: 'all', label: `Semua (${catalogItems.length})` },
                     { id: 'ludo', label: `JakLudo (${ludoItems.length})` },
-                    { id: 'quiz', label: `Monster Quiz (${quizItems.length})` }
+                    { id: 'quiz', label: `Monster Quiz (${quizItems.length})` },
+                    { id: 'chess', label: `Chess Master (${chessItems.length})` }
                   ].map(f => (
                     <button
                       key={f.id}

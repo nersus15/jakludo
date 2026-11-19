@@ -131,6 +131,7 @@ export default function ChessBoard({
   myColor = null,
   interactive = false,
   lastMove = null,
+  hintMove = null, // { from, to } dari item Hint Langkah
   onMove
 }) {
   const [selectedSquare, setSelectedSquare] = useState(null);
@@ -327,6 +328,8 @@ export default function ChessBoard({
             const piece = boardAnalysis.squaresMap[sq];
             const isSelected = selectedSquare === sq || dragFromSquare === sq;
             const isLastMove = lastMove && (lastMove.from === sq || lastMove.to === sq);
+            const isHintFrom = hintMove?.from === sq;
+            const isHintTo = hintMove?.to === sq;
             const isKingInCheck = boardAnalysis.kingInCheckSquare === sq;
             const isKingCheckmated = isKingInCheck && boardAnalysis.isCheckmate;
             const legalTarget = legalTargetsMap[sq];
@@ -348,6 +351,8 @@ export default function ChessBoard({
                   isLight ? 'cm-square--light' : 'cm-square--dark',
                   isSelected ? 'cm-square--selected' : '',
                   isLastMove ? 'cm-square--last-move' : '',
+                  isHintFrom ? 'cm-square--hint-from' : '',
+                  isHintTo ? 'cm-square--hint-to' : '',
                   isKingInCheck ? 'cm-square--in-check' : '',
                   isKingCheckmated ? 'cm-square--checkmated' : '',
                   legalTarget ? 'cm-square--legal' : '',

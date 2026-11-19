@@ -1497,6 +1497,44 @@ function submitMove(socket, payload = {}) {
   return executeMoveForPlayer(room, player, payload);
 }
 
+// Item "Hint Langkah": analisis posisi saat ini di worker thread lalu kirim langkah terbaik.
+// Item baru dipotong setelah analisis selesai dan posisi belum berubah, jadi pemain tidak rugi
+// bila analisis gagal atau lawan/waktu mengubah keadaan selama menunggu.
+async function useHint(socket, payload = {}) {
+  const user = resolveUser(socket, payload);
+  if (!user) return { ok: false, error: 'Silakan login terlebih dahulu.' };
+
+  const room = resolveRoomForAction(user, payload);
+  const m = room?.match;
+  if (!m || m.status !== 'active') return { ok: false, error: 'Hint hanya bisa dipakai saat pertandingan berjalan.' };
+
+  const player = room.players.find(p => p.userId === user.id);
+  if (!player) return { ok: false, error: 'Akses ditolak: kamu bukan peserta dalam pertandingan ini.' };
+  if (m.chess.turn() !== player.color) return { ok: false, error: 'Hint hanya bisa dipakai saat giliranmu.' };
+  if ((db.getUserItems(user.id).chessHint || 0) <= 0) {
+    return { ok: false, error: 'Kamu tidak memiliki item Hint Langkah. Beli dulu di Toko Item!' };
+  }
+
+  const matchId = m.id;
+  const moveVersion = m.moveVersion;
+  const best = await chooseBotMoveAsync(m.currentFen, 'analysis');
+  if (!best) return { ok: false, error: 'Tidak ada langkah yang bisa direkomendasikan.' };
+  if (room.match?.id !== matchId || room.match.moveVersion !== moveVersion || room.match.status !== 'active') {
+    return { ok: false, error: 'Posisi papan sudah berubah, hint tidak terpakai.' };
+  }
+  if (!db.consumeUserItem({ userId: user.id, itemId: 'chessHint' })) {
+    return { ok: false, error: 'Kamu tidak memiliki item Hint Langkah. Beli dulu di Toko Item!' };
+  }
+
+  const updatedUser = db.sanitizeUser(db.getUserById(user.id));
+  return {
+    ok: true,
+    hint: { from: best.from, to: best.to, promotion: best.promotion || null, san: best.san, moveVersion },
+    remainingHints: Number(updatedUser?.inventory?.chessHint || 0),
+    user: updatedUser
+  };
+}
+
 // ==========================================
 // DRAW, RESIGN, REMATCH
 // ==========================================
@@ -1989,6 +2027,7 @@ module.exports = {
   configureRoom,
   setPlayerReady,
   submitMove,
+  useHint,
   offerDraw,
   acceptDraw,
   declineDraw,

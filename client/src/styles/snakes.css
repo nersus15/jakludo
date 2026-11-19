@@ -642,7 +642,7 @@
 
 .snk-mini-badge--me {
   background: var(--brand-soft);
-  color: var(--brand);
+  color: var(--brand-text);
 }
 
 .snk-mini-badge--bot {

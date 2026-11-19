@@ -1377,7 +1377,7 @@
 }
 
 .profile-password-header:hover {
-  color: var(--brand);
+  color: var(--brand-text);
 }
 
 .profile-edit-actions {
@@ -1667,7 +1667,7 @@
   height: 48px;
   border-radius: var(--radius-sm);
   background: var(--brand-soft);
-  color: var(--brand);
+  color: var(--brand-text);
   border: 2px solid var(--ink-line);
   display: inline-flex;
   align-items: center;

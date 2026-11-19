@@ -97,7 +97,7 @@
 }
 
 .auth__recaptcha-notice a {
-  color: var(--brand);
+  color: var(--brand-text);
   text-decoration: underline;
 }
 
@@ -1288,7 +1288,7 @@
 
 .mp-nav__item.is-active {
   background: var(--brand-soft);
-  color: var(--brand);
+  color: var(--brand-text);
   border-color: rgba(59, 130, 246, 0.35);
 }
 

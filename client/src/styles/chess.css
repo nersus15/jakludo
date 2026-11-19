@@ -59,7 +59,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--brand-soft, rgba(99, 102, 241, 0.15));
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 0.75rem;
   font-weight: 800;
 }
@@ -73,12 +73,12 @@
   padding: 4px 10px;
   border-radius: 999px;
   background: rgba(16, 185, 129, 0.14);
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-conn-dot.is-warn {
   background: rgba(245, 158, 11, 0.16);
-  color: #f59e0b;
+  color: var(--warning);
 }
 
 .cm-toast {
@@ -95,7 +95,7 @@
 .cm-toast--error {
   background: rgba(239, 68, 68, 0.14);
   border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-toast--notice {
@@ -176,7 +176,7 @@
   margin: 2px 0 6px;
   font-size: 0.95rem;
   font-weight: 800;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-hero-card__desc {
@@ -241,7 +241,7 @@
 }
 
 .cm-metric--elo {
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 1.1rem !important;
 }
 
@@ -280,15 +280,15 @@
   padding: 3px 9px;
   border-radius: 999px;
   background: var(--brand-soft, rgba(99, 102, 241, 0.14));
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.05em;
 }
 
 .cm-mode-badge--alt {
-  background: rgba(16, 185, 129, 0.14);
-  color: #10b981;
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .cm-tc-section__top {
@@ -304,7 +304,7 @@
 .cm-link-btn {
   background: none;
   border: none;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
@@ -485,7 +485,7 @@
 }
 
 .cm-hub-tab.is-active {
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   border-bottom-color: var(--brand, #6366f1);
   background: var(--surface);
 }
@@ -601,7 +601,7 @@
 
 .cm-outcome-badge.is-win {
   background: rgba(16, 185, 129, 0.16);
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-outcome-badge.is-draw {
@@ -611,7 +611,7 @@
 
 .cm-outcome-badge.is-loss {
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-history-item__vs {
@@ -642,11 +642,11 @@
 }
 
 .cm-rating-delta.is-pos {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-rating-delta.is-neg {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-history-item__btns {
@@ -699,7 +699,7 @@
   font-size: 2.3rem;
   font-weight: 900;
   letter-spacing: 0.16em;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-room-code-box__hint {
@@ -906,12 +906,12 @@
 }
 
 .cm-status-tag--turn {
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-weight: 800;
 }
 
 .cm-status-tag--danger {
-  color: #ef4444;
+  color: var(--danger);
   font-weight: 700;
 }
 
@@ -1346,7 +1346,7 @@
   font-size: 0.76rem;
   font-weight: 900;
   letter-spacing: 0.06em;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-result-card__title {
@@ -1485,11 +1485,11 @@
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-gameover-modal.is-win .cm-gameover-kicker {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-gameover-title {
@@ -1543,7 +1543,7 @@
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.06em;
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-winner-spotlight__name {
@@ -1576,7 +1576,7 @@
   border-radius: 999px;
   background: rgba(245, 158, 11, 0.18);
   border: 1px solid rgba(245, 158, 11, 0.45);
-  color: #f59e0b;
+  color: var(--warning);
   font-weight: 800;
   font-size: 0.82rem;
   flex-shrink: 0;
@@ -1631,11 +1631,11 @@
 }
 
 .cm-gameover-player__meta em.is-pos {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-gameover-player__meta em.is-neg {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-gameover-vs-badge {
@@ -1735,7 +1735,7 @@
   padding: 3px 8px;
   border-radius: 6px;
   background: rgba(99, 102, 241, 0.16);
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-review-tag {
@@ -1749,17 +1749,17 @@
 
 .cm-review-tag--win {
   background: rgba(16, 185, 129, 0.16);
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-review-tag--warn {
   background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
+  color: var(--warning);
 }
 
 .cm-review-tag--capture {
   background: rgba(239, 68, 68, 0.16);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-review-tag--info {
@@ -1854,11 +1854,11 @@
 }
 
 .cm-result-card__elo strong.is-pos {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-result-card__elo strong.is-neg {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-result-card__coins {
@@ -1868,7 +1868,7 @@
   padding: 5px 10px;
   border-radius: 999px;
   background: rgba(245, 158, 11, 0.16);
-  color: #f59e0b;
+  color: var(--warning);
   font-weight: 800;
   font-size: 0.84rem;
 }

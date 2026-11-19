@@ -487,7 +487,9 @@ export default function ChessMasterScreen({
 
           <div className="cm-topbar__right">
             <span className={`cm-conn-dot ${room.players?.every(p => p.connected) ? 'is-online' : 'is-warn'}`}>
-              {room.players?.every(p => p.connected) ? 'Terhubung' : 'Reconnecting'}
+              <span className="cm-conn-dot__label">
+                {room.players?.every(p => p.connected) ? 'Terhubung' : 'Reconnecting'}
+              </span>
             </span>
             <button type="button" className="btn btn--ghost btn--sm" onClick={onOpenAudio} aria-label="Pengaturan Suara">
               <Icon name="volume-on" size={16} />

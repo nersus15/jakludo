@@ -2014,3 +2014,61 @@
 :root[data-theme='dark'] .cm-hint-label {
   color: #c4b5fd;
 }
+
+/* Layar Catur tidak boleh lebih lebar dari layar HP: konten yang meluber membuat browser HP
+   memperkecil (zoom out) seluruh halaman sehingga tampil seperti versi desktop.
+   overflow-x: clip (bukan hidden) supaya topbar sticky tetap bekerja. */
+.cm-screen {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.cm-topbar,
+.cm-topbar__brand,
+.cm-topbar__right {
+  min-width: 0;
+}
+
+.cm-topbar__brand strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .cm-topbar {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .cm-topbar__brand {
+    flex: 1;
+    font-size: 0.9rem;
+  }
+
+  .cm-topbar__right {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Di HP cukup ikon: label tombol kembali & teks status koneksi hanya untuk pembaca layar */
+  .cm-topbar > .btn > span,
+  .cm-conn-dot__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+
+/* Titik status koneksi (hijau = terhubung, kuning = menyambung ulang); di HP hanya titik ini yang tampil */
+.cm-conn-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}

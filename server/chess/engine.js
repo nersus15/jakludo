@@ -135,35 +135,19 @@ function computeLiveClocks(room, now = Date.now()) {
   };
 }
 
-// Langkah legal & status skak dihitung sekali per versi langkah lalu dipakai ulang untuk semua penerima
-// (sebelumnya dihitung ulang per pemain & per callback; chess.js lumayan mahal untuk ini)
+// Status skak & skakmat dihitung sekali per versi langkah lalu dipakai ulang untuk semua penerima
+// (sebelumnya dihitung ulang per pemain & per callback; chess.js lumayan mahal untuk ini).
+// Daftar langkah legal tidak dikirim: klien menghitungnya sendiri dengan chess.js di ChessBoard.
 const derivedByMatch = new WeakMap();
 function derivedPosition(m) {
   const cached = derivedByMatch.get(m);
   if (cached && cached.moveVersion === m.moveVersion && cached.status === m.status) return cached;
-  let legalMoves = [];
-  if (m.status === 'active') {
-    try {
-      legalMoves = m.chess.moves({ verbose: true }).map(mv => ({
-        from: mv.from,
-        to: mv.to,
-        promotion: mv.promotion || null,
-        san: mv.san,
-        flags: mv.flags,
-        piece: mv.piece,
-        captured: mv.captured || null
-      }));
-    } catch {
-      legalMoves = [];
-    }
-  }
   const inCheck = m.chess.inCheck();
   const derived = {
     moveVersion: m.moveVersion,
     status: m.status,
-    legalMoves,
     inCheck,
-    isCheckmate: inCheck && m.status !== 'active' ? m.chess.isCheckmate() : inCheck && legalMoves.length === 0
+    isCheckmate: inCheck && m.chess.isCheckmate()
   };
   derivedByMatch.set(m, derived);
   return derived;
@@ -199,7 +183,6 @@ function serializeRoomForUser(room, viewerUserId = null) {
   });
 
   const derived = m && m.chess ? derivedPosition(m) : null;
-  const legalMoves = derived ? derived.legalMoves : [];
   const inCheck = derived ? derived.inCheck : false;
 
   const myPlayer = viewerUserId ? players.find(p => p.userId === viewerUserId) : null;
@@ -261,7 +244,6 @@ function serializeRoomForUser(room, viewerUserId = null) {
           blackRatingChange: m.blackRatingChange || 0,
           moves: m.moves || [],
           lastMove: m.moves && m.moves.length > 0 ? m.moves[m.moves.length - 1] : null,
-          legalMoves,
           drawOffer: m.drawOffer
             ? {
                 fromUserId: m.drawOffer.fromUserId,
@@ -1475,8 +1457,8 @@ function executeMoveForPlayer(room, player, payload = {}) {
     moveVersion: nextMoveVersion,
     status: m.status,
     result: m.result,
-    terminationReason: m.terminationReason,
-    room: serializeRoomForUser(room, player.userId)
+    terminationReason: m.terminationReason
+    // State room lengkap tidak ikut di balasan langkah: klien sudah menerima ChessMoveMade & chess:room:state
   };
 }
 

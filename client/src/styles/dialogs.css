@@ -311,7 +311,7 @@
 
 .topup-methods-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
 }
 
@@ -1227,7 +1227,7 @@
 
 .mp-layout {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
@@ -1350,7 +1350,7 @@
 .mp-skin-showcase {
   padding: var(--space-4);
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: center;
   background: radial-gradient(circle at top right, color-mix(in srgb, var(--skin-accent, #38bdf8) 18%, transparent), var(--surface) 62%);
@@ -1521,7 +1521,7 @@
 
 .mp-diamonds-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
@@ -1640,7 +1640,7 @@
 
 .mp-convert-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: end;
 }
@@ -1683,7 +1683,7 @@
 
 @media (max-width: 480px) {
   .conv-summary {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .conv-summary > div {

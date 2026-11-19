@@ -25,7 +25,7 @@
 
 .snk-hero-card {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(59, 130, 246, 0.08)), var(--surface);
@@ -93,13 +93,13 @@
 
 .snk-hero-stats {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 @media (min-width: 560px) {
   .snk-hero-stats {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -131,7 +131,7 @@
 /* Mode Cards Grid */
 .snk-modes-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -186,14 +186,14 @@
 /* Rules Strip */
 .snk-rules-strip {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: 14px 16px;
 }
 
 @media (min-width: 760px) {
   .snk-rules-strip {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
   }
 }
@@ -225,7 +225,7 @@
 
 .snk-bottom-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -400,7 +400,7 @@
 
 .snk-waiting-players__grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   margin-top: 8px;
 }
@@ -499,7 +499,8 @@
 /* Grid Utama Permainan */
 .snk-game-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  /* minmax(0, ...): tanpa ini kolom melebar mengikuti isi papan dan HP ter-zoom out */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   align-items: start;
 }
@@ -724,7 +725,7 @@
 
 .snakes-board__row {
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
+  grid-template-columns: repeat(10, minmax(0, 1fr));
 }
 
 .snakes-cell {

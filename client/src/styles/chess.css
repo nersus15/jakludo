@@ -401,7 +401,7 @@
 
 .cm-side-picker {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -988,7 +988,7 @@
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   grid-template-rows: repeat(8, 1fr);
   border-radius: 10px;
   overflow: hidden;
@@ -1176,7 +1176,7 @@
 
 .cm-promo-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1647,7 +1647,7 @@
 
 .cm-gameover-stats {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1911,15 +1911,15 @@
 
 @media (max-width: 920px) {
   .cm-hero-card {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .cm-modes-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .cm-match-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     max-width: 560px;
   }
 
@@ -1928,7 +1928,7 @@
   }
 
   .cm-replay-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1969,7 +1969,7 @@
   }
 
   .cm-gameover-versus {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 6px;
   }
 
@@ -1995,7 +1995,7 @@
 
 @media (max-width: 360px) {
   .cm-gameover-actions__row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

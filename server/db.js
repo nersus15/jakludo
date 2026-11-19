@@ -24,6 +24,7 @@ const LOCAL_STATE_FILE = path.join(DATA_DIR, 'jakludo-state.json');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
 const STARTER_POINTS = 200;
+const REFERRAL_REWARD_COINS = 50; // Hadiah 50 coins saat kode referral digunakan oleh pendaftar baru
 // Poin per peringkat, menurut jumlah pemain di room (bot ikut dihitung). Peringkat terakhir selalu 5,
 // supaya pemain yang kalah di permainan 2 orang tidak dapat poin hampir sebesar pemenangnya.
 // Bonus harian: sekali per hari (WIB) untuk pemain yang menyelesaikan minimal 1 pertandingan tanpa OUT
@@ -51,16 +52,180 @@ if (!fs.existsSync(DATA_DIR)) {
 // STATE WRITE-THROUGH & KONEKSI POSTGRESQL
 // ==========================================
 
+// Default price list & items (seed awal & fallback offline/test)
+const DEFAULT_DIAMOND_PACKAGES = [
+  {
+    id: 'diamond_50',
+    name: '50 Coins',
+    diamonds: 50,
+    coins: 50,
+    price: 5000,
+    formattedPrice: 'Rp 5.000',
+    description: 'Paket pemula untuk mencoba item & avatar baru.',
+    subtitle: 'Paket pemula',
+    badge: null,
+    icon: 'coin',
+    sortOrder: 1,
+    isActive: true
+  },
+  {
+    id: 'diamond_120',
+    name: '120 Coins',
+    diamonds: 120,
+    coins: 120,
+    price: 10000,
+    formattedPrice: 'Rp 10.000',
+    description: 'Paket hemat paling diminati pemain!',
+    subtitle: 'Paket hemat',
+    badge: 'Populer',
+    icon: 'coin',
+    sortOrder: 2,
+    isActive: true
+  },
+  {
+    id: 'diamond_260',
+    name: '260 Coins',
+    diamonds: 260,
+    coins: 260,
+    price: 20000,
+    formattedPrice: 'Rp 20.000',
+    description: 'Cukup untuk beli dice, emote, dan skin spesial.',
+    subtitle: 'Paket reguler',
+    badge: null,
+    icon: 'coin',
+    sortOrder: 3,
+    isActive: true
+  },
+  {
+    id: 'diamond_700',
+    name: '700 Coins',
+    diamonds: 700,
+    coins: 700,
+    price: 50000,
+    formattedPrice: 'Rp 50.000',
+    description: 'Dapatkan 600 + Bonus 100 Coins.',
+    subtitle: 'Paket premium',
+    badge: 'Bonus 100',
+    icon: 'coin',
+    sortOrder: 4,
+    isActive: true
+  },
+  {
+    id: 'diamond_1500',
+    name: '1.500 Coins',
+    diamonds: 1500,
+    coins: 1500,
+    price: 100000,
+    formattedPrice: 'Rp 100.000',
+    description: 'Dapatkan 1.250 + Bonus 250 Coins.',
+    subtitle: 'Paket besar',
+    badge: 'Bonus 250',
+    icon: 'coin',
+    sortOrder: 5,
+    isActive: true
+  },
+  {
+    id: 'diamond_3250',
+    name: '3.250 Coins',
+    diamonds: 3250,
+    coins: 3250,
+    price: 200000,
+    formattedPrice: 'Rp 200.000',
+    description: 'Paket Sultan! Dapatkan 2.500 + Bonus 750 Coins.',
+    subtitle: 'Paket sultan',
+    badge: 'Bonus 750',
+    icon: 'crown',
+    sortOrder: 6,
+    isActive: true
+  }
+];
+
+const DEFAULT_SHOP_ITEMS = [
+  {
+    id: 'blackholeShield',
+    name: 'Blackhole Shield',
+    price: 50,
+    game: 'ludo',
+    icon: '🛡️',
+    description: 'Melindungi bidakmu dari sedotan Black Hole. Saat bidakmu mendarat di petak Black Hole, perisai otomatis aktif sehingga bidakmu tidak kembali ke markas.',
+    kind: 'passive',
+    badge: 'Perisai Pasif Otomatis',
+    badgeColor: '#3b82f6',
+    highlight: 'Otomatis aktif saat terkena Black Hole',
+    target: null,
+    sound: 'chime',
+    protects: ['blackHole'],
+    sortOrder: 1,
+    isActive: true
+  },
+  {
+    id: 'universalShield',
+    name: 'Universal Shield',
+    price: 100,
+    game: 'ludo',
+    icon: '🔰',
+    description: 'Menahan Force Return dari lawan dan sedotan Black Hole. Saat bidakmu jadi target Force Return atau mendarat di Black Hole, muncul pilihan untuk memakai perisai ini atau menyimpannya.',
+    kind: 'reactive',
+    badge: 'Perisai Pilihan',
+    badgeColor: '#7c3aed',
+    highlight: 'Menahan Force Return & Black Hole, kamu yang memilih',
+    target: null,
+    sound: 'chime',
+    protects: ['forceReturn', 'blackHole'],
+    sortOrder: 2,
+    isActive: true
+  },
+  {
+    id: 'forceReturn',
+    name: 'Force Return',
+    price: 100,
+    game: 'ludo',
+    icon: '⚡',
+    description: 'Pulangkan 1 bidak lawan di lintasan langsung ke markas. Dipakai di giliranmu sebelum melempar dadu, dan hanya jika minimal 1 bidakmu sudah keluar dari markas. Lawan yang punya Universal Shield bisa memilih menahannya.',
+    kind: 'active',
+    badge: 'Eliminasi Instan',
+    badgeColor: '#f59e0b',
+    highlight: 'Dipakai di giliranmu sebelum melempar dadu',
+    target: 'opponentPawn',
+    sound: 'thunder',
+    protects: [],
+    sortOrder: 3,
+    isActive: true
+  },
+  {
+    id: 'quizHint',
+    name: 'Hints Jawaban',
+    price: 25,
+    game: 'quiz',
+    icon: '💡',
+    description: 'Bantuan pintar saat ragu menjawab soal di Monster Quiz Battle! Menghilangkan 2 pilihan jawaban yang salah (50:50) pada ronde yang sedang berlangsung sehingga peluang benar meningkat tajam. Maksimal 1 Hint per ronde.',
+    kind: 'active',
+    badge: 'Monster Quiz',
+    badgeColor: '#3b82f6',
+    highlight: 'Eliminasi 2 opsi jawaban salah (50:50) saat duel Monster Quiz Battle',
+    target: null,
+    sound: 'chime',
+    protects: [],
+    sortOrder: 4,
+    isActive: true
+  }
+];
+
 const state = {
-  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, googleId, createdAt }
+  usersById: new Map(),       // id -> { id, username, name, passwordHash, authType, avatar, email, googleId, createdAt, referralCode, referredBy }
   usersByUsername: new Map(), // lower(username) -> id
   usersByGoogleId: new Map(), // googleId -> id
   usersByEmail: new Map(),    // lower(email) -> id
+  usersByReferralCode: new Map(), // upper(referralCode) -> id
   userItems: new Map(),       // userId -> { [itemId]: quantity }
   sessions: new Map(),        // tokenHash -> { tokenHash, userId, createdAt, expiresAt }
   leaderboard: new Map(),     // userId -> { userId, username, name, avatar, wins, matchesPlayed, points, authType }
   rooms: new Map(),           // code -> { code, state, updatedAt }
-  topupOrders: new Map()      // orderId -> { orderId, userId, packageId, diamonds, grossAmount, status, snapToken, paymentType, createdAt, updatedAt }
+  topupOrders: new Map(),     // orderId -> { orderId, userId, packageId, diamonds, grossAmount, status, snapToken, paymentType, createdAt, updatedAt }
+  shopItems: new Map(),       // id -> shop item record dari database
+  diamondPackages: new Map(), // id -> diamond package record dari database
+  referrals: new Map(),       // id -> referral record
+  referralsByReferrer: new Map() // referrerId -> Array of referral records
 };
 
 let pool = null;
@@ -113,7 +278,8 @@ function persistLocalFallback() {
       userItems: Object.fromEntries(state.userItems.entries()),
       sessions: Array.from(state.sessions.values()),
       leaderboard: Array.from(state.leaderboard.values()),
-      rooms: Array.from(state.rooms.values())
+      rooms: Array.from(state.rooms.values()),
+      referrals: Array.from(state.referrals.values())
     };
     fs.writeFileSync(LOCAL_STATE_FILE, JSON.stringify(dump));
   } catch (err) {
@@ -121,7 +287,71 @@ function persistLocalFallback() {
   }
 }
 
+function getAdminUsernameSet() {
+  const raw = process.env.ADMIN_USERNAMES || 'admin';
+  return new Set(
+    raw
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function resolveUserRole(role, username) {
+  if (role === 'admin') return 'admin';
+  const uname = String(username || '').trim().toLowerCase();
+  if (uname && getAdminUsernameSet().has(uname)) return 'admin';
+  return 'player';
+}
+
+function isUserAdmin(userOrRow) {
+  if (!userOrRow) return false;
+  return resolveUserRole(userOrRow.role, userOrRow.username) === 'admin';
+}
+
+function generateUniqueReferralCode() {
+  for (let i = 0; i < 500; i++) {
+    const code = String(crypto.randomInt(100000, 1000000));
+    if (!state.usersByReferralCode.has(code)) {
+      return code;
+    }
+  }
+  return String(Date.now()).slice(-6);
+}
+
+function findUserByReferralCode(code) {
+  if (!code || typeof code !== 'string') return null;
+  const clean = code.trim().toUpperCase();
+  const id = state.usersByReferralCode.get(clean);
+  return id ? findUserById(id) : null;
+}
+
+function recordReferralInState(ref) {
+  if (!ref || !ref.id) return;
+  const normalized = {
+    id: ref.id,
+    referrerId: ref.referrerId || ref.referrer_id,
+    referredUserId: ref.referredUserId || ref.referred_user_id,
+    referralCode: (ref.referralCode || ref.referral_code || '').toUpperCase(),
+    rewardPoints: Number(ref.rewardPoints || ref.reward_points || REFERRAL_REWARD_COINS),
+    createdAt: ref.createdAt || ref.created_at || new Date().toISOString()
+  };
+  state.referrals.set(normalized.id, normalized);
+  if (!state.referralsByReferrer.has(normalized.referrerId)) {
+    state.referralsByReferrer.set(normalized.referrerId, []);
+  }
+  const arr = state.referralsByReferrer.get(normalized.referrerId);
+  if (!arr.some(r => r.id === normalized.id)) {
+    arr.push(normalized);
+  }
+}
+
 function setUserInState(u) {
+  let referralCode = u.referralCode || u.referral_code || null;
+  if (!referralCode && u.username) {
+    referralCode = generateUniqueReferralCode();
+  }
+  const referredBy = u.referredBy || u.referred_by || null;
   const row = {
     id: u.id,
     username: u.username,
@@ -131,6 +361,9 @@ function setUserInState(u) {
     avatar: u.avatar || null,
     email: u.email || null,
     googleId: u.googleId || u.google_id || null,
+    role: resolveUserRole(u.role, u.username),
+    referralCode,
+    referredBy,
     createdAt: u.createdAt || u.created_at || new Date().toISOString()
   };
   state.usersById.set(row.id, row);
@@ -140,6 +373,9 @@ function setUserInState(u) {
   }
   if (row.email) {
     state.usersByEmail.set(String(row.email).toLowerCase(), row.id);
+  }
+  if (referralCode) {
+    state.usersByReferralCode.set(referralCode.toUpperCase(), row.id);
   }
 }
 
@@ -153,6 +389,13 @@ function setItemInState(userId, itemId, quantity) {
 
 // Impor dari JSON lama atau SQLite lokal untuk kebutuhan offline/test
 function bootstrapLocalState() {
+  for (const pkg of DEFAULT_DIAMOND_PACKAGES) {
+    state.diamondPackages.set(pkg.id, { ...pkg });
+  }
+  for (const it of DEFAULT_SHOP_ITEMS) {
+    state.shopItems.set(it.id, { ...it });
+  }
+
   if (fs.existsSync(LOCAL_STATE_FILE)) {
     try {
       const dump = JSON.parse(fs.readFileSync(LOCAL_STATE_FILE, 'utf8'));
@@ -165,6 +408,7 @@ function bootstrapLocalState() {
       }
       for (const e of dump.leaderboard || []) state.leaderboard.set(e.userId, e);
       for (const r of dump.rooms || []) state.rooms.set(r.code, r);
+      for (const ref of dump.referrals || []) recordReferralInState(ref);
     } catch {
       // Abaikan jika gagal dibaca
     }
@@ -272,22 +516,27 @@ function bootstrapLocalState() {
 async function hydrateFromPostgres(activePool) {
   state.usersById.clear();
   state.usersByUsername.clear();
+  state.usersByReferralCode.clear();
+  state.referrals.clear();
+  state.referralsByReferrer.clear();
   state.userItems.clear();
   state.sessions.clear();
   state.leaderboard.clear();
   state.rooms.clear();
   state.topupOrders.clear();
 
-  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes, topupRes] = await Promise.all([
+  const [usersRes, itemsRes, sessionsRes, lbRes, roomsRes, topupRes, refRes] = await Promise.all([
     activePool.query('SELECT * FROM users'),
     activePool.query('SELECT user_id, item_id, quantity FROM user_items WHERE quantity > 0'),
     activePool.query('SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE expires_at > $1', [Date.now()]),
     activePool.query('SELECT * FROM leaderboard'),
     activePool.query('SELECT code, state, updated_at FROM rooms'),
-    activePool.query('SELECT * FROM topup_orders ORDER BY created_at DESC LIMIT 500').catch(() => ({ rows: [] }))
+    activePool.query('SELECT * FROM topup_orders ORDER BY created_at DESC LIMIT 500').catch(() => ({ rows: [] })),
+    activePool.query('SELECT * FROM referrals ORDER BY created_at ASC').catch(() => ({ rows: [] }))
   ]);
 
   for (const r of usersRes.rows) setUserInState(r);
+  for (const r of refRes.rows || []) recordReferralInState(r);
   for (const r of itemsRes.rows) setItemInState(r.user_id, r.item_id, Number(r.quantity));
   for (const r of sessionsRes.rows) {
     state.sessions.set(r.token_hash, {
@@ -333,6 +582,61 @@ async function hydrateFromPostgres(activePool) {
       updatedAt: r.updated_at
     });
   }
+
+  // Muat price list diamond & katalog item toko dari PostgreSQL
+  try {
+    const [pkgRes, shopRes] = await Promise.all([
+      activePool.query('SELECT * FROM diamond_packages WHERE is_active = TRUE ORDER BY sort_order ASC, price ASC').catch(() => ({ rows: [] })),
+      activePool.query('SELECT * FROM shop_items WHERE is_active = TRUE ORDER BY sort_order ASC, name ASC').catch(() => ({ rows: [] }))
+    ]);
+    if (pkgRes.rows && pkgRes.rows.length > 0) {
+      state.diamondPackages.clear();
+      for (const r of pkgRes.rows) {
+        state.diamondPackages.set(r.id, {
+          id: r.id,
+          name: r.name,
+          diamonds: Number(r.diamonds),
+          coins: Number(r.diamonds),
+          price: Number(r.price),
+          formattedPrice: r.formatted_price,
+          description: r.description,
+          subtitle: r.subtitle,
+          badge: r.badge,
+          icon: r.icon,
+          sortOrder: Number(r.sort_order),
+          isActive: Boolean(r.is_active)
+        });
+      }
+    }
+    if (shopRes.rows && shopRes.rows.length > 0) {
+      state.shopItems.clear();
+      for (const r of shopRes.rows) {
+        let protects = r.protects;
+        if (typeof protects === 'string') {
+          try { protects = JSON.parse(protects); } catch { protects = []; }
+        }
+        state.shopItems.set(r.id, {
+          id: r.id,
+          name: r.name,
+          price: Number(r.price),
+          game: r.game,
+          icon: r.icon,
+          description: r.description,
+          kind: r.kind,
+          badge: r.badge,
+          badgeColor: r.badge_color,
+          highlight: r.highlight,
+          target: r.target,
+          sound: r.sound,
+          protects: Array.isArray(protects) ? protects : [],
+          sortOrder: Number(r.sort_order),
+          isActive: Boolean(r.is_active)
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[PG HYDRATE SHOP/DIAMONDS]', err.message);
+  }
 }
 
 // Inisialisasi koneksi PostgreSQL, jalankan migrasi skema & migrasi data SQLite otomatis, lalu muat state
@@ -360,6 +664,9 @@ async function init(options = {}) {
       await hydrateFromPostgres(pool);
       await require('./social/store').hydrateFromPostgres();
       await require('./quiz/store').hydrateFromPostgres();
+      await require('./chess/store').hydrateFromPostgres();
+      await require('./snakes/store').hydrateFromPostgres();
+      await require('./economy/store').hydrateFromPostgres();
       console.log(`[PG] Terhubung ke PostgreSQL (${state.usersById.size} user, ${state.leaderboard.size} leaderboard, ${state.rooms.size} room aktif).`);
     } else {
       console.warn('[DB] DATABASE_URL belum diset; berjalan dengan penyimpanan lokal di', DATA_DIR);
@@ -401,6 +708,9 @@ function buildUserObject(row) {
     avatar: row.avatar,
     email: row.email || undefined,
     googleId: row.googleId || undefined,
+    role: resolveUserRole(row.role, row.username),
+    referralCode: row.referralCode,
+    referredBy: row.referredBy,
     createdAt: row.createdAt,
     inventory: getUserItems(row.id)
   };
@@ -527,7 +837,7 @@ async function verifyPassword(password, storedHash) {
 // MANAJEMEN USER
 // ==========================================
 
-async function registerUser({ username, password, name }) {
+async function registerUser({ username, password, name, referralCode }) {
   const userValid = validateUsername(username);
   if (!userValid.valid) return { error: userValid.message };
 
@@ -536,6 +846,21 @@ async function registerUser({ username, password, name }) {
 
   if (findUserByUsername(userValid.cleanUsername)) {
     return { error: 'Username sudah digunakan, silakan pilih username lain.' };
+  }
+
+  let referrer = null;
+  let cleanRefCode = null;
+  if (referralCode && typeof referralCode === 'string') {
+    cleanRefCode = referralCode.trim().toUpperCase();
+    if (cleanRefCode) {
+      referrer = findUserByReferralCode(cleanRefCode);
+      if (!referrer) {
+        return { error: 'Kode referral tidak valid atau tidak ditemukan.' };
+      }
+      if (referrer.username.toLowerCase() === userValid.cleanUsername.toLowerCase()) {
+        return { error: 'Tidak dapat menggunakan kode referral milik sendiri.' };
+      }
+    }
   }
 
   const passwordHash = await hashPassword(password);
@@ -547,14 +872,16 @@ async function registerUser({ username, password, name }) {
   const displayName = (typeof name === 'string' ? name.trim().slice(0, 18) : '') || userValid.cleanUsername;
   const id = 'user_' + crypto.randomUUID();
   const createdAt = new Date().toISOString();
+  const myReferralCode = generateUniqueReferralCode();
+  const referredByUserId = referrer ? referrer.id : null;
 
   if (pool && !closed) {
     try {
       await execPgTransaction(async client => {
         await client.query(
-          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at)
-           VALUES ($1, $2, $3, $4, 'password', '🎯', $5)`,
-          [id, userValid.cleanUsername, displayName, passwordHash, createdAt]
+          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, created_at, referral_code, referred_by)
+           VALUES ($1, $2, $3, $4, 'password', '🎯', $5, $6, $7)`,
+          [id, userValid.cleanUsername, displayName, passwordHash, createdAt, myReferralCode, referredByUserId]
         );
         await client.query(
           `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
@@ -562,6 +889,19 @@ async function registerUser({ username, password, name }) {
            ON CONFLICT (user_id) DO NOTHING`,
           [id, userValid.cleanUsername, displayName, STARTER_POINTS]
         );
+        if (referrer) {
+          const refId = 'ref_' + crypto.randomUUID();
+          await client.query(
+            `INSERT INTO referrals (id, referrer_id, referred_user_id, referral_code, reward_points, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (referred_user_id) DO NOTHING`,
+            [refId, referrer.id, id, cleanRefCode, REFERRAL_REWARD_COINS, createdAt]
+          );
+          await client.query(
+            'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+            [REFERRAL_REWARD_COINS, referrer.id]
+          );
+        }
       });
     } catch (err) {
       if (String(err.code) === '23505' || String(err.message).includes('unique')) {
@@ -578,7 +918,9 @@ async function registerUser({ username, password, name }) {
     passwordHash,
     authType: 'password',
     avatar: '🎯',
-    createdAt
+    createdAt,
+    referralCode: myReferralCode,
+    referredBy: referredByUserId
   });
   state.leaderboard.set(id, {
     userId: id,
@@ -590,6 +932,23 @@ async function registerUser({ username, password, name }) {
     points: STARTER_POINTS,
     authType: 'password'
   });
+
+  if (referrer) {
+    const refRecord = {
+      id: 'ref_' + crypto.randomUUID(),
+      referrerId: referrer.id,
+      referredUserId: id,
+      referralCode: cleanRefCode,
+      rewardPoints: REFERRAL_REWARD_COINS,
+      createdAt
+    };
+    recordReferralInState(refRecord);
+    const referrerEntry = state.leaderboard.get(referrer.id);
+    if (referrerEntry) {
+      referrerEntry.points += REFERRAL_REWARD_COINS;
+    }
+  }
+
   persistLocalFallback();
 
   return { user: sanitizeUser(findUserById(id)), token: createSession(id) };
@@ -610,7 +969,7 @@ async function loginUser({ username, password }) {
   return { user: sanitizeUser(user), token: createSession(user.id) };
 }
 
-async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
+async function loginOrRegisterGoogleUser({ googleId, email, name, avatar, referralCode }) {
   if (!googleId && !email) {
     return { error: 'Identitas akun Google tidak lengkap.' };
   }
@@ -643,6 +1002,15 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
   }
 
   // 3. User baru: buat username yang unik
+  let referrer = null;
+  let cleanRefCode = null;
+  if (referralCode && typeof referralCode === 'string') {
+    cleanRefCode = referralCode.trim().toUpperCase();
+    if (cleanRefCode) {
+      referrer = findUserByReferralCode(cleanRefCode);
+    }
+  }
+
   const rawBase = (email ? email.split('@')[0] : '') || (name || 'player');
   let cleanUsername = rawBase.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 15);
   if (cleanUsername.length < 3) cleanUsername = 'player_' + crypto.randomInt(100, 999);
@@ -661,14 +1029,16 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
   const userAvatar = (typeof avatar === 'string' && avatar.trim()) ? avatar.trim() : '🎯';
   const userEmail = (typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : null;
   const userGoogleId = googleId ? String(googleId) : null;
+  const myReferralCode = generateUniqueReferralCode();
+  const referredByUserId = referrer ? referrer.id : null;
 
   if (pool && !closed) {
     try {
       await execPgTransaction(async client => {
         await client.query(
-          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, email, google_id, created_at)
-           VALUES ($1, $2, $3, NULL, 'google', $4, $5, $6, $7)`,
-          [id, finalUsername, displayName, userAvatar, userEmail, userGoogleId, createdAt]
+          `INSERT INTO users (id, username, name, password_hash, auth_type, avatar, email, google_id, created_at, referral_code, referred_by)
+           VALUES ($1, $2, $3, NULL, 'google', $4, $5, $6, $7, $8, $9)`,
+          [id, finalUsername, displayName, userAvatar, userEmail, userGoogleId, createdAt, myReferralCode, referredByUserId]
         );
         await client.query(
           `INSERT INTO leaderboard (user_id, username, name, avatar, wins, matches_played, points, auth_type)
@@ -676,6 +1046,19 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
            ON CONFLICT (user_id) DO NOTHING`,
           [id, finalUsername, displayName, userAvatar, STARTER_POINTS]
         );
+        if (referrer) {
+          const refId = 'ref_' + crypto.randomUUID();
+          await client.query(
+            `INSERT INTO referrals (id, referrer_id, referred_user_id, referral_code, reward_points, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (referred_user_id) DO NOTHING`,
+            [refId, referrer.id, id, cleanRefCode, REFERRAL_REWARD_COINS, createdAt]
+          );
+          await client.query(
+            'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+            [REFERRAL_REWARD_COINS, referrer.id]
+          );
+        }
       });
     } catch (err) {
       if (String(err.code) === '23505' || String(err.message).includes('unique')) {
@@ -701,7 +1084,9 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
     avatar: userAvatar,
     email: userEmail,
     googleId: userGoogleId,
-    createdAt
+    createdAt,
+    referralCode: myReferralCode,
+    referredBy: referredByUserId
   });
 
   state.leaderboard.set(id, {
@@ -714,6 +1099,22 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
     points: STARTER_POINTS,
     authType: 'google'
   });
+
+  if (referrer) {
+    const refRecord = {
+      id: 'ref_' + crypto.randomUUID(),
+      referrerId: referrer.id,
+      referredUserId: id,
+      referralCode: cleanRefCode,
+      rewardPoints: REFERRAL_REWARD_COINS,
+      createdAt
+    };
+    recordReferralInState(refRecord);
+    const referrerEntry = state.leaderboard.get(referrer.id);
+    if (referrerEntry) {
+      referrerEntry.points += REFERRAL_REWARD_COINS;
+    }
+  }
 
   persistLocalFallback();
 
@@ -728,9 +1129,90 @@ async function loginOrRegisterGoogleUser({ googleId, email, name, avatar }) {
 // PROFIL USER
 // ==========================================
 
+function getPool() {
+  return pool && !closed ? pool : null;
+}
+
+function syncUserRoleInState(userId, role) {
+  const row = state.usersById.get(userId);
+  if (!row) return null;
+  row.role = resolveUserRole(role, row.username);
+  return row;
+}
+
+async function setUserRole(userId, role) {
+  const row = state.usersById.get(userId);
+  if (!row) return null;
+  const resolved = role === 'admin' ? 'admin' : 'player';
+  row.role = resolveUserRole(resolved, row.username);
+  if (pool && !closed) {
+    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [row.role, userId]);
+  }
+  persistLocalFallback();
+  return sanitizeUser(findUserById(userId));
+}
+
+function getUserPoints(userId) {
+  const user = findUserById(userId);
+  if (!user) return 0;
+  const entry = ensureLeaderboardEntry(user);
+  return Number(entry.points || 0);
+}
+
+function adjustUserPointsInState(userId, delta) {
+  const user = findUserById(userId);
+  if (!user) return null;
+  const entry = ensureLeaderboardEntry(user);
+  const next = Number(entry.points || 0) + Math.trunc(Number(delta) || 0);
+  if (next < 0) return null;
+  entry.points = next;
+  persistLocalFallback();
+  return next;
+}
+
+function deductUserPoints(userId, amount) {
+  const amt = Math.floor(Number(amount) || 0);
+  if (!userId || amt <= 0) return null;
+  const user = findUserById(userId);
+  if (!user) return null;
+  const entry = ensureLeaderboardEntry(user);
+  if (Number(entry.points || 0) < amt) return null;
+  const previous = Number(entry.points || 0);
+  entry.points = previous - amt;
+  persistLocalFallback();
+  execPg(
+    'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
+    [amt, userId]
+  );
+  return { previous, current: entry.points };
+}
+
 function sanitizeUser(u) {
   if (!u) return null;
   const entry = state.leaderboard.get(u.id);
+  const points = entry ? entry.points : 0;
+  let diamonds = 0;
+  let equippedLudoSkin = null;
+  let ownedLudoSkins = [];
+  try {
+    const economyStore = require('./economy/store');
+    if (typeof economyStore.getDiamondBalanceSync === 'function') {
+      diamonds = economyStore.getDiamondBalanceSync(u.id);
+    }
+    if (typeof economyStore.getEquippedSkinSync === 'function') {
+      equippedLudoSkin = economyStore.getEquippedSkinSync(u.id);
+    }
+    if (typeof economyStore.getOwnedSkinIdsSync === 'function') {
+      ownedLudoSkins = economyStore.getOwnedSkinIdsSync(u.id);
+    }
+  } catch {
+    // Abaikan jika modul economy belum dimuat
+  }
+  const role = resolveUserRole(u.role, u.username);
+  const myRefs = state.referralsByReferrer.get(u.id) || [];
+  const referralCount = myRefs.length;
+  const referralBonusCoins = myRefs.reduce((acc, r) => acc + (Number(r.rewardPoints || r.reward_points) || REFERRAL_REWARD_COINS), 0);
+
   return {
     id: u.id,
     username: u.username,
@@ -738,8 +1220,141 @@ function sanitizeUser(u) {
     avatar: u.avatar,
     email: u.email,
     authType: u.authType,
-    points: entry ? entry.points : 0,
+    role,
+    isAdmin: role === 'admin',
+    points,
+    coins: points,
+    diamonds,
+    referralCode: u.referralCode,
+    referredBy: u.referredBy,
+    referralCount,
+    referralBonusCoins,
+    equippedLudoSkin,
+    ownedLudoSkins,
     inventory: { ...u.inventory }
+  };
+}
+
+function getReferralInfo(userId) {
+  const user = findUserById(userId);
+  if (!user) return null;
+  const rawRefs = state.referralsByReferrer.get(user.id) || [];
+  const history = rawRefs.map(r => {
+    const u = findUserById(r.referredUserId);
+    return {
+      id: r.id,
+      userId: r.referredUserId,
+      username: u ? u.username : 'Pemain',
+      name: u ? u.name : 'Pemain',
+      avatar: u ? u.avatar : '🎯',
+      rewardPoints: Number(r.rewardPoints || r.reward_points) || REFERRAL_REWARD_COINS,
+      createdAt: r.createdAt
+    };
+  }).reverse();
+
+  const totalCoinsEarned = history.reduce((sum, h) => sum + h.rewardPoints, 0);
+
+  return {
+    referralCode: user.referralCode,
+    rewardCoins: REFERRAL_REWARD_COINS,
+    totalReferrals: history.length,
+    totalCoinsEarned,
+    history
+  };
+}
+
+async function claimReferral({ userId, referralCode }) {
+  if (!userId) return { error: 'Silakan login terlebih dahulu.' };
+  if (!referralCode || typeof referralCode !== 'string') {
+    return { error: 'Kode referral wajib diisi.' };
+  }
+  const cleanCode = referralCode.trim();
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return { error: 'Kode referral harus berupa 6 digit angka.' };
+  }
+
+  const user = findUserById(userId);
+  if (!user) return { error: 'User tidak ditemukan.' };
+
+  // Pastikan user belum pernah klaim kode referral
+  if (user.referredBy) {
+    return { error: 'Anda sudah pernah menggunakan kode referral.' };
+  }
+
+  for (const ref of state.referrals.values()) {
+    if (ref.referredUserId === user.id) {
+      return { error: 'Anda sudah pernah menggunakan kode referral.' };
+    }
+  }
+
+  const referrer = findUserByReferralCode(cleanCode);
+  if (!referrer) {
+    return { error: 'Kode referral tidak valid atau tidak ditemukan.' };
+  }
+  if (referrer.id === user.id || referrer.username.toLowerCase() === user.username.toLowerCase()) {
+    return { error: 'Tidak dapat menggunakan kode referral milik sendiri.' };
+  }
+
+  const createdAt = new Date().toISOString();
+  const refId = 'ref_' + crypto.randomUUID();
+
+  if (pool && !closed) {
+    try {
+      await execPgTransaction(async client => {
+        await client.query(
+          `INSERT INTO referrals (id, referrer_id, referred_user_id, referral_code, reward_points, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (referred_user_id) DO NOTHING`,
+          [refId, referrer.id, user.id, cleanCode, REFERRAL_REWARD_COINS, createdAt]
+        );
+        await client.query(
+          'UPDATE users SET referred_by = $1 WHERE id = $2 AND referred_by IS NULL',
+          [referrer.id, user.id]
+        );
+        await client.query(
+          'UPDATE leaderboard SET points = points + $1 WHERE user_id = $2',
+          [REFERRAL_REWARD_COINS, referrer.id]
+        );
+      });
+    } catch (err) {
+      if (String(err.code) === '23505' || String(err.message).includes('unique')) {
+        return { error: 'Anda sudah pernah menggunakan kode referral.' };
+      }
+      throw err;
+    }
+  }
+
+  // Update in-memory state
+  const row = state.usersById.get(user.id);
+  if (row) {
+    row.referredBy = referrer.id;
+  }
+
+  const refRecord = {
+    id: refId,
+    referrerId: referrer.id,
+    referredUserId: user.id,
+    referralCode: cleanCode,
+    rewardPoints: REFERRAL_REWARD_COINS,
+    createdAt
+  };
+  recordReferralInState(refRecord);
+
+  const referrerEntry = state.leaderboard.get(referrer.id);
+  if (referrerEntry) {
+    referrerEntry.points += REFERRAL_REWARD_COINS;
+  }
+
+  persistLocalFallback();
+
+  return {
+    success: true,
+    message: `Berhasil! Kode referral dari ${referrer.name} diterapkan. Hadiah +50 Coins telah dikirimkan ke ${referrer.name}!`,
+    user: sanitizeUser(findUserById(user.id)),
+    referrer: {
+      username: referrer.username,
+      name: referrer.name
+    }
   };
 }
 
@@ -989,11 +1604,11 @@ function ensureGlobalLeaderboardRow(client, user) {
 // ranking: id pemain dari peringkat 1 ke bawah (lihat rankPlayers). Tanpa ranking, pemenang dianggap
 // peringkat 1 dan sisanya mengikuti urutan players.
 // Return { [playerId]: { points, dailyBonus } } untuk ditampilkan di layar hasil.
-function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() }) {
+function recordMatchResult({ winnerPlayerId, players, ranking, endReason = null, now = Date.now() }) {
   const awards = {};
   // Aturan bersama semua game: minimal 2 pemain asli (menang hanya melawan bot tidak dapat poin),
-  // lihat server/lib/rewards.js
-  if (!canAwardPoints(players)) return awards;
+  // dan tidak berlaku jika pertandingan berakhir karena forfeit instan (lihat server/lib/rewards.js).
+  if (!canAwardPoints(players, { endReason })) return awards;
   const humans = players.filter(p => !p.isBot);
   const today = todayWib(now);
 
@@ -1003,11 +1618,11 @@ function recordMatchResult({ winnerPlayerId, players, ranking, now = Date.now() 
     const user = p.userId ? findUserById(p.userId) : null;
     if (!user) continue;
     const entry = ensureLeaderboardEntry(user);
-    const won = p.id === winnerPlayerId;
+    const won = p.id === winnerPlayerId && !p.left;
     const deltaWins = won ? 1 : 0;
-    const points = rankPoints(players.length, order.indexOf(p.id));
+    const points = p.left ? 0 : rankPoints(players.length, order.indexOf(p.id));
     // Pemain yang OUT/menyerah tidak dihitung "main" untuk bonus harian
-    const dailyBonus = !p.isOut && entry.lastDailyBonus !== today ? DAILY_BONUS_POINTS : 0;
+    const dailyBonus = !p.isOut && !p.left && entry.lastDailyBonus !== today ? DAILY_BONUS_POINTS : 0;
     if (dailyBonus) entry.lastDailyBonus = today;
     const deltaPoints = points + dailyBonus;
     entry.matchesPlayed += 1;
@@ -1094,37 +1709,155 @@ function checkIsLudoKing(userId) {
 }
 
 // ==========================================
-// TOKO & INVENTARIS ITEM
+// TOKO & INVENTARIS ITEM (DATABASE-DRIVEN)
 // ==========================================
 
-function purchaseItem({ userId, itemId, price }) {
-  const user = findUserById(userId);
-  if (!user) return { error: 'Pengguna tidak ditemukan.' };
-
-  const entry = ensureLeaderboardEntry(user);
-  if (entry.points < price) {
-    return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${entry.points} poin.` };
+async function queryShopItems() {
+  if (pool && !closed) {
+    try {
+      const res = await pool.query('SELECT * FROM shop_items WHERE is_active = TRUE ORDER BY sort_order ASC, name ASC');
+      if (res.rows && res.rows.length > 0) {
+        return res.rows.map(r => {
+          let protects = r.protects;
+          if (typeof protects === 'string') {
+            try { protects = JSON.parse(protects); } catch { protects = []; }
+          }
+          return {
+            id: r.id,
+            name: r.name,
+            price: Number(r.price),
+            game: r.game,
+            icon: r.icon,
+            description: r.description,
+            kind: r.kind,
+            badge: r.badge,
+            badgeColor: r.badge_color,
+            highlight: r.highlight,
+            target: r.target,
+            sound: r.sound,
+            protects: Array.isArray(protects) ? protects : [],
+            sortOrder: Number(r.sort_order),
+            isActive: Boolean(r.is_active)
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[PG QUERY SHOP ITEMS]', err.message);
+    }
   }
+  return Array.from(state.shopItems.values()).filter(i => i.isActive);
+}
 
-  entry.points -= price;
-  const currentQty = getUserItems(user.id)[itemId] || 0;
-  setItemInState(user.id, itemId, currentQty + 1);
-  persistLocalFallback();
+async function getShopItemById(id) {
+  if (!id) return null;
+  if (pool && !closed) {
+    try {
+      const res = await pool.query('SELECT * FROM shop_items WHERE id = $1 AND is_active = TRUE', [id]);
+      if (res.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        let protects = r.protects;
+        if (typeof protects === 'string') {
+          try { protects = JSON.parse(protects); } catch { protects = []; }
+        }
+        return {
+          id: r.id,
+          name: r.name,
+          price: Number(r.price),
+          game: r.game,
+          icon: r.icon,
+          description: r.description,
+          kind: r.kind,
+          badge: r.badge,
+          badgeColor: r.badge_color,
+          highlight: r.highlight,
+          target: r.target,
+          sound: r.sound,
+          protects: Array.isArray(protects) ? protects : [],
+          sortOrder: Number(r.sort_order),
+          isActive: Boolean(r.is_active)
+        };
+      }
+    } catch {}
+  }
+  const item = state.shopItems.get(id);
+  return item && item.isActive ? item : null;
+}
 
-  execPgTransaction(async client => {
-    await ensureGlobalLeaderboardRow(client, user);
-    await client.query(
-      'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1',
-      [price, user.id]
-    );
-    await client.query(
-      `INSERT INTO user_items (user_id, item_id, quantity) VALUES ($1, $2, 1)
-       ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = user_items.quantity + 1`,
-      [user.id, itemId]
-    );
+const purchaseLocks = new Map();
+
+function withPurchaseLock(userId, fn) {
+  const prev = purchaseLocks.get(userId) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  const tail = next.catch(() => {});
+  purchaseLocks.set(userId, tail);
+  tail.finally(() => {
+    if (purchaseLocks.get(userId) === tail) {
+      purchaseLocks.delete(userId);
+    }
   });
+  return next;
+}
 
-  return { success: true, user: sanitizeUser(findUserById(user.id)) };
+// Beli item toko: harga item diverifikasi langsung dari database dengan per-user lock untuk mencegah race condition
+function purchaseItem({ userId, itemId }) {
+  return withPurchaseLock(userId, async () => {
+    const user = findUserById(userId);
+    if (!user) return { error: 'Pengguna tidak ditemukan.' };
+
+    const item = await getShopItemById(itemId);
+    if (!item || !item.isActive) {
+      return { error: 'Item toko tidak valid atau sudah tidak dijual.' };
+    }
+
+    const price = Number(item.price);
+    if (!Number.isFinite(price) || price <= 0) {
+      return { error: 'Harga item toko tidak valid.' };
+    }
+
+    const entry = ensureLeaderboardEntry(user);
+    if (entry.points < price) {
+      return { error: `Poin tidak mencukupi. Diperlukan ${price} poin, kamu memiliki ${entry.points} poin.` };
+    }
+
+    let pgPointsAfter = null;
+    let pgQtyAfter = null;
+    if (pool && !closed) {
+      let txErr = null;
+      await execPgTransaction(async client => {
+        try {
+          await ensureGlobalLeaderboardRow(client, user);
+          const updateRes = await client.query(
+            'UPDATE leaderboard SET points = points - $1 WHERE user_id = $2 AND points >= $1 RETURNING points',
+            [price, user.id]
+          );
+          if (updateRes.rowCount === 0) {
+            throw new Error('Poin tidak mencukupi saat proses transaksi database.');
+          }
+          pgPointsAfter = Number(updateRes.rows[0].points);
+          const itemRes = await client.query(
+            `INSERT INTO user_items (user_id, item_id, quantity) VALUES ($1, $2, 1)
+             ON CONFLICT (user_id, item_id) DO UPDATE SET quantity = user_items.quantity + 1
+             RETURNING quantity`,
+            [user.id, itemId]
+          );
+          pgQtyAfter = Number(itemRes.rows[0]?.quantity);
+        } catch (err) {
+          txErr = err;
+          throw err;
+        }
+      });
+      if (txErr) {
+        return { error: txErr.message || 'Gagal memproses pembelian item di database.' };
+      }
+    }
+
+    entry.points = pgPointsAfter !== null ? pgPointsAfter : entry.points - price;
+    const currentQty = getUserItems(user.id)[itemId] || 0;
+    setItemInState(user.id, itemId, pgQtyAfter !== null ? pgQtyAfter : currentQty + 1);
+    persistLocalFallback();
+
+    return { success: true, item, user: sanitizeUser(findUserById(user.id)) };
+  });
 }
 
 function consumeUserItem({ userId, itemId }) {
@@ -1204,17 +1937,77 @@ function awardUserPoints(userId, deltaPoints = 0) {
 }
 
 // ==========================================
-// TOPUP DIAMONDS / MIDTRANS ORDERS
+// TOPUP DIAMONDS / DUITKU ORDERS & PRICE LIST
 // ==========================================
 
-async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmount, snapToken = null, paymentType = null, paymentDetails = null }) {
+async function queryDiamondPackages() {
+  if (pool && !closed) {
+    try {
+      const res = await pool.query('SELECT * FROM diamond_packages WHERE is_active = TRUE ORDER BY sort_order ASC, price ASC');
+      if (res.rows && res.rows.length > 0) {
+        return res.rows.map(r => ({
+          id: r.id,
+          name: r.name,
+          diamonds: Number(r.diamonds),
+          coins: Number(r.diamonds),
+          price: Number(r.price),
+          formattedPrice: r.formatted_price,
+          description: r.description,
+          subtitle: r.subtitle,
+          badge: r.badge,
+          icon: r.icon,
+          sortOrder: Number(r.sort_order),
+          isActive: Boolean(r.is_active)
+        }));
+      }
+    } catch (err) {
+      console.warn('[PG QUERY PACKAGES]', err.message);
+    }
+  }
+  return Array.from(state.diamondPackages.values()).filter(p => p.isActive);
+}
+
+async function getDiamondPackageById(id) {
+  if (!id) return null;
+  if (pool && !closed) {
+    try {
+      const res = await pool.query('SELECT * FROM diamond_packages WHERE id = $1 AND is_active = TRUE', [id]);
+      if (res.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          name: r.name,
+          diamonds: Number(r.diamonds),
+          coins: Number(r.diamonds),
+          price: Number(r.price),
+          formattedPrice: r.formatted_price,
+          description: r.description,
+          subtitle: r.subtitle,
+          badge: r.badge,
+          icon: r.icon,
+          sortOrder: Number(r.sort_order),
+          isActive: Boolean(r.is_active)
+        };
+      }
+    } catch {}
+  }
+  const pkg = state.diamondPackages.get(id);
+  return pkg && pkg.isActive ? pkg : null;
+}
+
+async function createTopupOrder({ orderId, userId, packageId, diamonds = null, grossAmount = null, snapToken = null, paymentType = null, paymentDetails = null }) {
+  // Ambil paket diamond langsung dari database untuk validasi jumlah diamond & harga resmi
+  const pkg = await getDiamondPackageById(packageId);
+  const finalDiamonds = pkg ? pkg.diamonds : Number(diamonds || 0);
+  const finalGrossAmount = pkg ? pkg.price : Number(grossAmount || 0);
+
   const now = new Date().toISOString();
   const order = {
     orderId,
     userId,
     packageId,
-    diamonds: Number(diamonds),
-    grossAmount: Number(grossAmount),
+    diamonds: finalDiamonds,
+    grossAmount: finalGrossAmount,
     status: 'pending',
     snapToken,
     paymentType,
@@ -1236,7 +2029,7 @@ async function createTopupOrder({ orderId, userId, packageId, diamonds, grossAmo
          payment_type = EXCLUDED.payment_type,
          payment_details = EXCLUDED.payment_details,
          updated_at = EXCLUDED.updated_at`,
-      [orderId, userId, packageId, diamonds, grossAmount, 'pending', snapToken, paymentType, detailsJson, now, now]
+      [orderId, userId, packageId, finalDiamonds, finalGrossAmount, 'pending', snapToken, paymentType, detailsJson, now, now]
     );
   }
   return order;
@@ -1276,37 +2069,113 @@ async function getTopupOrder(orderId) {
   return null;
 }
 
-async function completeTopupOrder(orderId, paymentType = 'midtrans') {
+async function completeTopupOrder(orderId, paymentType = 'duitku') {
   const order = await getTopupOrder(orderId);
   if (!order) return { error: 'Order tidak ditemukan' };
-  if (order.status === 'success') {
-    const user = findUserById(order.userId);
-    return { success: true, alreadyCompleted: true, order, user: sanitizeUser(user) };
-  }
 
   const now = new Date().toISOString();
+  const chosenPayment = paymentType || order.paymentType || 'duitku';
+
+  // Atomic update di database PostgreSQL untuk mencegah race condition (double credit)
+  if (pool && !closed) {
+    try {
+      const res = await pool.query(
+        `UPDATE topup_orders
+         SET status = 'success', payment_type = $1, updated_at = $2
+         WHERE order_id = $3 AND status != 'success'
+         RETURNING *`,
+        [chosenPayment, now, orderId]
+      );
+      if (res.rowCount === 0) {
+        // Order sudah diselesaikan sebelumnya oleh request lain (idempotent)
+        const existing = await getTopupOrder(orderId);
+        const user = findUserById(existing ? existing.userId : order.userId);
+        return { success: true, alreadyCompleted: true, order: existing || order, user: sanitizeUser(user) };
+      }
+    } catch (err) {
+      console.error('[DB COMPLETE ORDER ERROR]', err.message);
+      return { error: 'Gagal menyelesaikan order di database.' };
+    }
+  } else {
+    if (order.status === 'success') {
+      const user = findUserById(order.userId);
+      return { success: true, alreadyCompleted: true, order, user: sanitizeUser(user) };
+    }
+  }
+
   order.status = 'success';
-  order.paymentType = paymentType || order.paymentType || 'midtrans';
+  order.paymentType = chosenPayment;
   order.updatedAt = now;
   state.topupOrders.set(orderId, order);
   persistLocalFallback();
-
-  if (pool && !closed) {
-    await execPg(
-      `UPDATE topup_orders
-       SET status = 'success', payment_type = $1, updated_at = $2
-       WHERE order_id = $3`,
-      [order.paymentType, now, orderId]
-    );
-  }
 
   const awardResult = awardUserPoints(order.userId, order.diamonds);
   return {
     success: true,
     order,
     diamondsAwarded: order.diamonds,
+    coinsAwarded: order.diamonds,
     user: awardResult ? awardResult.user : sanitizeUser(findUserById(order.userId))
   };
+}
+
+function listUserTopupOrders(userId, limit = 30) {
+  if (!userId) return [];
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 30));
+  return Array.from(state.topupOrders.values())
+    .filter(o => o.userId === userId)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, safeLimit)
+    .map(o => {
+      const details = o.paymentDetails && typeof o.paymentDetails === 'object' ? o.paymentDetails : {};
+      return {
+        orderId: o.orderId,
+        id: o.orderId,
+        userId: o.userId,
+        packageId: o.packageId,
+        packageName: `${Number(o.diamonds || 0).toLocaleString('id-ID')} Coins`,
+        coins: Number(o.diamonds || 0),
+        diamonds: Number(o.diamonds || 0),
+        grossAmount: Number(o.grossAmount || 0),
+        amountIdr: Number(o.grossAmount || 0),
+        status: o.status || 'pending',
+        reference: o.snapToken || details.reference || null,
+        paymentMethod: o.paymentType || details.paymentMethod || null,
+        paymentMethodName: details.paymentMethodName || null,
+        paymentCategory: details.paymentCategory || null,
+        bank: details.bank || null,
+        vaNumber: details.vaNumber || null,
+        qrString: details.qrString || null,
+        qrCodeUrl: details.qrCodeUrl || null,
+        paymentUrl: details.paymentUrl || null,
+        gateway: details.gateway || null,
+        createdAt: o.createdAt,
+        updatedAt: o.updatedAt
+      };
+    });
+}
+
+async function cancelTopupOrder(orderId, userId) {
+  if (!orderId) return { error: 'Order ID wajib diisi.', status: 400 };
+  const order = await getTopupOrder(orderId);
+  if (!order) return { error: 'Order topup tidak ditemukan.', status: 404 };
+  if (order.userId !== userId) return { error: 'Tidak diizinkan membatalkan order pengguna lain.', status: 403 };
+  if (order.status === 'success') return { error: 'Order yang sudah dibayar tidak dapat dibatalkan.', status: 400 };
+
+  if (order.status === 'pending') {
+    const now = new Date().toISOString();
+    if (pool && !closed) {
+      await pool.query(
+        "UPDATE topup_orders SET status = 'cancelled', updated_at = $1 WHERE order_id = $2 AND status = 'pending'",
+        [now, orderId]
+      );
+    }
+    order.status = 'cancelled';
+    order.updatedAt = now;
+    state.topupOrders.set(orderId, order);
+    persistLocalFallback();
+  }
+  return { success: true, order };
 }
 
 
@@ -1398,6 +2267,12 @@ module.exports = {
   updateUserEmail,
   updateUserProfile,
   getUserItems,
+  queryShopItems,
+  getShopItemById,
+  queryDiamondPackages,
+  getDiamondPackageById,
+  queryCoinPackages: queryDiamondPackages,
+  getCoinPackageById: getDiamondPackageById,
   purchaseItem,
   consumeUserItem,
   setUserItemQuantities,
@@ -1405,8 +2280,26 @@ module.exports = {
   awardUserPoints,
   createTopupOrder,
   getTopupOrder,
+  listUserTopupOrders,
+  cancelTopupOrder,
   completeTopupOrder,
   saveRoom,
+  getPool,
+  execPg,
+  execPgTransaction,
+  findUserById,
+  findUserByUsername,
+  ensureGlobalLeaderboardRow,
+  getUserPoints,
+  adjustUserPointsInState,
+  deductUserPoints,
+  isUserAdmin,
+  setUserRole,
+  syncUserRoleInState,
+  REFERRAL_REWARD_COINS,
+  findUserByReferralCode,
+  getReferralInfo,
+  claimReferral,
   deleteRoom,
   loadRooms,
   close

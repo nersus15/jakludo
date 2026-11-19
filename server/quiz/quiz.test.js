@@ -8,6 +8,7 @@ const path = require('path');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-quiz-test-'));
 process.env.JAKLUDO_DATA_DIR = dataDir;
+process.env.NODE_ENV = 'test';
 
 const { io: ioClient } = require('socket.io-client');
 const { server, shutdown } = require('../index');

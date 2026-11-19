@@ -9,6 +9,7 @@ const sharp = require('sharp');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jakludo-social-'));
 process.env.JAKLUDO_DATA_DIR = dataDir;
+process.env.NODE_ENV = 'test';
 
 const { io: ioClient } = require('socket.io-client');
 const { server, rooms, shutdown } = require('../index');

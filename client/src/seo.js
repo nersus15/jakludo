@@ -1,50 +1,64 @@
 // Utilitas SEO dinamis untuk memperbarui judul halaman, meta description, Open Graph,
-// serta sinkronisasi URL parameter (?game=jakludo | ?game=monster-quiz) di PlayGo.
+// tag hreflang global, serta sinkronisasi URL parameter (?game=...) di PlayGo.
 
 const SEO_CONFIGS = {
   hub: {
-    title: 'PlayGo · Platform Game Multiplayer Online Gratis (JakLudo & Monster Quiz Battle)',
+    title: 'PlayGo · Free Online Multiplayer Browser Games (JakLudo, Chess Master, Snakes & Ladders, Monster Quiz)',
     description:
-      'PlayGo adalah platform game multiplayer realtime gratis di browser. Mainkan JakLudo (Ludo online 2–4 pemain) dan Monster Quiz Battle (duel kuis RPG 2–3 pemain) bersama teman & grup!',
+      'Play free real-time multiplayer browser games with friends worldwide on PlayGo! Enjoy JakLudo (2–4 players), Chess Master (Elo rated online chess), Snakes and Ladders, and Monster Quiz Battle RPG instantly with no download.',
     image: '/playgo-logo.jpg',
     query: ''
   },
   ludo: {
-    title: 'Main JakLudo Online (2–4 Pemain) · PlayGo Multiplayer',
+    title: 'Play JakLudo Online (2–4 Player Multiplayer Ludo) · PlayGo',
     description:
-      'Mainkan JakLudo di PlayGo! Game Ludo multiplayer realtime 2–4 pemain dengan petak Black Hole, item strategi (Force Return & Perisai), obrolan grup, dan papan peringkat global.',
+      'Play real-time 2–4 player Ludo online free in your browser on PlayGo! Black Hole traps, strategic items (Force Return & Shield), custom skins, friend rooms, and global leaderboard.',
     image: '/playgo-logo.jpg',
     query: '?game=jakludo'
   },
   quiz: {
-    title: 'Monster Quiz Battle (Duel Kuis RPG 2–3 Pemain) · PlayGo Multiplayer',
+    title: 'Monster Quiz Battle (2–3 Player Online RPG Trivia) · PlayGo',
     description:
-      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +10 poin setiap menang!',
+      'Challenge friends worldwide in Monster Quiz Battle RPG on PlayGo! Answer general knowledge & math questions in 15s, use 50:50 Answer Hints, battle monsters, and earn PlayGo Coins.',
     image: '/playgo-logo.jpg',
     query: '?game=monster-quiz'
   },
-  shop: {
-    title: 'Toko Item & Hints Jawaban · PlayGo Multiplayer',
+  chess: {
+    title: 'Chess Master (Play Online Multiplayer Chess & Elo Rating) · PlayGo',
     description:
-      'Tukarkan poin kemenanganmu di Toko Item PlayGo! Beli Hints Jawaban (50:50) untuk Monster Quiz Battle serta Perisai dan Force Return untuk JakLudo.',
+      'Master the board and play free online multiplayer chess worldwide on PlayGo! Official Elo ratings, Bullet, Blitz & Rapid clocks, Private Rooms, AI Bot practice, and PGN move analysis.',
+    image: '/playgo-logo.jpg',
+    query: '?game=chess-master'
+  },
+  snakes: {
+    title: 'Snakes and Ladders Online Multiplayer (Ular Tangga 100 Tiles) · PlayGo',
+    description:
+      'Play classic Snakes and Ladders (Ular Tangga) online multiplayer free on PlayGo! Roll the dice across 100 tiles with Smart Matchmaking, Private Rooms, AI opponents, and global rankings.',
+    image: '/playgo-logo.jpg',
+    query: '?game=snakes-and-ladders'
+  },
+  shop: {
+    title: 'PlayGo Marketplace · Ludo Skins, Strategy Items & Top-Up Shop',
+    description:
+      'Explore the PlayGo Marketplace! Unlock exclusive JakLudo pawn skins, buy 50:50 Answer Hints, Shield, and Force Return items, or convert Coins into Diamonds.',
     image: '/playgo-logo.jpg'
   },
   leaderboard: {
-    title: 'Peringkat Global JakLudo & Monster Quiz Battle · PlayGo',
+    title: 'Global Leaderboard · JakLudo, Chess Elo, Snakes & Quiz | PlayGo',
     description:
-      'Lihat papan peringkat global pemain terbaik JakLudo dan Monster Quiz Battle di platform PlayGo.',
+      'View PlayGo worldwide global rankings across JakLudo, Chess Master Elo, Snakes and Ladders, and Monster Quiz Battle.',
     image: '/playgo-logo.jpg'
   },
   friends: {
-    title: 'Teman & Chat Private · PlayGo Multiplayer',
+    title: 'Friends & Private Chat · PlayGo Global Multiplayer',
     description:
-      'Tambah teman, kirim pesan private, dan undang temanmu bermain JakLudo atau Monster Quiz Battle secara realtime di PlayGo.',
+      'Add friends worldwide, send real-time private messages, and invite players directly to JakLudo, Chess Master, Snakes and Ladders, or Monster Quiz rooms.',
     image: '/playgo-logo.jpg'
   },
   groups: {
-    title: 'Grup & Chat Mabar · PlayGo Multiplayer',
+    title: 'Gaming Groups & Voice/Media Chat · PlayGo Multiplayer',
     description:
-      'Buat grup mabar di PlayGo, mengobrol lewat pesan teks/suara/foto, dan mulai match grup JakLudo maupun Monster Quiz Battle.',
+      'Create multiplayer gaming groups on PlayGo, share voice notes and photos, and launch group matches instantly in the browser.',
     image: '/playgo-logo.jpg'
   }
 };
@@ -61,6 +75,8 @@ export function getInitialGameModeFromUrl() {
   const game = String(params.get('game') || '').toLowerCase();
   if (game === 'jakludo' || game === 'ludo') return 'ludo';
   if (game === 'monster-quiz' || game === 'quiz') return 'quiz';
+  if (game === 'chess-master' || game === 'chess') return 'chess';
+  if (game === 'snakes-and-ladders' || game === 'snakes' || game === 'ular-tangga') return 'snakes';
   return 'hub';
 }
 
@@ -77,8 +93,15 @@ export function applySeo({ gameMode = 'hub', modal = null, roomCode = null }) {
   const cfg = SEO_CONFIGS[key] || SEO_CONFIGS.hub;
 
   let title = cfg.title;
-  if (roomCode && (gameMode === 'ludo' || gameMode === 'quiz')) {
-    const gameLabel = gameMode === 'quiz' ? 'Monster Quiz Battle' : 'JakLudo';
+  if (roomCode && (gameMode === 'ludo' || gameMode === 'quiz' || gameMode === 'chess' || gameMode === 'snakes')) {
+    const gameLabel =
+      gameMode === 'quiz'
+        ? 'Monster Quiz Battle'
+        : gameMode === 'chess'
+        ? 'Chess Master'
+        : gameMode === 'snakes'
+        ? 'Ular Tangga'
+        : 'JakLudo';
     title = `Room ${roomCode} · ${gameLabel} — PlayGo`;
   }
 
@@ -91,17 +114,26 @@ export function applySeo({ gameMode = 'hub', modal = null, roomCode = null }) {
 
   if (typeof window !== 'undefined' && window.history?.replaceState) {
     const modeCfg = SEO_CONFIGS[gameMode] || SEO_CONFIGS.hub;
-    const targetSearch = modeCfg.query || '';
+    const baseSearch = modeCfg.query || '';
+    const currentParams = new URLSearchParams(window.location.search || '');
+    const hlParam = (currentParams.get('hl') || currentParams.get('lang') || '').toLowerCase();
+    const validHl = hlParam === 'en' || hlParam === 'id' ? hlParam : '';
+    const sep = baseSearch ? '&' : '?';
+    const targetSearch = validHl ? `${baseSearch}${sep}hl=${validHl}` : baseSearch;
     const currentSearch = window.location.search || '';
     if (
-      (currentSearch === '' || currentSearch.startsWith('?game=')) &&
+      (currentSearch === '' || currentSearch.startsWith('?game=') || currentSearch.startsWith('?hl=')) &&
       currentSearch !== targetSearch
     ) {
       const nextUrl = `${window.location.pathname}${targetSearch}${window.location.hash || ''}`;
       window.history.replaceState(window.history.state, '', nextUrl);
     }
+    const basePageUrl = `${window.location.origin}${window.location.pathname}${baseSearch}`;
     const canonicalUrl = `${window.location.origin}${window.location.pathname}${targetSearch}`;
     setMetaTag('link[rel="canonical"]', 'href', canonicalUrl);
+    setMetaTag('link[rel="alternate"][hreflang="x-default"]', 'href', basePageUrl);
+    setMetaTag('link[rel="alternate"][hreflang="en"]', 'href', `${basePageUrl}${sep}hl=en`);
+    setMetaTag('link[rel="alternate"][hreflang="id"]', 'href', `${basePageUrl}${sep}hl=id`);
     setMetaTag('meta[property="og:url"]', 'content', canonicalUrl);
   }
 }

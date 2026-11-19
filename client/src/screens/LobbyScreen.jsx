@@ -82,6 +82,11 @@ function PlayerSlot({ player, index, playerId, onViewProfile }) {
               <Icon name="crown" size={14} /> King
             </span>
           )}
+          {player.equippedSkin && (
+            <span className="badge badge--diamond" title={`Skin Bidak: ${player.equippedSkin.name}`}>
+              💎 {player.equippedSkin.name}
+            </span>
+          )}
         </strong>
         <span className="muted">{role}</span>
       </span>
@@ -92,7 +97,7 @@ function PlayerSlot({ player, index, playerId, onViewProfile }) {
   );
 }
 
-export default function LobbyScreen({ room, me, playerId, currentUser, error, actions, social, onOpenFriends, onViewProfile }) {
+export default function LobbyScreen({ room, me, playerId, currentUser, error, actions, social, onOpenFriends, onOpenShop, onViewProfile }) {
   const [copyState, setCopyState] = useState('');
   const [groupMembers, setGroupMembers] = useState([]);
   const [inviteStatus, setInviteStatus] = useState({}); // { [userId]: 'sending' | 'sent' }
@@ -211,6 +216,24 @@ export default function LobbyScreen({ room, me, playerId, currentUser, error, ac
             />
           ))}
         </ul>
+        {onOpenShop && (
+          <div className="lobby__skin-bar">
+            <span className="muted">
+              Skin Bidak:{' '}
+              <strong>{currentUser?.equippedLudoSkin?.name || me?.equippedSkin?.name || 'Standar PlayGo'}</strong>
+            </span>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => {
+                sound.playClick();
+                onOpenShop();
+              }}
+            >
+              🎨 Skin Bidak &amp; Diamond
+            </button>
+          </div>
+        )}
         {isHost && (
           <div className="lobby__bots">
             {count < 4 && (

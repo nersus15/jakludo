@@ -68,10 +68,15 @@ services:
       # Google OAuth 2.0 (Sign-In with Google)
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      # Midtrans Payment Gateway
-      - MIDTRANS_SERVER_KEY=${MIDTRANS_SERVER_KEY:-}
-      - MIDTRANS_CLIENT_KEY=${MIDTRANS_CLIENT_KEY:-}
-      - MIDTRANS_IS_PRODUCTION=${MIDTRANS_IS_PRODUCTION:-0}
+      # Duitku Payment Gateway (POP)
+      - DUITKU_MERCHANT_CODE=${DUITKU_MERCHANT_CODE:-}
+      - DUITKU_API_KEY=${DUITKU_API_KEY:-}
+      - DUITKU_IS_PRODUCTION=${DUITKU_IS_PRODUCTION:-0}
+      - DUITKU_CALLBACK_URL=${DUITKU_CALLBACK_URL:-}
+      # Google reCAPTCHA v3
+      - RECAPTCHA_SITE_KEY=${RECAPTCHA_SITE_KEY:-}
+      - RECAPTCHA_SECRET_KEY=${RECAPTCHA_SECRET_KEY:-}
+      - RECAPTCHA_MIN_SCORE=${RECAPTCHA_MIN_SCORE:-0.5}
     volumes:
       # Folder data lokal tetap di-mount agar saat pertama kali deploy dengan PostgreSQL,
       # file jakludo.db lama otomatis dimigrasikan ke PostgreSQL dan hasil backup tersimpan di host.

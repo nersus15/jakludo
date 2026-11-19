@@ -12,12 +12,18 @@ import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
 import MonsterQuizScreen from './screens/MonsterQuizScreen';
+import ChessMasterScreen from './screens/ChessMasterScreen';
+import SnakesLaddersScreen from './screens/SnakesLaddersScreen';
 import AudioSettingsModal from './AudioSettingsModal';
 import PlayerProfileModal from './social/PlayerProfileModal';
+import ReferralPromptModal from './components/ReferralPromptModal';
+import { storage } from './storage';
 import { useAuth } from './hooks/useAuth';
 import { useGameRoom } from './hooks/useGameRoom';
 import { useSocial } from './hooks/useSocial';
 import { useMonsterQuiz } from './hooks/useMonsterQuiz';
+import { useChessMaster } from './hooks/useChessMaster';
+import { useSnakesLadders } from './hooks/useSnakesLadders';
 import { useActiveRooms } from './hooks/useActiveRooms';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useTheme } from './hooks/useTheme';
@@ -52,6 +58,7 @@ export default function App() {
   const [profileUserId, setProfileUserId] = useState('');
   const [initialChatFriendId, setInitialChatFriendId] = useState('');
   const [cropRequest, setCropRequest] = useState(null);
+  const [showReferralPrompt, setShowReferralPrompt] = useState(false);
   const [audio, setAudio] = useState(sound.getState());
   const [sheet, setSheet] = useState(null); // bottom sheet di layar permainan: 'chat' | 'scores'
   const [leaveRequest, setLeaveRequest] = useState(0); // Back saat bermain Ludo membuka konfirmasi keluar
@@ -112,6 +119,22 @@ export default function App() {
     onNeedLogin: () => navigateTo({ modal: 'auth' }),
     active: gameMode === 'quiz'
   });
+  const chess = useChessMaster({
+    socket: game.socket,
+    authToken: auth.authToken,
+    currentUser: auth.currentUser,
+    onUpdateUser: auth.setCurrentUser,
+    onNeedLogin: () => navigateTo({ modal: 'auth' }),
+    active: gameMode === 'chess'
+  });
+  const snakes = useSnakesLadders({
+    socket: game.socket,
+    authToken: auth.authToken,
+    currentUser: auth.currentUser,
+    onUpdateUser: auth.setCurrentUser,
+    onNeedLogin: () => navigateTo({ modal: 'auth' }),
+    active: gameMode === 'snakes'
+  });
   const social = useSocial({
     socket: game.socket,
     authToken: auth.authToken,
@@ -149,10 +172,60 @@ export default function App() {
     }
   }, [quiz.room?.code, game.screen]);
   useEffect(() => {
+    if (chess.room?.code && game.screen === 'home') {
+      setGameMode('chess');
+      if (window.history.state?.playgo) window.history.replaceState({ ...window.history.state, mode: 'chess' }, '');
+    }
+  }, [chess.room?.code, game.screen]);
+  useEffect(() => {
+    if (snakes.room?.code && game.screen === 'home') {
+      setGameMode('snakes');
+      if (window.history.state?.playgo) window.history.replaceState({ ...window.history.state, mode: 'snakes' }, '');
+    }
+  }, [snakes.room?.code, game.screen]);
+  useEffect(() => {
     const activeMode = game.screen === 'room' ? 'ludo' : gameMode;
-    const activeCode = game.room?.code || quiz.room?.code || null;
+    const activeCode = game.room?.code || quiz.room?.code || chess.room?.code || snakes.room?.code || null;
     applySeo({ gameMode: activeMode, modal, roomCode: activeCode });
-  }, [gameMode, game.screen, game.room?.code, quiz.room?.code, modal]);
+  }, [gameMode, game.screen, game.room?.code, quiz.room?.code, chess.room?.code, snakes.room?.code, modal]);
+
+  // Tangkap ?ref=... dari link referral
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const refParam = params.get('ref');
+        if (refParam && /^\d{6}$/.test(refParam.trim())) {
+          storage.set('pending_referral', refParam.trim());
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Munculkan popup referral saat user pertama kali login dan masuk ke platform
+  useEffect(() => {
+    if (auth.currentUser && !auth.checking && !auth.currentUser.referredBy) {
+      const seenKey = `ref_prompt_seen_${auth.currentUser.id}`;
+      if (!storage.get(seenKey)) {
+        setShowReferralPrompt(true);
+      }
+    }
+  }, [auth.currentUser, auth.checking]);
+
+  const handleCloseReferralPrompt = useCallback(() => {
+    if (auth.currentUser?.id) {
+      storage.set(`ref_prompt_seen_${auth.currentUser.id}`, '1');
+    }
+    setShowReferralPrompt(false);
+  }, [auth.currentUser?.id]);
+
+  const handleReferralClaimSuccess = useCallback(updatedUser => {
+    if (updatedUser) {
+      auth.setCurrentUser(updatedUser);
+      storage.set(`ref_prompt_seen_${updatedUser.id}`, '1');
+    }
+    storage.remove('pending_referral');
+  }, [auth]);
 
   useEffect(() => {
     const st = window.history.state?.playgo ? window.history.state : {};
@@ -190,15 +263,17 @@ export default function App() {
         apply(st);
         return;
       }
-      if (r.inGame || r.inQuizBattle) {
+      if (r.inGame || r.inQuizBattle || r.inChessBattle || r.inSnakesBattle) {
         restore(r.currentUrl);
         if (r.inGame) setLeaveRequest(n => n + 1);
         return;
       }
-      if (r.inLobby || r.inQuizRoom) {
+      if (r.inLobby || r.inQuizRoom || r.inChessRoom || r.inSnakesRoom) {
         // Back dari lobby = keluar room, tetap di halaman game yang sama
         if (r.inLobby) r.leaveLudo();
-        else r.leaveQuiz();
+        else if (r.inQuizRoom) r.leaveQuiz();
+        else if (r.inChessRoom) r.leaveChess();
+        else r.leaveSnakes();
         restore(gameModeUrl(cur.mode));
         return;
       }
@@ -240,31 +315,44 @@ export default function App() {
   const inGame = game.screen === 'room' && game.room?.started;
   const inLobby = game.screen === 'room' && game.room && !game.room.started;
   const isMobileFeaturePage =
-    isMobileView && !inGame && (modal === 'friends' || modal === 'groups' || modal === 'shop');
+    isMobileView && !inGame && (modal === 'friends' || modal === 'groups');
   const quizRoom = quiz.room;
+  const chessRoom = chess.room;
+  const snakesRoom = snakes.room;
   roomRef.current = {
     inRoom: game.screen === 'room',
     inGame,
     inLobby: game.screen === 'room' && !inGame,
     inQuizRoom: !!quizRoom,
     inQuizBattle: !!quizRoom && quizRoom.phase !== 'lobby' && quizRoom.phase !== 'finished',
+    inChessRoom: !!chessRoom,
+    inChessBattle: !!chessRoom && chessRoom.phase === 'playing',
+    inSnakesRoom: !!snakesRoom,
+    inSnakesBattle: !!snakesRoom && snakesRoom.status === 'playing',
     currentUrl: window.location.pathname + window.location.search,
     profileOpen: !!profileUserId,
     closeProfile: () => setProfileUserId(''),
     leaveLudo: game.actions.leaveRoom,
-    leaveQuiz: quiz.actions.leaveRoom
+    leaveQuiz: quiz.actions.leaveRoom,
+    leaveChess: chess.actions.leaveRoom,
+    leaveSnakes: snakes.actions.leaveRoom
   };
 
-  const showBottomNav = !inGame && !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby');
+  const showBottomNav =
+    !inGame &&
+    !(gameMode === 'quiz' && quiz.room && quiz.room.phase !== 'lobby') &&
+    !(gameMode === 'chess' && chess.room && chess.room.phase !== 'lobby') &&
+    !(gameMode === 'snakes' && snakes.room && snakes.room.status === 'playing');
 
   return (
     <div className={`app ${inGame ? 'app--game' : ''} ${showBottomNav ? 'app--bottom-nav' : ''}`}>
       <a className="skip-link" href="#main">Langsung ke konten</a>
       <ReconnectBar {...network} />
 
-      {inGame ? (
+      {inGame && modal !== 'shop' ? (
         <GameHeader
           room={game.room}
+          isOut={!!game.me?.isOut}
           audio={audio}
           network={network}
           onOpenShop={open('shop')}
@@ -281,7 +369,7 @@ export default function App() {
           friendBadgeCount={social.friendBadgeCount}
           groupBadgeCount={social.groupBadgeCount}
           onGoHome={
-            isMobileFeaturePage
+            isMobileFeaturePage || modal === 'shop'
               ? () => {
                   sound.playClick();
                   close();
@@ -310,13 +398,19 @@ export default function App() {
         error={inGame ? game.error : ''}
         memberNotice={game.memberNotice}
         roomInvite={social.roomInvite}
-        chatToast={game.chatToast}
+        chatToast={game.chatToast || quiz.chatToast || chess.chatToast || snakes.chatToast}
         reactions={game.reactions}
         onAcceptRoomInvite={(targetCode, inviteGameType) => {
           social.actions.dismissRoomInvite();
           if (inviteGameType === 'quiz') {
             navigateTo({ mode: 'quiz' });
             quiz.actions.joinRoomByCode(targetCode);
+          } else if (inviteGameType === 'chess') {
+            navigateTo({ mode: 'chess' });
+            chess.actions.joinRoomByCode(targetCode);
+          } else if (inviteGameType === 'snakes') {
+            navigateTo({ mode: 'snakes' });
+            snakes.actions.joinRoomByCode(targetCode);
           } else {
             navigateTo({ mode: 'ludo' });
             game.actions.joinRoom(targetCode);
@@ -324,13 +418,48 @@ export default function App() {
         }}
         onDismissRoomInvite={social.actions.dismissRoomInvite}
         onOpenChat={() => {
-          game.actions.dismissChatToast();
-          if (inGame) changeSheet('chat');
+          if (game.chatToast) {
+            game.actions.dismissChatToast();
+            if (inGame) changeSheet('chat');
+          } else if (quiz.chatToast) {
+            quiz.actions.dismissChatToast();
+            quiz.actions.setChatOpen(true);
+          } else if (chess.chatToast) {
+            chess.actions.dismissChatToast();
+            chess.actions.setChatOpen(true);
+          } else if (snakes.chatToast) {
+            snakes.actions.dismissChatToast();
+            snakes.actions.setChatOpen(true);
+          }
         }}
-        onDismissChat={game.actions.dismissChatToast}
+        onDismissChat={() => {
+          game.actions.dismissChatToast();
+          quiz.actions.dismissChatToast?.();
+          chess.actions.dismissChatToast?.();
+          snakes.actions.dismissChatToast?.();
+        }}
       />
 
-      {inGame ? (
+      {modal === 'shop' ? (
+        <Suspense
+          fallback={
+            <main className="loading-screen" id="main" role="status">
+              <span className="spinner" aria-hidden="true" /> Memuat PlayGo Marketplace...
+            </main>
+          }
+        >
+          <ShopModal
+            isOpen
+            asPage
+            onClose={close}
+            currentUser={auth.currentUser}
+            onUpdateUser={auth.setCurrentUser}
+            authToken={auth.authToken}
+            initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
+            onOpenAuth={open('auth')}
+          />
+        </Suspense>
+      ) : inGame ? (
         <GameScreen game={game} itemCatalog={itemCatalog} sheet={sheet} onSheetChange={changeSheet} onOpenShop={open('shop')} />
       ) : isMobileFeaturePage ? (
         <Suspense
@@ -340,17 +469,6 @@ export default function App() {
             </main>
           }
         >
-          {modal === 'shop' && (
-            <ShopModal
-              isOpen
-              asPage
-              onClose={close}
-              currentUser={auth.currentUser}
-              onUpdateUser={auth.setCurrentUser}
-              authToken={auth.authToken}
-              initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
-            />
-          )}
           {modal === 'friends' && (
             <FriendsModal
               isOpen
@@ -372,6 +490,7 @@ export default function App() {
               social={social}
               gameActions={game.actions}
               quizActions={quiz.actions}
+              snakesActions={snakes.actions}
               onSelectGameMode={mode => navigateTo({ mode })}
               onViewProfile={openProfile}
               onOpenAuth={open('auth')}
@@ -388,6 +507,7 @@ export default function App() {
           actions={game.actions}
           social={social}
           onOpenFriends={open('friends')}
+          onOpenShop={open('shop')}
           onViewProfile={openProfile}
         />
       ) : game.screen === 'room' ? (
@@ -407,6 +527,32 @@ export default function App() {
           onOpenAudio={openAudio}
           onViewProfile={openProfile}
         />
+      ) : gameMode === 'chess' ? (
+        <ChessMasterScreen
+          chess={chess}
+          currentUser={auth.currentUser}
+          onBackToMenu={() => {
+            sound.playClick();
+            navigateTo({ mode: 'hub' });
+          }}
+          onOpenAuth={open('auth')}
+          onOpenShop={open('shop')}
+          onOpenAudio={openAudio}
+          onViewProfile={openProfile}
+        />
+      ) : gameMode === 'snakes' ? (
+        <SnakesLaddersScreen
+          snakes={snakes}
+          currentUser={auth.currentUser}
+          onBackToMenu={() => {
+            sound.playClick();
+            navigateTo({ mode: 'hub' });
+          }}
+          onOpenAuth={open('auth')}
+          onOpenLeaderboard={open('leaderboard')}
+          onOpenAudio={openAudio}
+          onViewProfile={openProfile}
+        />
       ) : (
         <HomeScreen
           user={auth.currentUser}
@@ -416,6 +562,8 @@ export default function App() {
           error={game.error}
           activeRooms={activeRooms}
           activeQuizRoom={quiz.room}
+          activeChessRoom={chess.room}
+          activeSnakesRoom={snakes.room}
           isInstalled={pwa.isInstalled}
           actions={game.actions}
           friendBadgeCount={social.friendBadgeCount}
@@ -470,6 +618,9 @@ export default function App() {
             onLoginSuccess={(user, token) => {
               auth.loginSuccess(user, token);
               close();
+              if (!user?.referredBy && !storage.get(`ref_prompt_seen_${user?.id}`)) {
+                setShowReferralPrompt(true);
+              }
             }}
           />
         )}
@@ -480,17 +631,7 @@ export default function App() {
             currentUser={auth.currentUser}
             socket={game.socket}
             onViewProfile={openProfile}
-            initialTab={gameMode === 'quiz' ? 'quiz' : 'ludo'}
-          />
-        )}
-        {!isMobileFeaturePage && modal === 'shop' && (
-          <ShopModal
-            isOpen
-            onClose={close}
-            currentUser={auth.currentUser}
-            onUpdateUser={auth.setCurrentUser}
-            authToken={auth.authToken}
-            initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
+            initialTab={gameMode === 'quiz' ? 'quiz' : gameMode === 'chess' ? 'chess' : gameMode === 'snakes' ? 'snakes' : 'ludo'}
           />
         )}
         {!isMobileFeaturePage && modal === 'friends' && (
@@ -512,6 +653,7 @@ export default function App() {
             social={social}
             gameActions={game.actions}
             quizActions={quiz.actions}
+            snakesActions={snakes.actions}
             onSelectGameMode={mode => navigateTo({ mode })}
             onViewProfile={openProfile}
             onOpenAuth={open('auth')}
@@ -546,6 +688,12 @@ export default function App() {
           setCropRequest(null);
           req?.resolve(croppedFile);
         }}
+      />
+      <ReferralPromptModal
+        isOpen={showReferralPrompt && !!auth.currentUser && !auth.currentUser.referredBy}
+        onClose={handleCloseReferralPrompt}
+        authToken={auth.authToken}
+        onSuccess={handleReferralClaimSuccess}
       />
     </div>
   );

@@ -771,126 +771,588 @@ test('Update profil: nama, username, email, dan password', async () => {
   assert.equal(loginBody.user.id, user.id);
 });
 
-test('topup diamonds dengan midtrans core api (config, charge, verify, simulate, points award)', async () => {
-  // 1. GET /api/topup/config
-  const cfgRes = await fetch(`${url}/api/topup/config`);
+test('Google reCAPTCHA v3: config endpoint dan verifikasi token login / register', async () => {
+  // 1. GET /api/auth/recaptcha/config
+  const cfgRes = await fetch(`${url}/api/auth/recaptcha/config`);
   assert.equal(cfgRes.status, 200);
   const cfg = await cfgRes.json();
   assert.equal(cfg.success, true);
-  assert.equal(cfg.packages.length, 6);
-  assert.ok(Array.isArray(cfg.paymentMethods));
-  assert.ok(cfg.paymentMethods.length >= 5);
+  assert.equal(typeof cfg.enabled, 'boolean');
 
-  const p50 = cfg.packages.find(p => p.diamonds === 50);
-  const p120 = cfg.packages.find(p => p.diamonds === 120);
-  const p260 = cfg.packages.find(p => p.diamonds === 260);
-  const p700 = cfg.packages.find(p => p.diamonds === 700);
-  const p1500 = cfg.packages.find(p => p.diamonds === 1500);
-  const p3250 = cfg.packages.find(p => p.diamonds === 3250);
+  // 2. Register dengan mock recaptchaToken
+  const testUser = 'rc_' + Math.random().toString(36).slice(2, 8);
+  const regRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: testUser,
+      password: 'StrongPassword123!',
+      name: 'User Recaptcha',
+      recaptchaToken: 'mock_recaptcha_token'
+    })
+  });
+  assert.equal(regRes.status, 200);
+  const regBody = await regRes.json();
+  assert.equal(regBody.success, true);
+  assert.equal(regBody.user.username, testUser);
 
-  assert.ok(p50, 'Paket 50 diamond harus ada');
-  assert.equal(p50.price, 5000, '50 diamonds = Rp 5.000');
-  assert.ok(p120, 'Paket 120 diamond harus ada');
-  assert.equal(p120.price, 10000, '120 diamonds = Rp 10.000');
-  assert.equal(p120.badge, 'Populer');
-  assert.ok(p260, 'Paket 260 diamond harus ada');
-  assert.equal(p260.price, 20000, '260 diamonds = Rp 20.000');
-  assert.ok(p700, 'Paket 700 diamond harus ada');
-  assert.equal(p700.price, 50000, '700 diamonds = Rp 50.000');
-  assert.equal(p700.badge, 'Bonus 100');
-  assert.ok(p1500, 'Paket 1.500 diamond harus ada');
-  assert.equal(p1500.price, 100000, '1.500 diamonds = Rp 100.000');
-  assert.equal(p1500.badge, 'Bonus 250');
-  assert.ok(p3250, 'Paket 3.250 diamond harus ada');
-  assert.equal(p3250.price, 200000, '3.250 diamonds = Rp 200.000');
-  assert.equal(p3250.badge, 'Bonus 750');
+  // 3. Login dengan mock recaptchaToken
+  const loginRes = await fetch(`${url}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: testUser,
+      password: 'StrongPassword123!',
+      recaptchaToken: 'mock_recaptcha_token'
+    })
+  });
+  assert.equal(loginRes.status, 200);
+  const loginBody = await loginRes.json();
+  assert.equal(loginBody.success, true);
+  assert.equal(loginBody.user.id, regBody.user.id);
+});
 
-  // 2. Register user untuk topup
-  const topupUser = 'tp_' + Math.random().toString(36).slice(2, 8);
-  const reg = await register(topupUser);
-  const token = reg.token;
-  const initialPoints = reg.user.points; // default starter points (200)
+test('topup diamonds multi-gateway (switch DOKU <-> Duitku di .env, webhook verify & points award)', async () => {
+  const prevEnv = {
+    PAYMENT_GATEWAY: process.env.PAYMENT_GATEWAY,
+    DOKU_CLIENT_ID: process.env.DOKU_CLIENT_ID,
+    DOKU_SECRET_KEY: process.env.DOKU_SECRET_KEY,
+    DOKU_MERCHANT_CODE: process.env.DOKU_MERCHANT_CODE
+  };
 
-  // 3. Charge topup order untuk paket 120 diamonds via BCA Virtual Account (Core API)
-  const chargeRes = await fetch(`${url}/api/topup/charge`, {
+  try {
+    // A. Pastikan default / PAYMENT_GATEWAY=doku aktif dengan DOKU
+    process.env.PAYMENT_GATEWAY = 'doku';
+    const cfgRes = await fetch(`${url}/api/topup/config`);
+    assert.equal(cfgRes.status, 200);
+    const cfg = await cfgRes.json();
+    assert.equal(cfg.success, true);
+    assert.equal(cfg.gateway, 'doku');
+    assert.equal(cfg.mode, 'direct_api');
+    assert.equal(cfg.packages.length, 6);
+    assert.ok(Array.isArray(cfg.paymentMethods) && cfg.paymentMethods.length === 6);
+    assert.equal(cfg.popJsUrl, undefined);
+
+    const p50 = cfg.packages.find(p => p.diamonds === 50);
+    const p120 = cfg.packages.find(p => p.diamonds === 120);
+    const p260 = cfg.packages.find(p => p.diamonds === 260);
+    const p700 = cfg.packages.find(p => p.diamonds === 700);
+    const p1500 = cfg.packages.find(p => p.diamonds === 1500);
+    const p3250 = cfg.packages.find(p => p.diamonds === 3250);
+
+    assert.ok(p50 && p50.price === 5000);
+    assert.ok(p120 && p120.price === 10000 && p120.badge === 'Populer');
+    assert.ok(p260 && p260.price === 20000);
+    assert.ok(p700 && p700.price === 50000 && p700.badge === 'Bonus 100');
+    assert.ok(p1500 && p1500.price === 100000 && p1500.badge === 'Bonus 250');
+    assert.ok(p3250 && p3250.price === 200000 && p3250.badge === 'Bonus 750');
+
+    // 2. Register user untuk topup
+    const topupUser = 'tp_' + Math.random().toString(36).slice(2, 8);
+    const reg = await register(topupUser);
+    const token = reg.token;
+    const initialPoints = reg.user.points;
+
+    // 3. Create transaksi via DOKU (BCA VA)
+    const dokuRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_120', paymentMethod: 'BC' })
+    });
+    assert.equal(dokuRes.status, 200);
+    const dokuBody = await dokuRes.json();
+    assert.equal(dokuBody.success, true);
+    assert.equal(dokuBody.gateway, 'doku');
+    assert.ok(dokuBody.orderId);
+    assert.ok(dokuBody.reference.startsWith('doku_ref_'));
+    assert.equal(dokuBody.paymentMethod, 'BC');
+    assert.ok(dokuBody.vaNumber);
+    assert.equal(dokuBody.package.diamonds, 120);
+
+    // 4. Simulasi pembayaran topup
+    const simRes = await fetch(`${url}/api/topup/simulate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ orderId: dokuBody.orderId })
+    });
+    assert.equal(simRes.status, 200);
+    const simBody = await simRes.json();
+    assert.equal(simBody.diamondsAwarded, 120);
+    assert.equal(simBody.user.points, initialPoints + 120);
+
+    // 5. Cek verify endpoint
+    const verifyRes = await fetch(`${url}/api/topup/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ orderId: dokuBody.orderId })
+    });
+    assert.equal(verifyRes.status, 200);
+    const verifyBody = await verifyRes.json();
+    assert.equal(verifyBody.status, 'success');
+    assert.equal(verifyBody.user.points, initialPoints + 120);
+
+    // 6. Webhook Notifikasi Resmi DOKU Jokul (HMACSHA256) untuk paket 3.250
+    const dokuClientId = 'BRN-TEST-TOPUP';
+    const dokuSecret = 'SK-TEST-TOPUP-SECRET';
+    process.env.DOKU_CLIENT_ID = dokuClientId;
+    process.env.DOKU_SECRET_KEY = dokuSecret;
+    process.env.DOKU_MERCHANT_CODE = dokuClientId;
+
+    const sultanRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_3250', paymentMethod: 'SP' })
+    });
+    const sultanBody = await sultanRes.json();
+    assert.equal(sultanBody.success, true);
+    assert.equal(sultanBody.gateway, 'doku');
+
+    const dokuLib = require('./lib/doku');
+    const jokulPayloadObj = {
+      order: { invoice_number: sultanBody.orderId, amount: 200000 },
+      transaction: { status: 'SUCCESS', original_request_id: 'REQ-DOKU-SULTAN' },
+      channel: { id: 'QRIS' }
+    };
+    const rawJokulBody = JSON.stringify(jokulPayloadObj);
+    const reqId = 'req-srv-1';
+    const reqTs = new Date().toISOString().slice(0, 19) + 'Z';
+    const dokuSig = dokuLib.generateDokuSignature({
+      clientId: dokuClientId,
+      requestId: reqId,
+      requestTimestamp: reqTs,
+      requestTarget: '/api/topup/notification',
+      digest: dokuLib.generateDigest(rawJokulBody),
+      secretKey: dokuSecret
+    });
+
+    const dokuWebhookRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Client-Id': dokuClientId,
+        'Request-Id': reqId,
+        'Request-Timestamp': reqTs,
+        Signature: dokuSig
+      },
+      body: rawJokulBody
+    });
+    assert.equal(dokuWebhookRes.status, 200);
+    assert.equal(await dokuWebhookRes.text(), 'OK');
+
+    // B. Switch gateway ke Duitku lewat env PAYMENT_GATEWAY=duitku
+    process.env.PAYMENT_GATEWAY = 'duitku';
+    const duitkuCfg = await (await fetch(`${url}/api/topup/config`)).json();
+    assert.equal(duitkuCfg.gateway, 'duitku');
+
+    const notifOrderRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_260', paymentMethod: 'BC' })
+    });
+    const notifOrderBody = await notifOrderRes.json();
+    assert.equal(notifOrderBody.success, true);
+    assert.equal(notifOrderBody.gateway, 'duitku');
+
+    const crypto = require('crypto');
+    const mCode = duitkuCfg.merchantCode || 'DS37928';
+    const mKey = process.env.DUITKU_API_KEY || '';
+    const validSig = crypto.createHash('md5').update(`${mCode}20000${notifOrderBody.orderId}${mKey}`).digest('hex');
+
+    const duitkuNotifRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        merchantCode: mCode,
+        merchantOrderId: notifOrderBody.orderId,
+        amount: '20000',
+        resultCode: '00',
+        paymentMethod: 'BC',
+        reference: 'mock_ref_123',
+        signature: validSig
+      })
+    });
+    assert.equal(duitkuNotifRes.status, 200);
+
+    const finalUserRes = await fetch(`${url}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const finalUserData = await finalUserRes.json();
+    assert.equal(finalUserData.user.points, initialPoints + 120 + 3250 + 260);
+
+    // 7. Riwayat & pembatalan order Top-Up Coins via Payment Gateway
+    const pendingCoinRes = await fetch(`${url}/api/topup/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ packageId: 'diamond_50', paymentMethod: 'I1' })
+    });
+    const pendingCoinBody = await pendingCoinRes.json();
+    assert.equal(pendingCoinBody.success, true);
+
+    const histRes = await fetch(`${url}/api/topup/history`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(histRes.status, 200);
+    const histBody = await histRes.json();
+    assert.equal(histBody.success, true);
+    assert.ok(histBody.orders.some(o => o.orderId === pendingCoinBody.orderId && o.status === 'pending'));
+
+    const cancelCoinRes = await fetch(`${url}/api/topup/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ orderId: pendingCoinBody.orderId })
+    });
+    assert.equal(cancelCoinRes.status, 200);
+    const cancelCoinBody = await cancelCoinRes.json();
+    assert.equal(cancelCoinBody.order.status, 'cancelled');
+  } finally {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('GET /ads.txt mengembalikan text/plain dengan publisher Google AdSense', async () => {
+  const res = await fetch(`${url}/ads.txt`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /text\/plain/i);
+  const body = await res.text();
+  assert.equal(body.trim(), 'google.com, pub-9965100396262528, DIRECT, f08c47fec0942fa0');
+});
+
+test('SEO Global: robots.txt, sitemap.xml hreflang, dan SSR meta/JSON-LD untuk 4 game & multi-bahasa', async () => {
+  // 1. /robots.txt
+  const robotsRes = await fetch(`${url}/robots.txt`);
+  assert.equal(robotsRes.status, 200);
+  const robotsText = await robotsRes.text();
+  assert.match(robotsText, /Allow: \/\?game=jakludo/);
+  assert.match(robotsText, /Allow: \/\?game=chess-master/);
+  assert.match(robotsText, /Allow: \/\?game=snakes-and-ladders/);
+  assert.match(robotsText, /Allow: \/\?game=monster-quiz/);
+  assert.match(robotsText, /Allow: \/\?hl=en/);
+  assert.match(robotsText, /Allow: \/\?hl=id/);
+  assert.match(robotsText, new RegExp(`Sitemap: ${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/sitemap\\.xml`));
+
+  // 2. /sitemap.xml
+  const sitemapRes = await fetch(`${url}/sitemap.xml`);
+  assert.equal(sitemapRes.status, 200);
+  assert.match(sitemapRes.headers.get('content-type') || '', /application\/xml/i);
+  const sitemapXml = await sitemapRes.text();
+  assert.match(sitemapXml, /xmlns:xhtml="http:\/\/www\.w3\.org\/1999\/xhtml"/);
+  for (const q of ['', '?game=jakludo', '?game=chess-master', '?game=snakes-and-ladders', '?game=monster-quiz']) {
+    const baseLoc = `${url}/${q}`;
+    assert.ok(sitemapXml.includes(`<loc>${baseLoc}</loc>`), `Sitemap harus memuat ${baseLoc}`);
+    const sep = q ? '&amp;' : '?';
+    assert.ok(sitemapXml.includes(`hreflang="x-default" href="${baseLoc}"`));
+    assert.ok(sitemapXml.includes(`hreflang="en" href="${baseLoc}${sep}hl=en"`));
+    assert.ok(sitemapXml.includes(`hreflang="id" href="${baseLoc}${sep}hl=id"`));
+  }
+
+  // 3. SSR Hub / (default global en)
+  const hubHtml = await (await fetch(`${url}/`)).text();
+  assert.match(hubHtml, /<html lang="en"/);
+  assert.ok(hubHtml.includes(`<link rel="canonical" href="${url}/" />`));
+  assert.ok(hubHtml.includes(`<link rel="alternate" hreflang="x-default" href="${url}/" />`));
+  assert.ok(hubHtml.includes(`<link rel="alternate" hreflang="en" href="${url}/?hl=en" />`));
+  assert.ok(hubHtml.includes(`<link rel="alternate" hreflang="id" href="${url}/?hl=id" />`));
+
+  // Verifikasi JSON-LD valid dengan ke-4 game & URL absolut
+  const jsonLdMatch = hubHtml.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  assert.ok(jsonLdMatch, 'JSON-LD script harus ada');
+  const jsonLd = JSON.parse(jsonLdMatch[1]);
+  const graph = jsonLd['@graph'] || [];
+  const org = graph.find(n => n['@type'] === 'Organization');
+  assert.ok(org && org.url.startsWith(`${url}/`) && org.logo.startsWith(`${url}/playgo-logo.jpg`));
+  const videoGameNames = graph.filter(n => n['@type'] === 'VideoGame').map(n => n.name);
+  for (const expectedName of ['JakLudo', 'Monster Quiz Battle', 'Chess Master', 'Snakes and Ladders']) {
+    assert.ok(videoGameNames.includes(expectedName), `JSON-LD harus memuat VideoGame ${expectedName}`);
+  }
+  assert.ok(graph.some(n => n['@type'] === 'ItemList' && n.numberOfItems === 4));
+  assert.ok(graph.some(n => n['@type'] === 'FAQPage'));
+
+  // 4. SSR Chess Master
+  const chessHtml = await (await fetch(`${url}/?game=chess-master`)).text();
+  assert.match(chessHtml, /<title>Chess Master \(Play Online Multiplayer Chess/);
+  assert.ok(chessHtml.includes(`<link rel="canonical" href="${url}/?game=chess-master" />`));
+  assert.ok(chessHtml.includes(`<link rel="alternate" hreflang="en" href="${url}/?game=chess-master&amp;hl=en" />`));
+
+  // 5. SSR Snakes & Ladders (?hl=en)
+  const snakesEnHtml = await (await fetch(`${url}/?game=snakes-and-ladders&hl=en`)).text();
+  assert.match(snakesEnHtml, /<html lang="en"/);
+  assert.match(snakesEnHtml, /<meta property="og:locale" content="en_US" \/>/);
+  assert.match(snakesEnHtml, /<title>Snakes and Ladders Online Multiplayer/);
+  assert.ok(snakesEnHtml.includes(`<link rel="canonical" href="${url}/?game=snakes-and-ladders&amp;hl=en" />`));
+
+  // 6. SSR JakLudo (?hl=id)
+  const ludoIdHtml = await (await fetch(`${url}/?game=jakludo&hl=id`)).text();
+  assert.match(ludoIdHtml, /<html lang="id"/);
+  assert.match(ludoIdHtml, /<meta property="og:locale" content="id_ID" \/>/);
+  assert.match(ludoIdHtml, /<title>Main JakLudo Online \(Ludo 2–4 Pemain Realtime\)/);
+  assert.ok(ludoIdHtml.includes(`<link rel="canonical" href="${url}/?game=jakludo&amp;hl=id" />`));
+});
+
+test('Pemain yang dinyatakan OUT tetap bisa masuk room untuk menonton (chat aktif, tidak bisa roll/ambil host)', async () => {
+  const ua = await register('spec_a_' + Date.now().toString(36).slice(-5));
+  const ub = await register('spec_b_' + Date.now().toString(36).slice(-5));
+  const uc = await register('spec_c_' + Date.now().toString(36).slice(-5));
+
+  const sockA = await connect();
+  sockA.emit('room:create', { token: ua.token });
+  const joinedA = await once(sockA, 'room:joined');
+  const code = joinedA.code;
+
+  const sockB = await connect();
+  sockB.emit('room:join', { code, token: ub.token });
+  await once(sockB, 'room:joined');
+
+  const sockC = await connect();
+  sockC.emit('room:join', { code, token: uc.token });
+  await once(sockC, 'room:joined');
+
+  const room = rooms.get(code);
+  sockA.emit('game:start');
+  await wait(80);
+  clearTimeout(room.turnTimer);
+
+  // 1. Pemain A menyerah/keluar di tengah match 3 orang -> A berstatus OUT, host berpindah ke B
+  sockA.emit('room:leave', { code });
+  await wait(100);
+  const playerA = room.players.find(p => p.userId === ua.user.id);
+  const playerB = room.players.find(p => p.userId === ub.user.id);
+  assert.equal(playerA.isOut, true);
+  assert.equal(playerB.isHost, true, 'host berpindah ke pemain aktif');
+
+  // 2. Room tetap tampil di /api/rooms/active dengan isOut: true agar A bisa masuk menonton
+  const activeRes = await fetch(`${url}/api/rooms/active`, {
+    headers: { Authorization: `Bearer ${ua.token}` }
+  });
+  const activeBody = await activeRes.json();
+  const listed = activeBody.rooms.find(r => r.code === code);
+  assert.ok(listed, 'room yang masih berlangsung tetap muncul bagi pemain OUT');
+  assert.equal(listed.isOut, true);
+
+  // 3. A masuk kembali memakai socket baru untuk menonton pertandingan
+  const specA = await connect();
+  const updatePromise = once(specA, 'room:update');
+  specA.emit('room:join', { code, token: ua.token });
+  const rejoinedA = await once(specA, 'room:joined');
+  const roomState = await updatePromise;
+  assert.equal(rejoinedA.reconnected, true);
+  assert.equal(rejoinedA.isOut, true);
+  assert.equal(roomState.code, code);
+  assert.equal(playerA.isHost, false, 'pemain OUT yang menonton tidak boleh merebut status host dari pemain aktif');
+
+  // 4. A sebagai penonton OUT bisa mengirim chat ke room
+  const chatPromise = once(sockB, 'room:chat_message');
+  specA.emit('room:chat', { text: 'Semangat kawan!' });
+  const receivedChat = await chatPromise;
+  assert.equal(receivedChat.text, 'Semangat kawan!');
+
+  // 5. A sebagai penonton OUT dilarang melempar dadu meski mengirim event game:roll
+  const turnBefore = room.turn;
+  specA.emit('game:roll');
+  await wait(80);
+  assert.equal(room.rolling, false);
+  assert.equal(room.dice, null);
+  assert.equal(room.turn, turnBefore);
+
+  // 6. Pemain B kena OUT 3x Auto-Play saat gilirannya -> tetap bisa reconnect & menonton tanpa re-aktifasi giliran
+  const engine = require('./game/engine');
+  room.turn = room.players.findIndex(p => p.userId === ub.user.id);
+  playerB.autoPlayCount = 3;
+  engine.executeAutoPlay(room, playerB);
+  await wait(80);
+  clearTimeout(room.turnTimer);
+  assert.equal(playerB.isOut, true);
+
+  sockB.disconnect();
+  await wait(60);
+  const specB = await connect();
+  specB.emit('room:join', { code, token: ub.token });
+  const rejoinedB = await once(specB, 'room:joined');
+  assert.equal(rejoinedB.reconnected, true);
+  assert.equal(rejoinedB.isOut, true);
+
+  clearTimeout(room.turnTimer);
+});
+
+test('Sistem Kode Referral: pendaftar baru memakai kode referral dan pemberi kode mendapat 50 coins', async () => {
+  const ts = Date.now().toString(36).slice(-5);
+  const hostUname = 'ref_host_' + ts;
+  const guestUname = 'ref_guest_' + ts;
+
+  // 1. Host mendaftar
+  const hostRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: hostUname, password: 'Password123!', name: 'Host Referral' })
+  });
+  const hostData = await hostRes.json();
+  assert.equal(hostData.success, true);
+  assert.ok(hostData.user.referralCode, 'User harus memiliki referralCode otomatis');
+  assert.match(hostData.user.referralCode, /^\d{6}$/, 'Kode referral harus berupa angka acak 6 digit');
+  const hostRefCode = hostData.user.referralCode;
+  const initialHostPoints = hostData.user.points; // 200 (STARTER_POINTS)
+
+  // 2. Cek endpoint validasi kode referral
+  const checkValidRes = await fetch(`${url}/api/referral/check/${hostRefCode}`);
+  const checkValidData = await checkValidRes.json();
+  assert.equal(checkValidData.success, true);
+  assert.equal(checkValidData.valid, true);
+  assert.equal(checkValidData.referrer.username, hostUname);
+
+  const checkInvalidRes = await fetch(`${url}/api/referral/check/KODEPALSU99`);
+  const checkInvalidData = await checkInvalidRes.json();
+  assert.equal(checkInvalidData.valid, false);
+
+  // 3. Pendaftar baru mencoba kode referral tidak ada -> harus gagal
+  const badRegRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'ref_bad_' + ts,
+      password: 'Password123!',
+      name: 'Bad Guest',
+      referralCode: 'TIDAK_ADA_CODE'
+    })
+  });
+  const badRegData = await badRegRes.json();
+  assert.equal(badRegData.success, false);
+  assert.match(badRegData.error, /referral/i);
+
+  // 4. Pendaftar baru mendaftar dengan kode referral milik host
+  const guestRes = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: guestUname,
+      password: 'Password123!',
+      name: 'Guest Teman',
+      referralCode: hostRefCode.toLowerCase() // test case-insensitivity
+    })
+  });
+  const guestData = await guestRes.json();
+  assert.equal(guestData.success, true, 'Registrasi dengan kode referral harus sukses');
+  assert.equal(guestData.user.referredBy, hostData.user.id);
+
+  // 5. Verifikasi host mendapatkan reward +50 coins
+  const meRes = await fetch(`${url}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${hostData.token}` }
+  });
+  const meData = await meRes.json();
+  assert.equal(meData.success, true);
+  assert.equal(
+    meData.user.points,
+    initialHostPoints + 50,
+    `Host harus bertambah 50 coins (awal: ${initialHostPoints}, sekarang: ${meData.user.points})`
+  );
+  assert.equal(meData.user.referralCount, 1);
+  assert.equal(meData.user.referralBonusCoins, 50);
+
+  // 6. Cek endpoint GET /api/referral/info untuk host
+  const infoRes = await fetch(`${url}/api/referral/info`, {
+    headers: { Authorization: `Bearer ${hostData.token}` }
+  });
+  const infoData = await infoRes.json();
+  assert.equal(infoData.success, true);
+  assert.equal(infoData.referralCode, hostRefCode);
+  assert.equal(infoData.totalReferrals, 1);
+  assert.equal(infoData.totalCoinsEarned, 50);
+  assert.equal(infoData.history.length, 1);
+  assert.equal(infoData.history[0].username, guestUname);
+  assert.equal(infoData.history[0].rewardPoints, 50);
+
+  // 7. Test alur modal first-login: user mendaftar biasa, lalu klaim via POST /api/referral/claim
+  const claimerUname = 'ref_claimer_' + ts;
+  const claimerReg = await fetch(`${url}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: claimerUname, password: 'Password123!', name: 'Claimer Player' })
+  });
+  const claimerData = await claimerReg.json();
+  assert.equal(claimerData.success, true);
+  assert.equal(claimerData.user.referredBy, null, 'Pendaftar biasa awalnya belum memiliki referredBy');
+
+  // Coba klaim dengan kode sendiri -> harus ditolak
+  const selfClaimRes = await fetch(`${url}/api/referral/claim`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${claimerData.token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_120', methodId: 'bca_va' })
+    body: JSON.stringify({ referralCode: claimerData.user.referralCode })
   });
-  assert.equal(chargeRes.status, 200);
-  const chargeBody = await chargeRes.json();
-  assert.equal(chargeBody.success, true);
-  assert.ok(chargeBody.orderId);
-  assert.ok(chargeBody.payment);
-  assert.equal(chargeBody.package.diamonds, 120);
+  const selfClaimData = await selfClaimRes.json();
+  assert.equal(selfClaimData.success, false);
+  assert.match(selfClaimData.error, /sendiri/i);
 
-  // 4. Simulasi pembayaran topup (simulate)
-  const simRes = await fetch(`${url}/api/topup/simulate`, {
+  // Coba klaim dengan kode tidak valid
+  const invalidClaimRes = await fetch(`${url}/api/referral/claim`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${claimerData.token}`
     },
-    body: JSON.stringify({ orderId: chargeBody.orderId })
+    body: JSON.stringify({ referralCode: '111111' })
   });
-  assert.equal(simRes.status, 200);
-  const simBody = await simRes.json();
-  assert.equal(simBody.success, true);
-  assert.equal(simBody.diamondsAwarded, 120);
-  assert.equal(simBody.user.points, initialPoints + 120);
+  const invalidClaimData = await invalidClaimRes.json();
+  assert.equal(invalidClaimData.success, false);
+  assert.match(invalidClaimData.error, /tidak valid|tidak ditemukan/i);
 
-  // 5. Cek verify endpoint
-  const verifyRes = await fetch(`${url}/api/topup/verify`, {
+  // Klaim kode referral milik host
+  const validClaimRes = await fetch(`${url}/api/referral/claim`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${claimerData.token}`
     },
-    body: JSON.stringify({ orderId: chargeBody.orderId })
+    body: JSON.stringify({ referralCode: hostRefCode })
   });
-  assert.equal(verifyRes.status, 200);
-  const verifyBody = await verifyRes.json();
-  assert.equal(verifyBody.success, true);
-  assert.equal(verifyBody.status, 'success');
-  assert.equal(verifyBody.user.points, initialPoints + 120);
+  const validClaimData = await validClaimRes.json();
+  assert.equal(validClaimData.success, true);
+  assert.equal(validClaimData.user.referredBy, hostData.user.id);
+  assert.equal(validClaimData.referrer.username, hostUname);
 
-  // 6. Test Charge QRIS untuk paket 50 diamonds
-  const qrisChargeRes = await fetch(`${url}/api/topup/charge`, {
+  // Coba klaim lagi -> harus ditolak karena sudah pernah klaim
+  const repeatClaimRes = await fetch(`${url}/api/referral/claim`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${claimerData.token}`
     },
-    body: JSON.stringify({ packageId: 'diamond_50', methodId: 'qris' })
+    body: JSON.stringify({ referralCode: hostRefCode })
   });
-  const qrisBody = await qrisChargeRes.json();
-  assert.equal(qrisBody.success, true);
-  assert.ok(qrisBody.payment.qrCodeUrl || qrisBody.payment.qrString);
+  const repeatClaimData = await repeatClaimRes.json();
+  assert.equal(repeatClaimData.success, false);
+  assert.match(repeatClaimData.error, /pernah/i);
 
-  // 7. Test paket 3.250 diamonds (Paket Sultan)
-  const sultanRes = await fetch(`${url}/api/topup/create`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ packageId: 'diamond_3250' })
+  // Verifikasi host mendapatkan reward tambahan (+50 coins lagi, total +100 coins)
+  const hostMeRes = await fetch(`${url}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${hostData.token}` }
   });
-  const sultanBody = await sultanRes.json();
-  assert.equal(sultanBody.success, true);
-
-  const simSultanRes = await fetch(`${url}/api/topup/simulate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ orderId: sultanBody.orderId })
-  });
-  const simSultanBody = await simSultanRes.json();
-  assert.equal(simSultanBody.diamondsAwarded, 3250);
-  assert.equal(simSultanBody.user.points, initialPoints + 120 + 3250);
+  const hostMeData = await hostMeRes.json();
+  assert.equal(hostMeData.user.points, initialHostPoints + 100);
+  assert.equal(hostMeData.user.referralCount, 2);
+  assert.equal(hostMeData.user.referralBonusCoins, 100);
 });

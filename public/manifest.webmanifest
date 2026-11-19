@@ -1,8 +1,8 @@
 {
-  "name": "PlayGo · Platform Game Multiplayer Online Gratis",
+  "name": "PlayGo · Free Online Multiplayer Browser Games",
   "short_name": "PlayGo",
-  "description": "Platform game multiplayer realtime gratis di browser: mainkan JakLudo (2–4 pemain) dan Monster Quiz Battle (2–3 pemain) bareng teman!",
-  "lang": "id",
+  "description": "Play free real-time multiplayer browser games worldwide: JakLudo, Chess Master (Elo chess), Snakes & Ladders (Ular Tangga), and Monster Quiz Battle RPG!",
+  "lang": "en",
   "dir": "ltr",
   "start_url": "/",
   "scope": "/",
@@ -39,16 +39,30 @@
   ],
   "shortcuts": [
     {
-      "name": "Main JakLudo",
+      "name": "Play JakLudo",
       "short_name": "JakLudo",
-      "description": "Buat atau masuk ke arena JakLudo (2–4 Pemain)",
+      "description": "Real-time online Ludo board game (2–4 players)",
       "url": "/?game=jakludo",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Main Monster Quiz Battle",
+      "name": "Play Chess Master",
+      "short_name": "Chess Master",
+      "description": "Rated online multiplayer chess (Bullet, Blitz, Rapid)",
+      "url": "/?game=chess-master",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Play Snakes & Ladders",
+      "short_name": "Snakes",
+      "description": "Classic 100-tile Snakes and Ladders multiplayer board game",
+      "url": "/?game=snakes-and-ladders",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Play Monster Quiz Battle",
       "short_name": "Monster Quiz",
-      "description": "Duel kuis RPG pengetahuan & matematika (2–3 Pemain)",
+      "description": "Real-time RPG trivia & math quiz duel (2–3 players)",
       "url": "/?game=monster-quiz",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }

@@ -35,6 +35,7 @@ const newDiceStats = () => ({ counts: [0, 0, 0, 0, 0, 0], total: 0, captureStrea
 function resetPlayerForGame(p) {
   p.autoPlayCount = 0;
   p.isOut = false;
+  p.left = false;
   p.finishedCount = 0;
   p.diceStats = newDiceStats();
   inventory.resetForMatch(p);
@@ -57,17 +58,20 @@ function startGame(r) {
   }
 }
 
-// Main lagi: hanya setelah ada pemenang. Pemain yang sudah menyerah tidak diikutkan.
+// Main lagi: hanya setelah ada pemenang. Pemain yang tetap berada di room (termasuk yang sempat OUT dan menonton) diikutkan.
 function restartGame(r) {
-  const remaining = r.players.filter(p => !p.left);
+  const remaining = r.players.filter(p => !p.left || p.connected);
   if (remaining.length < 2) return 'Butuh minimal 2 pemain untuk bermain lagi. Tambahkan bot atau ajak teman.';
-  for (const p of r.players) if (p.left) delete r.pawns[p.id];
+  for (const p of r.players) {
+    if (p.left && !p.connected) delete r.pawns[p.id];
+    else p.left = false;
+  }
   r.players = remaining;
   startGame(r);
   return null;
 }
 
-function declareWinner(room, winnerPlayer) {
+function declareWinner(room, winnerPlayer, { endReason = null } = {}) {
   if (!room || room.winner) return;
   clearRoomTimers(room);
   room.winner = winnerPlayer.id;
@@ -78,7 +82,7 @@ function declareWinner(room, winnerPlayer) {
 
   // Poin sama untuk permainan biasa dan grup (leaderboard grup diambil dari leaderboard yang sama)
   const ranking = rankPlayers(room, winnerPlayer.id);
-  const awards = db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking });
+  const awards = db.recordMatchResult({ winnerPlayerId: winnerPlayer.id, players: room.players, ranking, endReason });
   // Peringkat resmi + poin yang didapat, ditampilkan di layar hasil
   room.matchResult = { ranking, awards };
   room.players.forEach(p => {
@@ -138,7 +142,7 @@ function shiftBlackHolesEachRound(room, activeCount) {
 }
 
 // Jadwalkan aksi berikutnya untuk pemain yang sedang mendapat giliran
-function triggerTurn(room) {
+function triggerTurn(room, { preserveClock = false } = {}) {
   if (!room || !room.started || room.winner || room.rolling || room.animatingMove) return;
   // Permainan berhenti sampai pemilik perisai memutuskan (timer dipasang ulang setelah server restart)
   if (room.pendingShield) {
@@ -147,6 +151,10 @@ function triggerTurn(room) {
   }
   const currentPlayer = room.players[room.turn];
   if (!currentPlayer) return;
+
+  const existingEndsAt = preserveClock && room.turnClock && room.turnClock.playerId === currentPlayer.id
+    ? room.turnClock.endsAt
+    : null;
 
   if (room.botTimeout) clearTimeout(room.botTimeout);
   if (room.turnTimer) clearTimeout(room.turnTimer);
@@ -170,8 +178,11 @@ function triggerTurn(room) {
     return;
   }
 
-  // Pemain manusia: online -> batas waktu 15 detik, terputus -> tunggu sebentar agar sempat tersambung ulang
-  const delay = currentPlayer.connected ? TURN_TIMEOUT_MS : DISCONNECTED_TURN_DELAY_MS;
+  // Pemain manusia: online -> batas waktu 15 detik (atau lanjutkan sisa timer saat reconnect), terputus -> 8 detik
+  const remainingExisting = existingEndsAt ? existingEndsAt - Date.now() : 0;
+  const delay = currentPlayer.connected
+    ? (remainingExisting > 0 ? Math.max(2000, Math.min(TURN_TIMEOUT_MS, remainingExisting)) : TURN_TIMEOUT_MS)
+    : DISCONNECTED_TURN_DELAY_MS;
   room.turnTimer = roomTimeout(room, () => {
     if (room.players[room.turn]?.id === currentPlayer.id) executeAutoPlay(room, currentPlayer);
   }, delay);
@@ -203,6 +214,7 @@ function executeAutoPlay(room, player) {
     addHistory(room, `❌ ${player.name} dinyatakan OUT (batas ${MAX_AUTO_PLAY}x auto-play tercapai tanpa respon).`);
     room.message = `❌ ${player.name} dinyatakan OUT!`;
     if (store.deleteIfAllHumansOut(room, `${player.name} dinyatakan OUT karena ${MAX_AUTO_PLAY}x tidak jalan. Room ditutup karena tidak ada pemain lain.`)) return;
+    if (room.host === player.id) store.reassignHost(room);
     advanceTurn(room);
     return;
   }

@@ -8,7 +8,9 @@ const EMOJI_TO_ICON = {
   '🛒': 'shop',
   '🏆': 'trophy',
   '👑': 'crown',
-  '💎': 'diamond',
+  '💎': 'coin',
+  '🪙': 'coin',
+  '💰': 'coin',
   '🎲': 'dice',
   '🔔': 'bell',
   '🔊': 'volume-on',
@@ -39,7 +41,13 @@ const EMOJI_TO_ICON = {
   '💡': 'bulb',
   '❤️': 'heart',
   '✏️': 'edit',
-  '🚪': 'logout'
+  '🚪': 'logout',
+  '♟️': 'chess',
+  '♞': 'chess',
+  '🏳️': 'flag',
+  '⏱️': 'clock',
+  '🐍': 'snakes',
+  '🪜': 'snakes'
 };
 
 export function resolveIconName(nameOrEmoji) {
@@ -138,11 +146,27 @@ export default function Icon({ name, size = 20, className = '', label }) {
         </svg>
       );
 
-    case 'diamond':
+    case 'coin':
+    case 'coins':
       return (
         <svg {...common}>
-          <path d="M6 4h12l3 5-9 11L3 9l3-5Z" fill="var(--brand-soft)" />
-          <path d="M3 9h18M9 4l-2 5 5 11 5-11-2-5" />
+          <circle cx="12" cy="12" r="9" fill="rgba(245, 158, 11, 0.18)" stroke="#f59e0b" />
+          <circle cx="12" cy="12" r="6.2" stroke="#d97706" strokeWidth="1.5" />
+          <path d="M12 7.8l1.1 2.7 2.9.2-2.3 1.9.8 2.8-2.5-1.6-2.5 1.6.8-2.8-2.3-1.9 2.9-.2Z" fill="#f59e0b" stroke="none" />
+        </svg>
+      );
+    case 'diamond':
+    case 'diamonds':
+      return (
+        <svg {...common}>
+          <polygon
+            points="6.5,4.5 17.5,4.5 21,9.5 12,20.5 3,9.5"
+            fill="rgba(56, 189, 248, 0.24)"
+            stroke="#0ea5e9"
+            strokeWidth="1.7"
+          />
+          <polyline points="3,9.5 21,9.5" stroke="#0284c7" strokeWidth="1.5" />
+          <polyline points="8.5,4.5 7.5,9.5 12,20.5 16.5,9.5 15.5,4.5" stroke="#38bdf8" strokeWidth="1.4" />
         </svg>
       );
 
@@ -507,6 +531,52 @@ export default function Icon({ name, size = 20, className = '', label }) {
             fill="var(--brand-soft)"
           />
           <path d="M12 8v3" />
+        </svg>
+      );
+
+    case 'chess':
+    case 'knight':
+      return (
+        <svg {...common}>
+          <path
+            d="M7 20h10M8 17h8l-1-4.5c1.8-.8 3-2.5 3-4.8 0-2.6-2.1-4.7-4.7-4.7-.8 0-1.5.2-2.2.6L9.5 2.5 8 5.2C6.5 6.4 6 8.2 6 9.8l2.5 1.2L7 13.5 9.5 14 8 17Z"
+            fill="var(--brand-soft)"
+          />
+          <circle cx="11.5" cy="7.5" r="0.9" fill="currentColor" stroke="none" />
+        </svg>
+      );
+
+    case 'flag':
+      return (
+        <svg {...common}>
+          <path d="M5 21V4" />
+          <path d="M5 4h12l-2.5 4.5L17 13H5" fill="var(--brand-soft)" />
+        </svg>
+      );
+
+    case 'clock':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" fill="var(--brand-soft)" />
+          <path d="M12 7.5V12l3 2" />
+        </svg>
+      );
+
+    case 'download':
+      return (
+        <svg {...common}>
+          <path d="M12 3v12m0 0-4-4m4 4 4-4" />
+          <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+      );
+
+    case 'snakes':
+    case 'ladder':
+      return (
+        <svg {...common}>
+          <path d="M6 3v18M13 3v18M6 7h7M6 12h7M6 17h7" />
+          <path d="M17 4c2.5 1.5 2.5 4.5 0 6s-2.5 4.5 0 6 2.5 3.5 0 5" />
+          <circle cx="17" cy="4" r="1.2" fill="currentColor" stroke="none" />
         </svg>
       );
 

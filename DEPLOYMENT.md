@@ -206,19 +206,19 @@ Admin bank soal Monster Quiz diatur lewat `QUIZ_ADMIN_USERNAMES` (username dipis
 
 ### Koreksi stok item & poin pemain
 
-Server menyimpan stok item dan poin di cache memori (diisi dari PostgreSQL saat start). **Jangan ubah tabel `user_items` / `leaderboard` langsung di database** saat server berjalan: cache tidak tahu perubahannya, sehingga item yang dihapus masih bisa dipakai sampai server restart. Pakai endpoint admin berikut; perubahan langsung berlaku di cache, database, dan room yang sedang berjalan.
+Server menyimpan stok item dan Coins di cache memori (diisi dari PostgreSQL saat start). **Jangan ubah tabel `user_items` / `leaderboard` langsung di database** saat server berjalan: cache tidak tahu perubahannya, sehingga item yang dihapus masih bisa dipakai sampai server restart. Pakai endpoint admin berikut; perubahan langsung berlaku di cache, database, dan room yang sedang berjalan.
 
 ```bash
-# Lihat poin & stok item pemain
+# Lihat Coins & stok item pemain
 curl -H "Authorization: Bearer <token-admin>" https://domain/api/admin/users/<username>/items
 
-# Atur jumlah akhir (0 = hapus item); points opsional
+# Atur jumlah akhir (0 = hapus item); coins opsional
 curl -X PATCH -H "Authorization: Bearer <token-admin>" -H "Content-Type: application/json" \
-  -d '{"items":{"forceReturn":0,"universalShield":0},"points":0}' \
+  -d '{"items":{"forceReturn":0,"universalShield":0},"coins":0}' \
   https://domain/api/admin/users/<username>/items
 ```
 
-Akses: username di `ADMIN_USERNAMES` atau header `X-Admin-Key` = `ADMIN_KEY`. Kalau keduanya kosong, memakai `QUIZ_ADMIN_USERNAMES` / `QUIZ_ADMIN_KEY` (default username `admin`).
+Akses: admin aplikasi, yaitu akun dengan role `admin` di tabel `users` atau username di `ADMIN_USERNAMES` (default `admin`). Untuk Diamonds gunakan `/api/admin/economy/wallets/adjust` (tercatat di riwayat transaksi).
 
 ### D. Aktifkan TRUST_PROXY
 Karena semua request kini datang dari Nginx, set `TRUST_PROXY=1` agar batas percobaan login dihitung per IP pemain (bukan IP Nginx). Buat file `.env` di folder proyek:

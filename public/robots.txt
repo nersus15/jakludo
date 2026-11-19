@@ -1,9 +1,14 @@
 User-agent: *
 Allow: /
 Allow: /?game=jakludo
+Allow: /?game=chess-master
+Allow: /?game=snakes-and-ladders
 Allow: /?game=monster-quiz
+Allow: /?hl=en
+Allow: /?hl=id
 Disallow: /api/
 Disallow: /socket.io/
 
-# Sitemap disajikan dinamis oleh server (/sitemap.xml dengan URL absolut)
+# Sitemap disajikan dinamis oleh server (/sitemap.xml dengan URL absolut dan tag hreflang)
+
 

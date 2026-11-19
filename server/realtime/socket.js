@@ -6,15 +6,25 @@ const engine = require('../game/engine');
 const social = require('../social/store');
 const quizEngine = require('../quiz/engine');
 const quizStore = require('../quiz/store');
+const chessEngine = require('../chess/engine');
+const chessStore = require('../chess/store');
+const snakesEngine = require('../snakes/engine');
+const snakesStore = require('../snakes/store');
 const { createLimiter } = require('../lib/limiter');
 const { EMOJIS, MAX_CHATS } = require('../game/config');
 
 const chatLimiter = createLimiter({ windowMs: 5000, max: 5 });
 const reactionLimiter = createLimiter({ windowMs: 5000, max: 8 });
+const ludoActionLimiter = createLimiter({ windowMs: 3000, max: 25 });
+const ludoPlayLimiter = createLimiter({ windowMs: 3000, max: 35 });
 const quizActionLimiter = createLimiter({ windowMs: 3000, max: 12 });
 // Aksi selama bermain (jawab, siap, hint, pilih monster, dll.). Pemain normal hanya 1–3 aksi per ronde
 // 15 detik; batas ini cukup longgar untuk itu tapi memotong spam event dari klien nakal.
 const quizPlayLimiter = createLimiter({ windowMs: 3000, max: 15 });
+const chessActionLimiter = createLimiter({ windowMs: 3000, max: 12 });
+const chessPlayLimiter = createLimiter({ windowMs: 3000, max: 25 });
+const snakesActionLimiter = createLimiter({ windowMs: 3000, max: 12 });
+const snakesPlayLimiter = createLimiter({ windowMs: 3000, max: 20 });
 const QUIZ_RATE_ERROR = { ok: false, error: 'Terlalu banyak aksi dalam waktu singkat.' };
 
 // Tolak event bila socket melewati batas; balas callback dengan error yang sama
@@ -69,8 +79,14 @@ function registerSocketHandlers(io) {
       if (typeof callback === 'function') callback(clientTimestamp);
     });
 
-    on(socket, 'room:create', payload => lobby.createRoom(socket, payload));
-    on(socket, 'room:join', payload => lobby.joinRoom(socket, payload.code, payload));
+    on(socket, 'room:create', payload => {
+      if (!ludoActionLimiter(socket.id)) return socket.emit('room:error', 'Terlalu banyak permintaan. Coba lagi sebentar.');
+      lobby.createRoom(socket, payload);
+    });
+    on(socket, 'room:join', payload => {
+      if (!ludoActionLimiter(socket.id)) return socket.emit('room:error', 'Terlalu banyak permintaan. Coba lagi sebentar.');
+      lobby.joinRoom(socket, payload.code, payload);
+    });
     on(socket, 'leaderboard:get', () => socket.emit('leaderboard:update', db.getLeaderboard()));
 
     // Identifikasi sesi user pada koneksi Socket.IO untuk fitur teman, chat grup, & undangan room
@@ -101,9 +117,77 @@ function registerSocketHandlers(io) {
       const reply = payload => { if (typeof cb === 'function') cb(payload); };
       const r = currentRoom();
       const qr = !r && socket.data.quizRoom ? quizEngine.quizRooms.get(socket.data.quizRoom) : null;
+      const cr = !r && !qr && socket.data.chessRoom ? chessEngine.chessRooms.get(socket.data.chessRoom) : null;
+      const sr = !r && !qr && !cr && socket.data.snakesRoom ? snakesEngine.snakesRooms.get(socket.data.snakesRoom) : null;
 
-      if (!r && !qr) {
+      if (!r && !qr && !cr && !sr) {
         return reply({ ok: false, error: 'Room tidak tersedia atau permainan sudah dimulai.' });
+      }
+
+      if (sr) {
+        if (sr.status !== 'waiting') {
+          return reply({ ok: false, error: 'Pertandingan Ular Tangga sudah dimulai.' });
+        }
+        if (sr.players.length >= (sr.maxPlayers || 2)) {
+          return reply({ ok: false, error: 'Room Ular Tangga sudah penuh.' });
+        }
+        const mePlayer = sr.players.find(p => p.player_type === 'human' && (p.socketId === socket.id || p.user_id === socket.data.userId));
+        const senderUserId = socket.data.userId || mePlayer?.user_id;
+        if (!senderUserId) return reply({ ok: false, error: 'Silakan login terlebih dahulu.' });
+        if (!targetUserId || targetUserId === senderUserId) return reply({ ok: false, error: 'Target undangan tidak valid.' });
+        if (sr.players.some(p => p.user_id === targetUserId)) {
+          return reply({ ok: false, error: 'Pemain tersebut sudah berada di dalam room.' });
+        }
+        if (sr.groupId) {
+          if (!social.isGroupMember(sr.groupId, targetUserId)) {
+            return reply({ ok: false, error: 'Hanya anggota grup yang dapat diundang ke match grup ini.' });
+          }
+        } else if (!social.areFriends(senderUserId, targetUserId)) {
+          return reply({ ok: false, error: 'Kamu hanya dapat mengundang pemain yang sudah menjadi teman.' });
+        }
+        if (!social.isUserOnline(targetUserId)) {
+          return reply({ ok: false, error: 'Teman sedang offline.' });
+        }
+        social.emitToUser(targetUserId, 'room:invite', {
+          code: sr.code,
+          gameType: 'snakes',
+          from: social.userSummary(senderUserId),
+          group: sr.groupId ? social.getGroupBasic(sr.groupId) : null
+        });
+        return reply({ ok: true });
+      }
+
+      if (cr) {
+        if (cr.phase !== 'lobby') {
+          return reply({ ok: false, error: 'Pertandingan Chess Master sudah dimulai.' });
+        }
+        if (cr.players.length >= 2) {
+          return reply({ ok: false, error: 'Room Chess Master sudah penuh (maksimal 2 pemain).' });
+        }
+        const mePlayer = cr.players.find(p => p.socketId === socket.id || p.userId === socket.data.userId);
+        const senderUserId = socket.data.userId || mePlayer?.userId;
+        if (!senderUserId) return reply({ ok: false, error: 'Silakan login terlebih dahulu.' });
+        if (!targetUserId || targetUserId === senderUserId) return reply({ ok: false, error: 'Target undangan tidak valid.' });
+        if (cr.players.some(p => p.userId === targetUserId)) {
+          return reply({ ok: false, error: 'Pemain tersebut sudah berada di dalam room.' });
+        }
+        if (cr.groupId) {
+          if (!social.isGroupMember(cr.groupId, targetUserId)) {
+            return reply({ ok: false, error: 'Hanya anggota grup yang dapat diundang ke match grup ini.' });
+          }
+        } else if (!social.areFriends(senderUserId, targetUserId)) {
+          return reply({ ok: false, error: 'Kamu hanya dapat mengundang pemain yang sudah menjadi teman.' });
+        }
+        if (!social.isUserOnline(targetUserId)) {
+          return reply({ ok: false, error: 'Teman sedang offline.' });
+        }
+        social.emitToUser(targetUserId, 'room:invite', {
+          code: cr.code,
+          gameType: 'chess',
+          from: social.userSummary(senderUserId),
+          group: cr.groupId ? social.getGroupBasic(cr.groupId) : null
+        });
+        return reply({ ok: true });
       }
 
       if (qr) {
@@ -186,11 +270,21 @@ function registerSocketHandlers(io) {
       callback({ active: true, started: r.started, isOut: !!player.isOut, winner: r.winner, code: r.code });
     });
 
-    on(socket, 'room:update_settings', payload => lobby.updateSettings(currentRoom(), socket.id, payload));
-    on(socket, 'room:add_bot', () => lobby.addBot(currentRoom(), socket.id));
-    on(socket, 'room:remove_bot', () => lobby.removeBot(currentRoom(), socket.id));
+    on(socket, 'room:update_settings', payload => {
+      if (!ludoActionLimiter(socket.id)) return;
+      lobby.updateSettings(currentRoom(), socket.id, payload);
+    });
+    on(socket, 'room:add_bot', () => {
+      if (!ludoActionLimiter(socket.id)) return;
+      lobby.addBot(currentRoom(), socket.id);
+    });
+    on(socket, 'room:remove_bot', () => {
+      if (!ludoActionLimiter(socket.id)) return;
+      lobby.removeBot(currentRoom(), socket.id);
+    });
 
     on(socket, 'game:start', () => {
+      if (!ludoActionLimiter(socket.id)) return;
       const r = currentRoom();
       if (!r || r.host !== socket.id || r.started || r.players.length < 2) return;
       engine.startGame(r);
@@ -201,6 +295,7 @@ function registerSocketHandlers(io) {
     });
 
     on(socket, 'game:restart', () => {
+      if (!ludoActionLimiter(socket.id)) return;
       const r = currentRoom();
       if (!r || r.host !== socket.id || !r.started || !r.winner) return;
       const error = engine.restartGame(r);
@@ -212,22 +307,32 @@ function registerSocketHandlers(io) {
     });
 
     on(socket, 'game:roll', () => {
+      if (!ludoPlayLimiter(socket.id)) return;
       const r = currentRoom();
       if (r) engine.handleRoll(r, socket.id);
     });
 
     on(socket, 'game:move', ({ pawn }) => {
+      if (!ludoPlayLimiter(socket.id)) return;
       const r = currentRoom();
       if (r) engine.handleMove(r, socket.id, pawn);
     });
 
-    on(socket, 'game:shield_decision', payload => engine.decideShield(socket, currentRoom(), { use: payload?.use === true }));
+    on(socket, 'game:shield_decision', payload => {
+      if (!ludoPlayLimiter(socket.id)) return;
+      engine.decideShield(socket, currentRoom(), { use: payload?.use === true });
+    });
 
     // Satu event untuk semua item aktif: { itemId, target }
-    on(socket, 'game:use_item', ({ itemId, target }) => engine.useItem(socket, currentRoom(), { itemId, target }));
+    on(socket, 'game:use_item', ({ itemId, target }) => {
+      if (!ludoPlayLimiter(socket.id)) return;
+      engine.useItem(socket, currentRoom(), { itemId, target });
+    });
     // Kompatibilitas klien lama yang masih terbuka saat deploy. Hapus setelah semua klien diperbarui.
-    on(socket, 'game:use_force_return', payload =>
-      engine.useItem(socket, currentRoom(), { itemId: 'forceReturn', target: readTarget(payload) }));
+    on(socket, 'game:use_force_return', payload => {
+      if (!ludoPlayLimiter(socket.id)) return;
+      engine.useItem(socket, currentRoom(), { itemId: 'forceReturn', target: readTarget(payload) });
+    });
 
     on(socket, 'game:reaction', ({ emoji }) => {
       const r = currentRoom();
@@ -349,10 +454,222 @@ function registerSocketHandlers(io) {
       if (cb) cb(res);
     });
 
+    on(socket, 'quiz:chat', (payload, cb) => {
+      if (!chatLimiter(socket.id)) {
+        if (cb) cb({ ok: false, error: 'Terlalu cepat mengirim pesan. Tunggu sebentar.' });
+        return;
+      }
+      const res = quizEngine.sendChat(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'quiz:reaction', (payload, cb) => {
+      if (!reactionLimiter(socket.id)) {
+        if (cb) cb({ ok: false, error: 'Terlalu cepat mengirim reaksi.' });
+        return;
+      }
+      const res = quizEngine.sendReaction(socket, payload);
+      if (cb) cb(res);
+    });
+
     on(socket, 'quiz:leaderboard:get', (_, cb) => {
       if (!allowQuiz(quizPlayLimiter, socket, cb)) return;
       const lb = quizStore.getQuizLeaderboard();
       socket.emit('quiz:leaderboard:update', lb);
+      if (cb) cb({ ok: true, leaderboard: lb });
+    });
+
+    // ==========================================
+    // CHESS MASTER SOCKET EVENTS
+    // ==========================================
+
+    on(socket, 'chess:matchmaking:join', (payload, cb) => {
+      if (!allowQuiz(chessActionLimiter, socket, cb)) return;
+      const res = chessEngine.joinMatchmaking(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:matchmaking:leave', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.leaveMatchmaking(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:room:create', (payload, cb) => {
+      if (!allowQuiz(chessActionLimiter, socket, cb)) return;
+      const res = chessEngine.createRoom(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:room:join', (payload, cb) => {
+      if (!allowQuiz(chessActionLimiter, socket, cb)) return;
+      const res = chessEngine.joinRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:room:config', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.configureRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:player:ready', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.setPlayerReady(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:move', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.submitMove(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:draw:offer', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.offerDraw(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:draw:accept', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.acceptDraw(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:draw:decline', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.declineDraw(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:resign', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.resignMatch(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:rematch', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.requestRematch(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:room:leave', (payload, cb) => {
+      const res = chessEngine.leaveRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:bot:play', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const res = chessEngine.playVsBot(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:chat', (payload, cb) => {
+      if (!chatLimiter(socket.id)) {
+        if (cb) cb({ ok: false, error: 'Terlalu cepat mengirim pesan. Tunggu sebentar.' });
+        return;
+      }
+      const res = chessEngine.sendChat(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:reaction', (payload, cb) => {
+      if (!reactionLimiter(socket.id)) {
+        if (cb) cb({ ok: false, error: 'Terlalu cepat mengirim reaksi.' });
+        return;
+      }
+      const res = chessEngine.sendReaction(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'chess:leaderboard:get', (payload, cb) => {
+      if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
+      const lb = chessStore.getChessLeaderboard(payload || {});
+      socket.emit('chess:leaderboard:update', lb);
+      if (cb) cb({ ok: true, leaderboard: lb });
+    });
+
+    // ==========================================
+    // SNAKES AND LADDERS (ULAR TANGGA) SOCKET EVENTS
+    // ==========================================
+
+    on(socket, 'snakes:matchmaking:join', (payload, cb) => {
+      if (!allowQuiz(snakesActionLimiter, socket, cb)) return;
+      const res = snakesEngine.joinMatchmaking(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:matchmaking:cancel', (payload, cb) => {
+      if (!allowQuiz(snakesPlayLimiter, socket, cb)) return;
+      const res = snakesEngine.cancelMatchmaking(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:matchmaking:leave', (payload, cb) => {
+      if (!allowQuiz(snakesPlayLimiter, socket, cb)) return;
+      const res = snakesEngine.cancelMatchmaking(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:room:create', (payload, cb) => {
+      if (!allowQuiz(snakesActionLimiter, socket, cb)) return;
+      const res = snakesEngine.createPrivateRoom(socket, payload, store.rooms);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:room:join', (payload, cb) => {
+      if (!allowQuiz(snakesActionLimiter, socket, cb)) return;
+      const res = snakesEngine.joinPrivateRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:room:start', (payload, cb) => {
+      if (!allowQuiz(snakesPlayLimiter, socket, cb)) return;
+      const res = snakesEngine.startPrivateRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:roll', (payload, cb) => {
+      if (!allowQuiz(snakesPlayLimiter, socket, cb)) return;
+      const res = snakesEngine.handleRollDice(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:rematch', (payload, cb) => {
+      if (!allowQuiz(snakesPlayLimiter, socket, cb)) return;
+      const res = snakesEngine.requestRematch(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:room:leave', (payload, cb) => {
+      const res = snakesEngine.leaveRoom(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:chat', (payload, cb) => {
+      if (!chatLimiter(socket.id)) {
+        if (cb) cb({ ok: false, error: 'Terlalu cepat mengirim pesan. Tunggu sebentar.' });
+        return;
+      }
+      const res = snakesEngine.sendChat(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:reaction', (payload, cb) => {
+      if (!reactionLimiter(socket.id)) {
+        if (cb) cb({ ok: false, error: 'Terlalu cepat mengirim reaksi.' });
+        return;
+      }
+      const res = snakesEngine.sendReaction(socket, payload);
+      if (cb) cb(res);
+    });
+
+    on(socket, 'snakes:leaderboard:get', (payload, cb) => {
+      if (!allowQuiz(snakesPlayLimiter, socket, cb)) return;
+      const lb = snakesStore.getSnakesLeaderboard(payload || {});
+      socket.emit('snakes:leaderboard:update', lb);
       if (cb) cb({ ok: true, leaderboard: lb });
     });
 
@@ -363,6 +680,16 @@ function registerSocketHandlers(io) {
         quizEngine.handleDisconnect(socket);
       } catch (err) {
         console.error('[quiz disconnect]', err);
+      }
+      try {
+        chessEngine.handleDisconnect(socket);
+      } catch (err) {
+        console.error('[chess disconnect]', err);
+      }
+      try {
+        snakesEngine.handleDisconnect(socket);
+      } catch (err) {
+        console.error('[snakes disconnect]', err);
       }
       try {
         const r = currentRoom();

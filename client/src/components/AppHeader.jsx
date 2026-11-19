@@ -19,6 +19,7 @@ function AccountMenu({
   onOpenFriends,
   onOpenGroups,
   onOpenLeaderboard,
+  onOpenShop,
   onViewProfile,
   onUploadAvatar,
   onLogout
@@ -109,9 +110,14 @@ function AccountMenu({
                   {user.name} {user.isLudoKing && <Icon name="crown" size={16} label="Ludo King" />}
                 </strong>
                 <span className="muted">@{user.username}</span>
-                <span className="badge badge--brand">
-                  <Icon name="diamond" size={14} /> {user.points ?? 0} poin
-                </span>
+                <div className="account__currencies">
+                  <span className="badge badge--brand">
+                    <Icon name="coin" size={14} /> {user.points ?? 0} Coins
+                  </span>
+                  <span className="badge badge--diamond">
+                    <Icon name="diamond" size={14} /> {user.diamonds ?? 0} Diamonds
+                  </span>
+                </div>
               </div>
             </div>
             {onUploadAvatar && (
@@ -142,6 +148,45 @@ function AccountMenu({
               >
                 {avatarFeedback.text}
               </p>
+            )}
+
+            {user.referralCode && (
+              <div className="account__referral-box card card--flat" style={{ marginTop: 'var(--space-2)', padding: 'var(--space-2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 'bold' }}>🎁 Kode Referral:</span>
+                  <code style={{ fontSize: 'var(--fs-xs)', fontWeight: 'bold', color: 'var(--color-primary)' }}>{user.referralCode}</code>
+                </div>
+                <p className="muted" style={{ fontSize: '11px', margin: '0 0 var(--space-2) 0', lineHeight: 1.3 }}>
+                  Ajak teman baru = kamu dapat <strong>+50 Coins</strong>!
+                </p>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--xs"
+                    style={{ flex: 1 }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      navigator.clipboard?.writeText(user.referralCode);
+                      setAvatarFeedback({ type: 'success', text: `Kode ${user.referralCode} disalin!` });
+                    }}
+                  >
+                    Salin Kode
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--xs"
+                    style={{ flex: 1 }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      const refUrl = `${window.location.origin}/?ref=${encodeURIComponent(user.referralCode)}`;
+                      navigator.clipboard?.writeText(refUrl);
+                      setAvatarFeedback({ type: 'success', text: 'Link undangan disalin!' });
+                    }}
+                  >
+                    Salin Link
+                  </button>
+                </div>
+              </div>
             )}
           </div>
           {onViewProfile && (
@@ -233,11 +278,27 @@ export default function AppHeader({
 
       <div className="app-header__actions">
         <NetworkIndicator {...network} />
-        {user && (
-          <span className="badge badge--brand app-header__points" title="Poin kamu">
-            <Icon name="diamond" size={14} /> {user.points ?? 0}
-          </span>
-        )}
+        <div className="account-menu__stats">
+          {user && (
+            <>
+              <span className="badge badge--brand app-header__points" title="Coins kamu">
+                <Icon name="coin" size={14} /> {user.points ?? 0}
+              </span>
+              <button
+                type="button"
+                className="badge badge--diamond app-header__diamonds"
+                title="Diamonds kamu (Klik untuk Top-Up / Konversi)"
+                onClick={() => {
+                  setOpen(false);
+                  sound.playClick();
+                  onOpenShop?.();
+                }}
+              >
+                <Icon name="diamond" size={14} /> {user.diamonds ?? 0}
+              </button>
+            </>
+          )}
+        </div>
         {onOpenFriends && (
           <button
             type="button"
@@ -302,6 +363,7 @@ export default function AppHeader({
             onOpenFriends={onOpenFriends}
             onOpenGroups={onOpenGroups}
             onOpenLeaderboard={onOpenLeaderboard}
+            onOpenShop={onOpenShop}
             onViewProfile={onViewProfile}
             onUploadAvatar={onUploadAvatar}
             onLogout={onLogout}

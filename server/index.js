@@ -16,6 +16,8 @@ const db = require('./db');
 const store = require('./game/store');
 const engine = require('./game/engine');
 const quizEngine = require('./quiz/engine');
+const chessEngine = require('./chess/engine');
+const snakesEngine = require('./snakes/engine');
 const { createApiRouter } = require('./http/routes');
 const { registerSocketHandlers } = require('./realtime/socket');
 
@@ -27,7 +29,18 @@ if (process.env.TRUST_PROXY && process.env.TRUST_PROXY !== '0') {
 // Klien dilayani dari origin yang sama (Vite dev memakai proxy). CORS hanya dibuka bila diminta.
 const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : null;
 if (corsOrigin) app.use(cors({ origin: corsOrigin }));
+
+// Security Headers (Proteksi Clickjacking, MIME-Sniffing, dan XSS)
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '20kb' }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -41,9 +54,18 @@ const io = new Server(server, {
 
 store.init(io);
 quizEngine.init(io);
+chessEngine.init(io);
+snakesEngine.init(io);
 registerSocketHandlers(io);
 
-app.get('/health', (_, res) => res.json({ ok: true, rooms: store.rooms.size, quizRooms: quizEngine.quizRooms.size, db: db.getStatus().engine }));
+app.get('/health', (_, res) => res.json({
+  ok: true,
+  rooms: store.rooms.size,
+  quizRooms: quizEngine.quizRooms.size,
+  chessRooms: chessEngine.chessRooms.size,
+  snakesRooms: snakesEngine.snakesRooms.size,
+  db: db.getStatus().engine
+}));
 app.use('/api', createApiRouter());
 
 app.use((err, req, res, next) => {
@@ -74,6 +96,21 @@ function getPublicOrigin(req) {
   return `${proto}://${host}`;
 }
 
+const GAME_CANONICAL_PATHS = [
+  { key: 'hub', query: '', priority: '1.0' },
+  { key: 'jakludo', query: '?game=jakludo', priority: '0.9' },
+  { key: 'chess-master', query: '?game=chess-master', priority: '0.9' },
+  { key: 'snakes-and-ladders', query: '?game=snakes-and-ladders', priority: '0.9' },
+  { key: 'monster-quiz', query: '?game=monster-quiz', priority: '0.9' }
+];
+
+function buildPageUrl(origin, query, hl = null, forXml = false) {
+  const base = `${origin}/${query || ''}`;
+  if (!hl) return base;
+  const sep = query ? (forXml ? '&amp;' : '&') : '?';
+  return `${base}${sep}hl=${hl}`;
+}
+
 app.get('/robots.txt', (req, res) => {
   const origin = escapeHtml(getPublicOrigin(req));
   res.type('text/plain; charset=utf-8');
@@ -82,8 +119,9 @@ app.get('/robots.txt', (req, res) => {
     [
       'User-agent: *',
       'Allow: /',
-      'Allow: /?game=jakludo',
-      'Allow: /?game=monster-quiz',
+      ...GAME_CANONICAL_PATHS.filter(p => p.query).map(p => `Allow: /${p.query}`),
+      'Allow: /?hl=en',
+      'Allow: /?hl=id',
       'Disallow: /api/',
       'Disallow: /socket.io/',
       '',
@@ -93,32 +131,36 @@ app.get('/robots.txt', (req, res) => {
   );
 });
 
+app.get('/ads.txt', (req, res) => {
+  res.type('text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send('google.com, pub-9965100396262528, DIRECT, f08c47fec0942fa0\n');
+});
+
 app.get('/sitemap.xml', (req, res) => {
   const origin = escapeHtml(getPublicOrigin(req));
   const today = new Date().toISOString().slice(0, 10);
   res.type('application/xml; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600');
+  const urlNodes = GAME_CANONICAL_PATHS.map(({ query, priority }) => {
+    const loc = buildPageUrl(origin, query, null, true);
+    const hrefEn = buildPageUrl(origin, query, 'en', true);
+    const hrefId = buildPageUrl(origin, query, 'id', true);
+    return `  <url>
+    <loc>${loc}</loc>
+    <xhtml:link rel="alternate" hreflang="x-default" href="${loc}" />
+    <xhtml:link rel="alternate" hreflang="en" href="${hrefEn}" />
+    <xhtml:link rel="alternate" hreflang="id" href="${hrefId}" />
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>${priority}</priority>
+  </url>`;
+  }).join('\n');
+
   res.send(
     `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>${origin}/</loc>
-    <lastmod>${today}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>
-  <url>
-    <loc>${origin}/?game=jakludo</loc>
-    <lastmod>${today}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-  <url>
-    <loc>${origin}/?game=monster-quiz</loc>
-    <lastmod>${today}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${urlNodes}
 </urlset>`
   );
 });
@@ -135,19 +177,88 @@ app.use(express.static(dist, {
 }));
 
 const GAME_SSR_META = {
+  hub: {
+    query: '',
+    en: {
+      title: 'PlayGo · Free Online Multiplayer Browser Games (JakLudo, Chess Master, Snakes & Ladders, Monster Quiz)',
+      description:
+        'Play free real-time multiplayer browser games with friends worldwide on PlayGo! Enjoy JakLudo (2–4 players), Chess Master (Elo rated online chess), Snakes and Ladders, and Monster Quiz Battle RPG instantly with no download.'
+    },
+    id: {
+      title: 'PlayGo · Game Multiplayer Online Gratis (JakLudo, Chess Master, Ular Tangga & Monster Quiz)',
+      description:
+        'Mainkan game multiplayer realtime gratis di browser bersama teman seluruh dunia di PlayGo! Tersedia JakLudo (2–4 pemain), Chess Master (catur Elo), Ular Tangga 100 kotak, dan Monster Quiz Battle RPG tanpa unduh.'
+    }
+  },
   jakludo: {
-    title: 'Main JakLudo Online (2–4 Pemain) · PlayGo Multiplayer',
-    description:
-      'Mainkan JakLudo di PlayGo! Game Ludo multiplayer realtime 2–4 pemain dengan petak Black Hole, item strategi (Force Return & Perisai), obrolan grup, dan papan peringkat global.',
-    query: '?game=jakludo'
+    query: '?game=jakludo',
+    en: {
+      title: 'Play JakLudo Online (2–4 Player Multiplayer Ludo) · PlayGo',
+      description:
+        'Play real-time 2–4 player Ludo online free in your browser on PlayGo! Enjoy Black Hole traps, strategic items (Force Return & Shield), custom skins, friend rooms, and global leaderboards.'
+    },
+    id: {
+      title: 'Main JakLudo Online (Ludo 2–4 Pemain Realtime) · PlayGo Multiplayer',
+      description:
+        'Mainkan JakLudo di PlayGo! Game Ludo multiplayer realtime 2–4 pemain dengan petak Black Hole, item strategi (Force Return & Perisai), skin bidak eksklusif, obrolan grup, dan papan peringkat global.'
+    }
   },
   'monster-quiz': {
-    title: 'Monster Quiz Battle (Duel Kuis RPG 2–3 Pemain) · PlayGo Multiplayer',
-    description:
-      'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster andalanmu, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +10 poin setiap menang!',
-    query: '?game=monster-quiz'
+    query: '?game=monster-quiz',
+    en: {
+      title: 'Monster Quiz Battle (2–3 Player Online RPG Trivia) · PlayGo',
+      description:
+        'Challenge friends worldwide in Monster Quiz Battle on PlayGo! Answer general knowledge and math trivia in 15 seconds, use 50:50 Answer Hints, battle elemental monsters, and earn PlayGo Coins.'
+    },
+    id: {
+      title: 'Monster Quiz Battle (Duel Kuis RPG 2–3 Pemain) · PlayGo Multiplayer',
+      description:
+        'Adu cepat pengetahuan umum & matematika di Monster Quiz Battle PlayGo! Pilih monster berelemen, gunakan Hints Jawaban (50:50), serang monster lawan, dan raih +10 Coins setiap menang!'
+    }
+  },
+  'chess-master': {
+    query: '?game=chess-master',
+    en: {
+      title: 'Chess Master (Play Online Multiplayer Chess & Elo Rating) · PlayGo',
+      description:
+        'Master the board and play free online multiplayer chess worldwide on PlayGo! Official Elo ratings, Bullet, Blitz & Rapid clocks, Private Rooms, AI Bot practice, and PGN move analysis.'
+    },
+    id: {
+      title: 'Chess Master (Catur Online Multiplayer & Rating Elo) · PlayGo Strategy',
+      description:
+        'Mainkan catur online multiplayer gratis di PlayGo! Sistem rating Elo resmi, mode Bullet, Blitz, Rapid, Private Room bersama teman, latihan melawan AI Bot, dan analisis notasi PGN.'
+    }
+  },
+  'snakes-and-ladders': {
+    query: '?game=snakes-and-ladders',
+    en: {
+      title: 'Snakes and Ladders Online Multiplayer (Ular Tangga 100 Tiles) · PlayGo',
+      description:
+        'Play classic Snakes and Ladders (Ular Tangga) online multiplayer for free on PlayGo! Roll the dice across 100 tiles with Smart Matchmaking, Private Rooms, AI opponents, and global rankings.'
+    },
+    id: {
+      title: 'Ular Tangga Online (Snakes and Ladders Multiplayer) · PlayGo Board Game',
+      description:
+        'Mainkan Ular Tangga (Snakes and Ladders) multiplayer realtime gratis di PlayGo! Lempar dadu menuju kotak 100, panjat tangga, hindari ular, lengkap dengan Smart Matchmaking & Private Room.'
+    }
   }
 };
+
+function resolveGameKey(rawGame) {
+  const g = String(rawGame || '').toLowerCase();
+  if (g === 'jakludo' || g === 'ludo') return 'jakludo';
+  if (g === 'monster-quiz' || g === 'quiz') return 'monster-quiz';
+  if (g === 'chess-master' || g === 'chess') return 'chess-master';
+  if (g === 'snakes-and-ladders' || g === 'snakes' || g === 'ular-tangga') return 'snakes-and-ladders';
+  return 'hub';
+}
+
+function resolveLangParam(query) {
+  const raw = String(query?.hl || query?.lang || '').toLowerCase().trim();
+  if (raw === 'id' || raw === 'id-id' || raw === 'ind') return 'id';
+  if (raw === 'en' || raw.startsWith('en-')) return 'en';
+  return null;
+}
 
 app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
@@ -158,52 +269,42 @@ app.get('*', (req, res) => {
 
   let html = fs.readFileSync(htmlPath, 'utf8');
   const origin = getPublicOrigin(req);
-  const rawGame = String(req.query?.game || '').toLowerCase();
-  const gameKey =
-    rawGame === 'jakludo' || rawGame === 'ludo'
-      ? 'jakludo'
-      : rawGame === 'monster-quiz' || rawGame === 'quiz'
-      ? 'monster-quiz'
-      : null;
-  const gameMeta = gameKey ? GAME_SSR_META[gameKey] : null;
-  const canonicalUrl = escapeHtml(`${origin}/${gameMeta ? gameMeta.query : ''}`);
   const safeOrigin = escapeHtml(origin);
-  const metaTitle = gameMeta ? escapeHtml(gameMeta.title) : '';
-  const metaDescription = gameMeta ? escapeHtml(gameMeta.description) : '';
+  const gameKey = resolveGameKey(req.query?.game);
+  const explicitLang = resolveLangParam(req.query);
+  const htmlLang = explicitLang || 'en';
+  const ogLocale = htmlLang === 'id' ? 'id_ID' : 'en_US';
+  const gameEntry = GAME_SSR_META[gameKey] || GAME_SSR_META.hub;
+  const localizedMeta = gameEntry[htmlLang] || gameEntry.en;
+  const gameQuery = gameEntry.query;
 
-  if (gameMeta) {
-    html = html
-      .replace(/<title>[\s\S]*?<\/title>/, `<title>${metaTitle}</title>`)
-      .replace(
-        /<meta name="description" content="[^"]*" \/>/,
-        `<meta name="description" content="${metaDescription}" />`
-      )
-      .replace(
-        /<meta property="og:title" content="[^"]*" \/>/,
-        `<meta property="og:title" content="${metaTitle}" />`
-      )
-      .replace(
-        /<meta property="og:description" content="[^"]*" \/>/,
-        `<meta property="og:description" content="${metaDescription}" />`
-      )
-      .replace(
-        /<meta name="twitter:title" content="[^"]*" \/>/,
-        `<meta name="twitter:title" content="${metaTitle}" />`
-      )
-      .replace(
-        /<meta name="twitter:description" content="[^"]*" \/>/,
-        `<meta name="twitter:description" content="${metaDescription}" />`
-      );
-  }
+  const xDefaultUrl = escapeHtml(buildPageUrl(origin, gameQuery, null, false));
+  const enUrl = escapeHtml(buildPageUrl(origin, gameQuery, 'en', false));
+  const idUrl = escapeHtml(buildPageUrl(origin, gameQuery, 'id', false));
+  const canonicalUrl = explicitLang === 'id' ? idUrl : explicitLang === 'en' ? enUrl : xDefaultUrl;
+
+  const metaTitle = escapeHtml(localizedMeta.title);
+  const metaDescription = escapeHtml(localizedMeta.description);
 
   html = html
-    .replace('<link rel="canonical" href="/" />', `<link rel="canonical" href="${canonicalUrl}" />`)
-    .replace('<meta property="og:url" content="/" />', `<meta property="og:url" content="${canonicalUrl}" />`)
-    .replace('<meta property="og:image" content="/playgo-logo.jpg" />', `<meta property="og:image" content="${safeOrigin}/playgo-logo.jpg" />`)
-    .replace('<meta name="twitter:image" content="/playgo-logo.jpg" />', `<meta name="twitter:image" content="${safeOrigin}/playgo-logo.jpg" />`);
+    .replace(/<html lang="[^"]*"/, `<html lang="${htmlLang}"`)
+    .replace(/<title>[\s\S]*?<\/title>/, `<title>${metaTitle}</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, `<meta name="description" content="${metaDescription}" />`)
+    .replace(/<meta property="og:locale" content="[^"]*"\s*\/?>/, `<meta property="og:locale" content="${ogLocale}" />`)
+    .replace(/<meta property="og:title" content="[^"]*"\s*\/?>/, `<meta property="og:title" content="${metaTitle}" />`)
+    .replace(/<meta property="og:description" content="[^"]*"\s*\/?>/, `<meta property="og:description" content="${metaDescription}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*"\s*\/?>/, `<meta name="twitter:title" content="${metaTitle}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*"\s*\/?>/, `<meta name="twitter:description" content="${metaDescription}" />`)
+    .replace(/<link rel="canonical" href="[^"]*"\s*\/?>/, `<link rel="canonical" href="${canonicalUrl}" />`)
+    .replace(/<link rel="alternate" hreflang="x-default" href="[^"]*"\s*\/?>/, `<link rel="alternate" hreflang="x-default" href="${xDefaultUrl}" />`)
+    .replace(/<link rel="alternate" hreflang="en" href="[^"]*"\s*\/?>/, `<link rel="alternate" hreflang="en" href="${enUrl}" />`)
+    .replace(/<link rel="alternate" hreflang="id" href="[^"]*"\s*\/?>/, `<link rel="alternate" hreflang="id" href="${idUrl}" />`)
+    .replace(/<meta property="og:url" content="[^"]*"\s*\/?>/, `<meta property="og:url" content="${canonicalUrl}" />`)
+    .replace(/<meta property="og:image" content="\/playgo-logo\.jpg"\s*\/?>/, `<meta property="og:image" content="${safeOrigin}/playgo-logo.jpg" />`)
+    .replace(/<meta name="twitter:image" content="\/playgo-logo\.jpg"\s*\/?>/, `<meta name="twitter:image" content="${safeOrigin}/playgo-logo.jpg" />`);
 
-  // URL di data terstruktur (JSON-LD) harus absolut
-  html = html.replace(/"url": "\//g, `"url": "${safeOrigin}/`);
+  // URL dan aset di data terstruktur (JSON-LD) harus absolut
+  html = html.replace(/"(url|logo|image)": "\//g, `"$1": "${safeOrigin}/`);
 
   res.type('text/html; charset=utf-8').send(html);
 });
@@ -224,6 +325,10 @@ function shutdown() {
   store.stopAllTimers();
   quizEngine.closeAllRoomsForShutdown();
   quizEngine.stopAllTimers();
+  chessEngine.closeAllRoomsForShutdown();
+  chessEngine.stopAllTimers();
+  snakesEngine.closeAllRoomsForShutdown();
+  snakesEngine.stopAllTimers();
   store.flushRooms();
   return db.close();
 }

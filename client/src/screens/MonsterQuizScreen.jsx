@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import Icon from '../components/Icon';
+import Modal from '../components/Modal';
 import PlayerAvatar from '../components/PlayerAvatar';
+import ChatPanel from '../components/game/ChatPanel';
 import MonsterSprite from '../quiz/MonsterSprite';
 import { QUIZ_MONSTERS, getClientMonster } from '../quiz/monsters';
 import { sound } from '../sound';
 import monsterQuizLogo from '../assets/monster-quiz-logo.webp';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
+const REACTIONS = ['🎲', '🔥', '👏', '😂', '😭', '👑'];
+const QUIZ_QUICK_CHATS = ['Semangat! 🔥', 'GG! 👏', 'Soalnya susah! 😂', 'Jangan serang aku! 😭', 'Ayo cepat jawab! ⚡'];
 
 function hpTone(hp) {
   if (hp > 50) return 'high';
@@ -148,6 +152,9 @@ export default function MonsterQuizScreen({
     stats,
     history,
     leaderboard,
+    chats = [],
+    unreadChats = 0,
+    chatOpen = false,
     actions
   } = quiz;
 
@@ -198,7 +205,7 @@ export default function MonsterQuizScreen({
                 <span>Hints Jawaban: {ownedHints} · Beli di Toko</span>
               </button>
             )}
-            <span className="badge badge--brand">Menang +10 Poin · 2–3 Pemain</span>
+            <span className="badge badge--brand">Menang +10 Coins · 2–3 Pemain</span>
           </div>
         </div>
 
@@ -216,12 +223,12 @@ export default function MonsterQuizScreen({
                 />
               </figure>
               <div>
-                <span className="mq-eyebrow">MONSTER QUIZ BATTLE · MAKS 3 PEMAIN · HADIAH +10 POIN</span>
+                <span className="mq-eyebrow">MONSTER QUIZ BATTLE · MAKS 3 PEMAIN · HADIAH +10 COINS</span>
                 <h1 className="mq-hero__title">
                   Adu cepat pengetahuan &amp; matematika, <span className="home__title-accent">serang monster lawan!</span>
                 </h1>
                 <p className="mq-hero__lead">
-                  2 hingga maksimal 3 pemain menerima soal yang sama selama 15 detik. Jika kamu benar dan lawan salah, monstermu melancarkan serangan sebesar <strong>10 HP</strong>. Menangkan pertandingan untuk meraih <strong>+10 Poin PlayGo</strong> (lawan pemain asli) dan gunakan item <strong>Hints Jawaban (50:50)</strong> dari Toko Item saat ragu!
+                  2 hingga maksimal 3 pemain menerima soal yang sama selama 15 detik. Jika kamu benar dan lawan salah, monstermu melancarkan serangan sebesar <strong>10 HP</strong>. Menangkan pertandingan untuk meraih <strong>+10 Coins PlayGo</strong> (lawan pemain asli) dan gunakan item <strong>Hints Jawaban (50:50)</strong> dari Toko Item saat ragu!
                 </p>
               </div>
             </div>
@@ -636,6 +643,36 @@ export default function MonsterQuizScreen({
           </div>
 
           <div className="mq-lobby-footer">
+            <div className="turn-panel__toolbar" style={{ width: '100%', marginBottom: '0.5rem' }}>
+              <div className="reaction-row" role="group" aria-label="Kirim reaksi">
+                {REACTIONS.map(emoji => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="icon-btn icon-btn--plain"
+                    aria-label={`Kirim reaksi ${emoji}`}
+                    onClick={() => actions.sendReaction(emoji)}
+                  >
+                    <span aria-hidden="true">{emoji}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="turn-panel__tools">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Buka obrolan${unreadChats ? `, ${unreadChats} pesan baru` : ''}`}
+                  onClick={() => {
+                    sound.playClick();
+                    actions.setChatOpen(true);
+                  }}
+                >
+                  <span aria-hidden="true">💬</span>
+                  {unreadChats > 0 && <span className="count-badge" aria-hidden="true">{unreadChats}</span>}
+                </button>
+              </div>
+            </div>
+
             <button
               type="button"
               className={`btn btn--lg ${me?.ready ? 'btn--secondary' : 'btn--primary'}`}
@@ -652,6 +689,21 @@ export default function MonsterQuizScreen({
             </button>
           </div>
         </section>
+
+        <Modal
+          isOpen={Boolean(chatOpen)}
+          onClose={() => actions.setChatOpen(false)}
+          variant="sheet"
+          title="Obrolan room"
+          icon="💬"
+        >
+          <ChatPanel
+            chats={chats}
+            playerId={currentUser?.id}
+            onSend={actions.sendChat}
+            quickChats={QUIZ_QUICK_CHATS}
+          />
+        </Modal>
       </main>
     );
   }
@@ -853,11 +905,11 @@ export default function MonsterQuizScreen({
 
                 {!isDraw && rewardPoints > 0 && (
                   <div className={`mq-reward-banner ${isWinner ? 'mq-reward-banner--win' : ''}`} role="status">
-                    <Icon name="diamond" size={18} />
+                    <Icon name="coin" size={18} />
                     <span>
                       {isWinner
-                        ? `Selamat! Kamu mendapatkan hadiah +${rewardPoints} Poin PlayGo!`
-                        : `${winnerPlayer?.name || 'Pemenang'} mendapatkan hadiah +${rewardPoints} Poin PlayGo.`}
+                        ? `Selamat! Kamu mendapatkan hadiah +${rewardPoints} Coins PlayGo!`
+                        : `${winnerPlayer?.name || 'Pemenang'} mendapatkan hadiah +${rewardPoints} Coins PlayGo.`}
                     </span>
                   </div>
                 )}
@@ -968,7 +1020,7 @@ export default function MonsterQuizScreen({
                         onClick={onOpenShop}
                       >
                         <Icon name="shop" size={16} />
-                        <span>Beli Hint di Toko (25 Poin)</span>
+                        <span>Beli Hint di Toko (25 Coins)</span>
                       </button>
                     ) : null)}
                 </div>
@@ -1015,6 +1067,54 @@ export default function MonsterQuizScreen({
           )}
         </section>
       )}
+
+      {/* Bar Reaksi Emoticon & Tombol Obrolan (seperti JakLudo) */}
+      <section className="card mq-chat-bar" aria-label="Reaksi dan Obrolan Room" style={{ padding: '0.65rem 1rem' }}>
+        <div className="turn-panel__toolbar" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
+          <div className="reaction-row" role="group" aria-label="Kirim reaksi">
+            {REACTIONS.map(emoji => (
+              <button
+                key={emoji}
+                type="button"
+                className="icon-btn icon-btn--plain"
+                aria-label={`Kirim reaksi ${emoji}`}
+                onClick={() => actions.sendReaction(emoji)}
+              >
+                <span aria-hidden="true">{emoji}</span>
+              </button>
+            ))}
+          </div>
+          <div className="turn-panel__tools">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={`Buka obrolan${unreadChats ? `, ${unreadChats} pesan baru` : ''}`}
+              onClick={() => {
+                sound.playClick();
+                actions.setChatOpen(true);
+              }}
+            >
+              <span aria-hidden="true">💬</span>
+              {unreadChats > 0 && <span className="count-badge" aria-hidden="true">{unreadChats}</span>}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <Modal
+        isOpen={Boolean(chatOpen)}
+        onClose={() => actions.setChatOpen(false)}
+        variant="sheet"
+        title="Obrolan room"
+        icon="💬"
+      >
+        <ChatPanel
+          chats={chats}
+          playerId={currentUser?.id}
+          onSend={actions.sendChat}
+          quickChats={QUIZ_QUICK_CHATS}
+        />
+      </Modal>
     </main>
   );
 }

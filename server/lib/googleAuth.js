@@ -8,26 +8,24 @@ async function verifyGoogleIdToken(idToken) {
 
   const cleanToken = idToken.trim();
 
-  // Dukungan token simulasi untuk pengujian unit atau mode development lokal tanpa internet
-  if (cleanToken.startsWith('mock_google_token_') || process.env.NODE_ENV === 'test') {
-    if (cleanToken.startsWith('mock_google_token_')) {
-      try {
-        const jsonPart = cleanToken.replace(/^mock_google_token_/, '');
-        const decoded = JSON.parse(Buffer.from(jsonPart, 'base64').toString('utf8'));
-        return {
-          googleId: decoded.sub || decoded.googleId || 'mock_sub_12345',
-          email: decoded.email || 'user@gmail.com',
-          name: decoded.name || 'User Google',
-          picture: decoded.picture || null
-        };
-      } catch {
-        return {
-          googleId: 'mock_sub_' + cleanToken.slice(-6),
-          email: `${cleanToken.slice(-6)}@gmail.com`,
-          name: 'Pemain Google',
-          picture: null
-        };
-      }
+  // Dukungan token simulasi HANYA untuk pengujian unit (NODE_ENV === 'test')
+  if (process.env.NODE_ENV === 'test' && cleanToken.startsWith('mock_google_token_')) {
+    try {
+      const jsonPart = cleanToken.replace(/^mock_google_token_/, '');
+      const decoded = JSON.parse(Buffer.from(jsonPart, 'base64').toString('utf8'));
+      return {
+        googleId: decoded.sub || decoded.googleId || 'mock_sub_12345',
+        email: decoded.email || 'user@gmail.com',
+        name: decoded.name || 'User Google',
+        picture: decoded.picture || null
+      };
+    } catch {
+      return {
+        googleId: 'mock_sub_' + cleanToken.slice(-6),
+        email: `${cleanToken.slice(-6)}@gmail.com`,
+        name: 'Pemain Google',
+        picture: null
+      };
     }
   }
 

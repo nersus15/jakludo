@@ -152,22 +152,23 @@ function evaluateBoard(chess) {
   if (chess.isDraw() || chess.isStalemate() || chess.isThreefoldRepetition() || chess.isInsufficientMaterial()) {
     return 0;
   }
+  return materialScore(chess);
+}
 
+// Nilai material + posisi saja (tanpa cek akhir permainan). Dipakai di daun pencarian: cek skakmat /
+// remis sudah dilakukan sekali di simpul induk lewat jumlah langkah legal, jadi tidak perlu diulang.
+function materialScore(chess) {
   const board = chess.board();
   let score = 0;
-
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const piece = board[r][c];
       if (!piece) continue;
-      const base = PIECE_VALUES[piece.type] || 0;
-      const pos = getPositionalBonus(piece, r, c);
-      const val = base + pos;
+      const val = (PIECE_VALUES[piece.type] || 0) + getPositionalBonus(piece, r, c);
       if (piece.color === 'w') score += val;
       else score -= val;
     }
   }
-
   return score;
 }
 
@@ -182,12 +183,17 @@ function scoreMoveForOrdering(mv) {
   return s;
 }
 
+const MATE_SCORE = 99999;
+
+// Minimax alpha-beta, skor dari sudut pandang Putih. Skakmat yang lebih cepat dinilai lebih ekstrem.
 function minimax(chess, depth, alpha, beta, isMaximizing) {
-  if (depth === 0 || chess.isGameOver()) {
-    return evaluateBoard(chess);
-  }
+  if (depth === 0) return materialScore(chess);
 
   const moves = chess.moves({ verbose: true });
+  if (moves.length === 0) {
+    if (!chess.inCheck()) return 0; // stalemate
+    return chess.turn() === 'w' ? -MATE_SCORE - depth : MATE_SCORE + depth;
+  }
   moves.sort((a, b) => scoreMoveForOrdering(b) - scoreMoveForOrdering(a));
 
   if (isMaximizing) {
@@ -215,54 +221,60 @@ function minimax(chess, depth, alpha, beta, isMaximizing) {
   return minEval;
 }
 
-function chooseBotMove(fen, difficulty = 'medium') {
+// Kedalaman pencarian (setelah langkah akar), variasi acak skor, dan batas waktu berpikir per level.
+// 'analysis' dipakai item HINT: paling dalam dan tanpa variasi acak.
+const SEARCH_PROFILES = {
+  easy: { depth: 1, jitter: 95, timeBudgetMs: 400 },
+  medium: { depth: 1, jitter: 25, timeBudgetMs: 600 },
+  hard: { depth: 2, jitter: 8, timeBudgetMs: 1500 },
+  analysis: { depth: 3, jitter: 0, timeBudgetMs: 2500 }
+};
+
+// Pilih langkah untuk posisi `fen`. Langkah akar diurutkan dari yang paling menjanjikan; bila batas waktu
+// habis, sisa langkah (yang kurang menjanjikan) tidak dihitung. Return { from, to, promotion, san, score }.
+function chooseBotMove(fen, difficulty = 'medium', { timeBudgetMs } = {}) {
   const chess = new Chess(fen);
   const legalMoves = chess.moves({ verbose: true });
   if (!legalMoves || legalMoves.length === 0) return null;
-  if (legalMoves.length === 1) {
-    const only = legalMoves[0];
-    return { from: only.from, to: only.to, promotion: only.promotion || 'q' };
-  }
+  const pick = mv => ({ from: mv.from, to: mv.to, promotion: mv.promotion || 'q', san: mv.san });
+  if (legalMoves.length === 1) return pick(legalMoves[0]);
 
-  const botColor = chess.turn(); // 'w' atau 'b'
-  const isMaximizing = botColor === 'w';
-  const diff = String(difficulty || 'medium').toLowerCase();
+  const isWhite = chess.turn() === 'w';
+  const profile = SEARCH_PROFILES[String(difficulty || 'medium').toLowerCase()] || SEARCH_PROFILES.medium;
+  const deadline = Date.now() + (timeBudgetMs ?? profile.timeBudgetMs);
 
-  // Cek apakah ada langkah skakmat langsung (1 langkah)
+  // Skakmat 1 langkah langsung dipilih
   for (const mv of legalMoves) {
     chess.move(mv);
     const isMate = chess.isCheckmate();
     chess.undo();
-    if (isMate) {
-      return { from: mv.from, to: mv.to, promotion: mv.promotion || 'q' };
+    if (isMate) return pick(mv);
+  }
+
+  legalMoves.sort((a, b) => scoreMoveForOrdering(b) - scoreMoveForOrdering(a));
+
+  // Skor dari sudut pandang bot (besar = bagus untuk bot). Jendela pruning dilonggarkan selebar jitter
+  // agar langkah yang hampir sama bagusnya tetap dihitung tepat dan bisa terpilih secara acak.
+  let best = null;
+  let bestScore = -Infinity;
+  for (const mv of legalMoves) {
+    if (best && Date.now() > deadline) break;
+    const floor = bestScore === -Infinity ? -Infinity : bestScore - profile.jitter;
+    chess.move(mv);
+    const raw = isWhite
+      ? minimax(chess, profile.depth, floor, Infinity, false)
+      : -minimax(chess, profile.depth, -Infinity, floor === -Infinity ? Infinity : -floor, true);
+    chess.undo();
+
+    const jitter = profile.jitter ? crypto.randomInt(-profile.jitter, profile.jitter + 1) : 0;
+    const score = raw + jitter;
+    if (score > bestScore) {
+      bestScore = score;
+      best = mv;
     }
   }
 
-  const searchDepth = diff === 'hard' ? 2 : 1;
-  const scoredMoves = [];
-
-  for (const mv of legalMoves) {
-    chess.move(mv);
-    const boardScore = minimax(chess, searchDepth, -Infinity, Infinity, !isMaximizing);
-    chess.undo();
-
-    // Konversi ke skor dari perspektif bot (semakin besar semakin bagus untuk bot)
-    let myScore = isMaximizing ? boardScore : -boardScore;
-
-    // Tambahkan sedikit variasi agar langkah pembukaan bot natural dan tidak selalu identik
-    const jitterRange = diff === 'easy' ? 95 : diff === 'medium' ? 25 : 8;
-    myScore += crypto.randomInt(-jitterRange, jitterRange + 1);
-
-    scoredMoves.push({ mv, score: myScore });
-  }
-
-  scoredMoves.sort((a, b) => b.score - a.score);
-  const chosen = scoredMoves[0].mv;
-  return {
-    from: chosen.from,
-    to: chosen.to,
-    promotion: chosen.promotion || 'q'
-  };
+  return { ...pick(best), score: bestScore };
 }
 
 module.exports = {

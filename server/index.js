@@ -327,6 +327,7 @@ function shutdown() {
   quizEngine.stopAllTimers();
   chessEngine.closeAllRoomsForShutdown();
   chessEngine.stopAllTimers();
+  require('./chess/botPool').shutdownBotPool();
   snakesEngine.closeAllRoomsForShutdown();
   snakesEngine.stopAllTimers();
   store.flushRooms();

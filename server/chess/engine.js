@@ -9,9 +9,9 @@ const {
   isBotUserId,
   getBotProfile,
   buildQuickMatchBotForRating,
-  evaluateBoard,
-  chooseBotMove
+  evaluateBoard
 } = require('./bot');
+const { chooseBotMoveAsync } = require('./botPool');
 
 const DISCONNECT_GRACE_MS = Number(process.env.CHESS_DISCONNECT_GRACE_MS || 60_000);
 const LOBBY_EXPIRE_MS = Number(process.env.CHESS_LOBBY_EXPIRE_MS || 5 * 60 * 1000);
@@ -135,6 +135,40 @@ function computeLiveClocks(room, now = Date.now()) {
   };
 }
 
+// Langkah legal & status skak dihitung sekali per versi langkah lalu dipakai ulang untuk semua penerima
+// (sebelumnya dihitung ulang per pemain & per callback; chess.js lumayan mahal untuk ini)
+const derivedByMatch = new WeakMap();
+function derivedPosition(m) {
+  const cached = derivedByMatch.get(m);
+  if (cached && cached.moveVersion === m.moveVersion && cached.status === m.status) return cached;
+  let legalMoves = [];
+  if (m.status === 'active') {
+    try {
+      legalMoves = m.chess.moves({ verbose: true }).map(mv => ({
+        from: mv.from,
+        to: mv.to,
+        promotion: mv.promotion || null,
+        san: mv.san,
+        flags: mv.flags,
+        piece: mv.piece,
+        captured: mv.captured || null
+      }));
+    } catch {
+      legalMoves = [];
+    }
+  }
+  const inCheck = m.chess.inCheck();
+  const derived = {
+    moveVersion: m.moveVersion,
+    status: m.status,
+    legalMoves,
+    inCheck,
+    isCheckmate: inCheck && m.status !== 'active' ? m.chess.isCheckmate() : inCheck && legalMoves.length === 0
+  };
+  derivedByMatch.set(m, derived);
+  return derived;
+}
+
 function serializeRoomForUser(room, viewerUserId = null) {
   if (!room) return null;
   const now = Date.now();
@@ -164,26 +198,9 @@ function serializeRoomForUser(room, viewerUserId = null) {
     };
   });
 
-  let legalMoves = [];
-  let inCheck = false;
-  if (m && m.chess) {
-    inCheck = m.chess.inCheck();
-    if (m.status === 'active') {
-      try {
-        legalMoves = m.chess.moves({ verbose: true }).map(mv => ({
-          from: mv.from,
-          to: mv.to,
-          promotion: mv.promotion || null,
-          san: mv.san,
-          flags: mv.flags,
-          piece: mv.piece,
-          captured: mv.captured || null
-        }));
-      } catch {
-        legalMoves = [];
-      }
-    }
-  }
+  const derived = m && m.chess ? derivedPosition(m) : null;
+  const legalMoves = derived ? derived.legalMoves : [];
+  const inCheck = derived ? derived.inCheck : false;
 
   const myPlayer = viewerUserId ? players.find(p => p.userId === viewerUserId) : null;
   const whitePlayerObj = m ? players.find(p => p.userId === m.whitePlayerId) || null : null;
@@ -216,7 +233,7 @@ function serializeRoomForUser(room, viewerUserId = null) {
           currentTurn: m.currentTurn,
           turn: m.currentTurn,
           inCheck,
-          isCheckmate: Boolean(m.chess && m.chess.isCheckmate()),
+          isCheckmate: Boolean(derived?.isCheckmate),
           whitePlayerId: m.whitePlayerId,
           blackPlayerId: m.blackPlayerId,
           whitePlayer: whitePlayerObj,
@@ -1248,14 +1265,21 @@ function scheduleBotMoveIfNeeded(room) {
   const expectedMatchId = m.id;
   const expectedMoveVersion = m.moveVersion;
 
-  room.botMoveTimer = setTimeout(() => {
-    room.botMoveTimer = null;
-    if (!room.match || room.match.id !== expectedMatchId || room.match.status !== 'active') return;
-    if (room.match.moveVersion !== expectedMoveVersion) return;
-    if (room.match.chess.turn() !== activePlayer.color) return;
+  const stillBotTurn = () =>
+    room.match &&
+    room.match.id === expectedMatchId &&
+    room.match.status === 'active' &&
+    room.match.moveVersion === expectedMoveVersion &&
+    room.match.chess.turn() === activePlayer.color;
 
-    const chosen = chooseBotMove(room.match.currentFen, activePlayer.difficulty || 'medium');
-    if (!chosen) return;
+  room.botMoveTimer = setTimeout(async () => {
+    room.botMoveTimer = null;
+    if (!stillBotTurn()) return;
+
+    // Pencarian di worker thread agar server tidak membeku (lihat botPool.js)
+    const chosen = await chooseBotMoveAsync(room.match.currentFen, activePlayer.difficulty || 'medium');
+    // Keadaan bisa berubah selama bot berpikir (lawan menyerah, waktu habis, room ditutup)
+    if (!chosen || !stillBotTurn()) return;
 
     executeMoveForPlayer(room, activePlayer, {
       from: chosen.from,

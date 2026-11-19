@@ -59,7 +59,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--brand-soft, rgba(99, 102, 241, 0.15));
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 0.75rem;
   font-weight: 800;
 }
@@ -73,12 +73,12 @@
   padding: 4px 10px;
   border-radius: 999px;
   background: rgba(16, 185, 129, 0.14);
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-conn-dot.is-warn {
   background: rgba(245, 158, 11, 0.16);
-  color: #f59e0b;
+  color: var(--warning);
 }
 
 .cm-toast {
@@ -95,7 +95,7 @@
 .cm-toast--error {
   background: rgba(239, 68, 68, 0.14);
   border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-toast--notice {
@@ -176,7 +176,7 @@
   margin: 2px 0 6px;
   font-size: 0.95rem;
   font-weight: 800;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-hero-card__desc {
@@ -241,7 +241,7 @@
 }
 
 .cm-metric--elo {
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 1.1rem !important;
 }
 
@@ -280,15 +280,15 @@
   padding: 3px 9px;
   border-radius: 999px;
   background: var(--brand-soft, rgba(99, 102, 241, 0.14));
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.05em;
 }
 
 .cm-mode-badge--alt {
-  background: rgba(16, 185, 129, 0.14);
-  color: #10b981;
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .cm-tc-section__top {
@@ -304,7 +304,7 @@
 .cm-link-btn {
   background: none;
   border: none;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
@@ -401,7 +401,7 @@
 
 .cm-side-picker {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -485,7 +485,7 @@
 }
 
 .cm-hub-tab.is-active {
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   border-bottom-color: var(--brand, #6366f1);
   background: var(--surface);
 }
@@ -601,7 +601,7 @@
 
 .cm-outcome-badge.is-win {
   background: rgba(16, 185, 129, 0.16);
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-outcome-badge.is-draw {
@@ -611,7 +611,7 @@
 
 .cm-outcome-badge.is-loss {
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-history-item__vs {
@@ -642,11 +642,11 @@
 }
 
 .cm-rating-delta.is-pos {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-rating-delta.is-neg {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-history-item__btns {
@@ -699,7 +699,7 @@
   font-size: 2.3rem;
   font-weight: 900;
   letter-spacing: 0.16em;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-room-code-box__hint {
@@ -906,12 +906,12 @@
 }
 
 .cm-status-tag--turn {
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
   font-weight: 800;
 }
 
 .cm-status-tag--danger {
-  color: #ef4444;
+  color: var(--danger);
   font-weight: 700;
 }
 
@@ -988,7 +988,7 @@
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   grid-template-rows: repeat(8, 1fr);
   border-radius: 10px;
   overflow: hidden;
@@ -1026,6 +1026,27 @@
 
 .cm-square--last-move.cm-square--dark {
   background-color: #aaa23a;
+}
+
+/* Rekomendasi item Hint Langkah: petak asal & tujuan disorot ungu, tujuan berdenyut pelan */
+.cm-square--hint-from,
+.cm-square--hint-to {
+  box-shadow: inset 0 0 0 4px #8b5cf6;
+}
+
+.cm-square--hint-to::after {
+  content: '';
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.45);
+  animation: cm-hint-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes cm-hint-pulse {
+  0%, 100% { transform: scale(0.75); opacity: 0.55; }
+  50% { transform: scale(1); opacity: 1; }
 }
 
 .cm-square--selected {
@@ -1155,7 +1176,7 @@
 
 .cm-promo-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1325,7 +1346,7 @@
   font-size: 0.76rem;
   font-weight: 900;
   letter-spacing: 0.06em;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-result-card__title {
@@ -1464,11 +1485,11 @@
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-gameover-modal.is-win .cm-gameover-kicker {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-gameover-title {
@@ -1522,7 +1543,7 @@
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.06em;
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-winner-spotlight__name {
@@ -1555,7 +1576,7 @@
   border-radius: 999px;
   background: rgba(245, 158, 11, 0.18);
   border: 1px solid rgba(245, 158, 11, 0.45);
-  color: #f59e0b;
+  color: var(--warning);
   font-weight: 800;
   font-size: 0.82rem;
   flex-shrink: 0;
@@ -1610,11 +1631,11 @@
 }
 
 .cm-gameover-player__meta em.is-pos {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-gameover-player__meta em.is-neg {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-gameover-vs-badge {
@@ -1626,7 +1647,7 @@
 
 .cm-gameover-stats {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1714,7 +1735,7 @@
   padding: 3px 8px;
   border-radius: 6px;
   background: rgba(99, 102, 241, 0.16);
-  color: var(--brand, #6366f1);
+  color: var(--brand-text);
 }
 
 .cm-review-tag {
@@ -1728,17 +1749,17 @@
 
 .cm-review-tag--win {
   background: rgba(16, 185, 129, 0.16);
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-review-tag--warn {
   background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
+  color: var(--warning);
 }
 
 .cm-review-tag--capture {
   background: rgba(239, 68, 68, 0.16);
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-review-tag--info {
@@ -1833,11 +1854,11 @@
 }
 
 .cm-result-card__elo strong.is-pos {
-  color: #10b981;
+  color: var(--success);
 }
 
 .cm-result-card__elo strong.is-neg {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .cm-result-card__coins {
@@ -1847,7 +1868,7 @@
   padding: 5px 10px;
   border-radius: 999px;
   background: rgba(245, 158, 11, 0.16);
-  color: #f59e0b;
+  color: var(--warning);
   font-weight: 800;
   font-size: 0.84rem;
 }
@@ -1890,15 +1911,15 @@
 
 @media (max-width: 920px) {
   .cm-hero-card {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .cm-modes-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .cm-match-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     max-width: 560px;
   }
 
@@ -1907,7 +1928,7 @@
   }
 
   .cm-replay-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1948,7 +1969,7 @@
   }
 
   .cm-gameover-versus {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 6px;
   }
 
@@ -1974,7 +1995,103 @@
 
 @media (max-width: 360px) {
   .cm-gameover-actions__row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
+
+.cm-hint-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.15);
+  color: #6d28d9;
+  font-size: var(--fs-sm);
+}
+
+:root[data-theme='dark'] .cm-hint-label {
+  color: #c4b5fd;
+}
+
+/* Layar Catur tidak boleh lebih lebar dari layar HP: konten yang meluber membuat browser HP
+   memperkecil (zoom out) seluruh halaman sehingga tampil seperti versi desktop.
+   overflow-x: clip (bukan hidden) supaya topbar sticky tetap bekerja. */
+.cm-screen {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.cm-topbar,
+.cm-topbar__brand,
+.cm-topbar__right {
+  min-width: 0;
+}
+
+.cm-topbar__brand strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .cm-topbar {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .cm-topbar__brand {
+    flex: 1;
+    font-size: 0.9rem;
+  }
+
+  .cm-topbar__right {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Di HP cukup ikon: label tombol kembali & teks status koneksi hanya untuk pembaca layar */
+  .cm-topbar > .btn > span,
+  .cm-conn-dot__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+
+/* Titik status koneksi (hijau = terhubung, kuning = menyambung ulang); di HP hanya titik ini yang tampil */
+.cm-conn-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* Gerak bidak: meluncur dari petak asal ke petak tujuan. Bidak = 86% petak, jadi 1 petak = 116.28%
+   dari ukuran bidak. z-index tinggi supaya bidak melintas di atas petak lain. */
+.cm-piece-wrap--arrive {
+  position: relative;
+  z-index: 4;
+  animation: cm-piece-slide 0.22s cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+
+@keyframes cm-piece-slide {
+  from {
+    transform: translate(calc(var(--dx, 0) * 116.28%), calc(var(--dy, 0) * 116.28%));
+  }
+  to {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-piece-wrap--arrive {
+    animation: none;
+  }
+}

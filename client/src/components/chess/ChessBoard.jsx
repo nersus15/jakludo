@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
@@ -131,6 +131,7 @@ export default function ChessBoard({
   myColor = null,
   interactive = false,
   lastMove = null,
+  hintMove = null, // { from, to } dari item Hint Langkah
   onMove
 }) {
   const [selectedSquare, setSelectedSquare] = useState(null);
@@ -311,6 +312,25 @@ export default function ChessBoard({
   const orderedRanks = orientation === 'b' ? [...RANKS].reverse() : RANKS;
   const orderedFiles = orientation === 'b' ? [...FILES].reverse() : FILES;
 
+  // Animasi gerak bidak: bidak di petak tujuan langkah terakhir digambar mulai dari petak asal lalu
+  // meluncur ke tujuan. Hanya untuk langkah yang terjadi saat papan sedang dilihat (bukan saat
+  // papan pertama tampil / reconnect). dx & dy dalam satuan petak sesuai orientasi papan.
+  const lastMoveKey = lastMove ? `${lastMove.from}-${lastMove.to}-${fen}` : '';
+  const seenMoveKey = useRef(lastMoveKey);
+  const [moveAnim, setMoveAnim] = useState(null);
+  useEffect(() => {
+    if (!lastMoveKey || lastMoveKey === seenMoveKey.current) return;
+    seenMoveKey.current = lastMoveKey;
+    const col = sq => orderedFiles.indexOf(sq[0]);
+    const row = sq => orderedRanks.indexOf(sq[1]);
+    setMoveAnim({
+      key: lastMoveKey,
+      to: lastMove.to,
+      dx: col(lastMove.from) - col(lastMove.to),
+      dy: row(lastMove.from) - row(lastMove.to)
+    });
+  }, [lastMoveKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="cm-board-frame">
       <div
@@ -327,6 +347,8 @@ export default function ChessBoard({
             const piece = boardAnalysis.squaresMap[sq];
             const isSelected = selectedSquare === sq || dragFromSquare === sq;
             const isLastMove = lastMove && (lastMove.from === sq || lastMove.to === sq);
+            const isHintFrom = hintMove?.from === sq;
+            const isHintTo = hintMove?.to === sq;
             const isKingInCheck = boardAnalysis.kingInCheckSquare === sq;
             const isKingCheckmated = isKingInCheck && boardAnalysis.isCheckmate;
             const legalTarget = legalTargetsMap[sq];
@@ -348,6 +370,8 @@ export default function ChessBoard({
                   isLight ? 'cm-square--light' : 'cm-square--dark',
                   isSelected ? 'cm-square--selected' : '',
                   isLastMove ? 'cm-square--last-move' : '',
+                  isHintFrom ? 'cm-square--hint-from' : '',
+                  isHintTo ? 'cm-square--hint-to' : '',
                   isKingInCheck ? 'cm-square--in-check' : '',
                   isKingCheckmated ? 'cm-square--checkmated' : '',
                   legalTarget ? 'cm-square--legal' : '',
@@ -368,7 +392,9 @@ export default function ChessBoard({
 
                 {piece && (
                   <div
-                    className={`cm-piece-wrap ${canDragPiece ? 'is-draggable' : ''}`}
+                    key={moveAnim?.to === sq ? moveAnim.key : 'piece'}
+                    className={`cm-piece-wrap ${canDragPiece ? 'is-draggable' : ''} ${moveAnim?.to === sq ? 'cm-piece-wrap--arrive' : ''}`}
+                    style={moveAnim?.to === sq ? { '--dx': moveAnim.dx, '--dy': moveAnim.dy } : undefined}
                     draggable={Boolean(canDragPiece)}
                     onDragStart={e => handleDragStart(e, sq)}
                     onDragEnd={handleDragEnd}

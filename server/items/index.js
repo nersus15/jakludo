@@ -41,7 +41,8 @@ const ITEMS = [
   require('./blackhole-shield'),
   require('./universal-shield'),
   require('./force-return'),
-  require('./quiz-hint')
+  require('./quiz-hint'),
+  require('./chess-hint')
 ];
 
 const KINDS = ['active', 'passive', 'reactive'];

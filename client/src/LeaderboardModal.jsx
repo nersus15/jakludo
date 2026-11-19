@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { getJsonCached } from './apiCache';
 import Modal from './components/Modal';
 import Icon from './components/Icon';
 import { isAvatarUrl } from './social/media';
 import { sound } from './sound';
+
+// Papan peringkat dibuka berulang kali; data yang sama dalam 30 detik memakai hasil sebelumnya
+const LEADERBOARD_CACHE = { maxAgeMs: 30000 };
 
 const MEDAL_ICONS = { 1: 'medal-1', 2: 'medal-2', 3: 'medal-3' };
 
@@ -41,8 +45,7 @@ export default function LeaderboardModal({
   const loadLudo = useCallback(async () => {
     setLudoState(s => ({ ...s, status: 'loading' }));
     try {
-      const res = await fetch('/api/leaderboard');
-      const data = res.ok ? await res.json() : null;
+      const data = await getJsonCached('/api/leaderboard', LEADERBOARD_CACHE);
       if (!data?.success) throw new Error('bad response');
       setLudoState({ status: 'ready', list: data.leaderboard || [] });
     } catch {
@@ -53,8 +56,7 @@ export default function LeaderboardModal({
   const loadQuiz = useCallback(async () => {
     setQuizState(s => ({ ...s, status: 'loading' }));
     try {
-      const res = await fetch('/api/quiz/leaderboard');
-      const data = res.ok ? await res.json() : null;
+      const data = await getJsonCached('/api/quiz/leaderboard', LEADERBOARD_CACHE);
       if (!data?.success) throw new Error('bad response');
       setQuizState({ status: 'ready', list: data.leaderboard || [] });
     } catch {
@@ -65,8 +67,7 @@ export default function LeaderboardModal({
   const loadChess = useCallback(async () => {
     setChessState(s => ({ ...s, status: 'loading' }));
     try {
-      const res = await fetch('/api/chess/leaderboard?page=1&limit=50');
-      const data = res.ok ? await res.json() : null;
+      const data = await getJsonCached('/api/chess/leaderboard?page=1&limit=50', LEADERBOARD_CACHE);
       if (!data?.success) throw new Error('bad response');
       setChessState({ status: 'ready', list: data.entries || data.leaderboard || [] });
     } catch {
@@ -77,8 +78,7 @@ export default function LeaderboardModal({
   const loadSnakes = useCallback(async () => {
     setSnakesState(s => ({ ...s, status: 'loading' }));
     try {
-      const res = await fetch('/api/games/snakes-and-ladders/leaderboard?page=1&limit=50');
-      const data = res.ok ? await res.json() : null;
+      const data = await getJsonCached('/api/games/snakes-and-ladders/leaderboard?page=1&limit=50', LEADERBOARD_CACHE);
       if (!data?.success) throw new Error('bad response');
       setSnakesState({ status: 'ready', list: data.entries || data.leaderboard || [] });
     } catch {

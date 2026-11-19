@@ -525,6 +525,17 @@ function registerSocketHandlers(io) {
       if (cb) cb(res);
     });
 
+    on(socket, 'chess:hint:use', (payload, cb) => {
+      if (!allowQuiz(chessActionLimiter, socket, cb)) return;
+      chessEngine
+        .useHint(socket, payload)
+        .then(res => cb && cb(res))
+        .catch(err => {
+          console.error('[chess hint]', err);
+          if (cb) cb({ ok: false, error: 'Gagal menganalisis posisi. Coba lagi.' });
+        });
+    });
+
     on(socket, 'chess:draw:offer', (payload, cb) => {
       if (!allowQuiz(chessPlayLimiter, socket, cb)) return;
       const res = chessEngine.offerDraw(socket, payload);

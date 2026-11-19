@@ -104,18 +104,16 @@ function registerEconomyRoutes(api) {
     const user = requireUser(req, res);
     if (!user) return;
     const { diamonds, direction, idempotencyKey } = req.body || {};
-    const result =
-      String(direction || '').trim().toLowerCase() === 'coins_to_diamonds'
-        ? await economy.convertCoinsToDiamonds({
-            userId: user.id,
-            diamonds,
-            idempotencyKey
-          })
-        : await economy.convertDiamondsToCoins({
-            userId: user.id,
-            diamonds,
-            idempotencyKey
-          });
+    // Konversi Diamonds -> Coins ditutup (keputusan produk), apa pun pengaturan admin.
+    // Logika convertDiamondsToCoins di store dibiarkan bila suatu saat ingin dibuka lagi.
+    if (String(direction || '').trim().toLowerCase() !== 'coins_to_diamonds') {
+      return res.status(403).json({ success: false, error: 'Konversi Diamonds ke Coins sudah ditutup.' });
+    }
+    const result = await economy.convertCoinsToDiamonds({
+      userId: user.id,
+      diamonds,
+      idempotencyKey
+    });
     res.json(result);
   }));
 

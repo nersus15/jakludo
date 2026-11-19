@@ -633,6 +633,47 @@ class SoundManager {
     else ludoSfx.CAPTURE_SOUNDS[pick - 1](tools);
   }
 
+  // ---- Suara yang dipanggil layar Catur & Ular Tangga ----
+  // Mengembalikan true saat berbunyi: pemanggil memakai pola `sound.playX?.() || sound.playY?.()`
+  // sebagai cadangan, jadi nilai kosong akan memutar suara cadangan juga (dobel).
+
+  // Langkah kecil (mis. maju satu langkah saat review Catur)
+  playHop() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return false;
+    this.playStep(1);
+    return true;
+  }
+
+  playDiceRoll() {
+    if (this.sfxMuted || this.sfxVolume <= 0) return false;
+    this.playRoll();
+    return true;
+  }
+
+  // Sorak singkat (naik tangga): arpeggio mayor naik
+  playCheer() {
+    const tools = this.sfxTools();
+    if (!tools) return false;
+    const { tone } = tools.synth;
+    const t = tools.synth.ctx.currentTime + 0.02;
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
+      tone({ t: t + i * 0.07, f, dur: 0.22, type: 'triangle', gain: 0.22, out: tools.out })
+    );
+    return true;
+  }
+
+  // Kalah: tiga nada turun yang lesu
+  playMonsterDefeat() {
+    const tools = this.sfxTools();
+    if (!tools) return false;
+    const { tone } = tools.synth;
+    const t = tools.synth.ctx.currentTime + 0.02;
+    [392, 349.23, 293.66].forEach((f, i) =>
+      tone({ t: t + i * 0.22, f, f2: i === 2 ? 220 : undefined, dur: i === 2 ? 0.55 : 0.2, type: 'triangle', gain: 0.25, out: tools.out })
+    );
+    return true;
+  }
+
   playLeaveBase() {
     const tools = this.sfxTools();
     if (tools) ludoSfx.keluarBase(tools);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../storage';
+import { getJsonCached } from '../apiCache';
 import { sound } from '../sound';
 import { triggerConfetti } from '../confetti';
 
@@ -40,6 +41,8 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
   const [diceValue, setDiceValue] = useState(null);
   const [animatingMove, setAnimatingMove] = useState(false);
   const [animatedPositions, setAnimatedPositions] = useState({});
+  // Pemain yang sedang meluncur naik tangga / turun ular: { [playerId]: 'ladder' | 'snake' }
+  const [slidingPlayers, setSlidingPlayers] = useState({});
   const [hopCounters, setHopCounters] = useState({});
   const [boardEffect, setBoardEffect] = useState(null); // { type: 'ladder' | 'snake' | 'overshoot' | 'three_sixes' | 'extra_turn', from, to, playerName }
 
@@ -99,6 +102,7 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     activeAnimTargetRef.current = null;
     animatingRef.current = false;
     setAnimatingMove(false);
+    setSlidingPlayers({});
   }, []);
 
   const showError = useCallback(msg => {
@@ -150,20 +154,15 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     [clearAnimTimers, clearDiceTimer, showError]
   );
 
-  const fetchSnakesMeta = useCallback(async (page = 1) => {
+  // fresh: lewati cache (dipakai setelah pertandingan selesai / keluar room, saat datanya berubah)
+  const fetchSnakesMeta = useCallback(async (page = 1, { fresh = false } = {}) => {
     const token = authToken || storage.get('token');
+    const maxAgeMs = fresh ? 0 : 5000;
     setLoadingMeta(true);
     try {
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [lbRes, profRes] = await Promise.all([
-        fetch(`/api/games/snakes-and-ladders/leaderboard?page=${page}&limit=20`, { headers })
-          .then(r => (r.ok ? r.json() : null))
-          .catch(() => null),
-        token
-          ? fetch('/api/games/snakes-and-ladders/history?limit=15', { headers })
-              .then(r => (r.ok ? r.json() : null))
-              .catch(() => null)
-          : Promise.resolve(null)
+        getJsonCached(`/api/games/snakes-and-ladders/leaderboard?page=${page}&limit=20`, { token, maxAgeMs }),
+        token ? getJsonCached('/api/games/snakes-and-ladders/history?limit=15', { token, maxAgeMs }) : Promise.resolve(null)
       ]);
       if (lbRes?.success) {
         setLeaderboard(Array.isArray(lbRes.entries) ? lbRes.entries : []);
@@ -403,10 +402,20 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
 
       const afterStepsDelay = diceLandDelay + steps.length * stepInterval + 80;
 
+      const SLIDE_MS = 1000; // samakan dengan transisi .snk-token.is-sliding di snakes.css
+      const markSliding = kind =>
+        setSlidingPlayers(prev => {
+          const next = { ...prev };
+          if (kind) next[playerId] = kind;
+          else delete next[playerId];
+          return next;
+        });
+
       if (ladder) {
-        animEndTimeRef.current = Date.now() + afterStepsDelay + 700;
+        animEndTimeRef.current = Date.now() + afterStepsDelay + SLIDE_MS;
         const tLadder = setTimeout(() => {
           sound.playCheer?.() || sound.playWin?.();
+          markSliding('ladder');
           setAnimatedPositions(prev => ({ ...prev, [playerId]: ladder.to }));
           setHopCounters(prev => ({ ...prev, [playerId]: (prev[playerId] || 0) + 1 }));
           showBoardEffect({
@@ -417,15 +426,17 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
           }, 2600);
         }, afterStepsDelay);
         const tDone = setTimeout(() => {
+          markSliding(null);
           activeAnimTargetRef.current = null;
           animatingRef.current = false;
           setAnimatingMove(false);
-        }, afterStepsDelay + 700);
+        }, afterStepsDelay + SLIDE_MS);
         animTimersRef.current.push(tLadder, tDone);
       } else if (snake) {
-        animEndTimeRef.current = Date.now() + afterStepsDelay + 700;
+        animEndTimeRef.current = Date.now() + afterStepsDelay + SLIDE_MS;
         const tSnake = setTimeout(() => {
           sound.playMonsterHurt?.() || sound.playClick?.();
+          markSliding('snake');
           setAnimatedPositions(prev => ({ ...prev, [playerId]: snake.to }));
           setHopCounters(prev => ({ ...prev, [playerId]: (prev[playerId] || 0) + 1 }));
           showBoardEffect({
@@ -436,10 +447,11 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
           }, 2600);
         }, afterStepsDelay);
         const tDone = setTimeout(() => {
+          markSliding(null);
           activeAnimTargetRef.current = null;
           animatingRef.current = false;
           setAnimatingMove(false);
-        }, afterStepsDelay + 700);
+        }, afterStepsDelay + SLIDE_MS);
         animTimersRef.current.push(tSnake, tDone);
       } else {
         animEndTimeRef.current = Date.now() + afterStepsDelay;
@@ -483,7 +495,7 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
         } else {
           sound.playMonsterDefeat?.() || sound.playClick?.();
         }
-        fetchSnakesMeta(1);
+        fetchSnakesMeta(1, { fresh: true });
       }, finishDelay);
       animTimersRef.current.push(t);
     };
@@ -780,7 +792,7 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     if (socket && code) {
       socket.emit('snakes:room:leave', { code, token });
     }
-    fetchSnakesMeta(1);
+    fetchSnakesMeta(1, { fresh: true });
   }, [authToken, room?.code, socket, clearAnimTimers, clearDiceTimer, fetchSnakesMeta]);
 
   const setChatOpen = useCallback(open => {
@@ -832,6 +844,7 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     animatingMove,
     animatedPositions,
     hopCounters,
+    slidingPlayers,
     boardEffect,
     error,
     notice,

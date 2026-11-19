@@ -204,6 +204,22 @@ Set `PUBLIC_URL` ke alamat publik situs (mis. `PUBLIC_URL=https://playgo.domaink
 
 Admin bank soal Monster Quiz diatur lewat `QUIZ_ADMIN_USERNAMES` (username dipisah koma) dan/atau `QUIZ_ADMIN_KEY`. Kalau `QUIZ_ADMIN_USERNAMES` kosong, username `admin` otomatis menjadi admin bank soal.
 
+### Koreksi stok item & poin pemain
+
+Server menyimpan stok item dan Coins di cache memori (diisi dari PostgreSQL saat start). **Jangan ubah tabel `user_items` / `leaderboard` langsung di database** saat server berjalan: cache tidak tahu perubahannya, sehingga item yang dihapus masih bisa dipakai sampai server restart. Pakai endpoint admin berikut; perubahan langsung berlaku di cache, database, dan room yang sedang berjalan.
+
+```bash
+# Lihat Coins & stok item pemain
+curl -H "Authorization: Bearer <token-admin>" https://domain/api/admin/users/<username>/items
+
+# Atur jumlah akhir (0 = hapus item); coins opsional
+curl -X PATCH -H "Authorization: Bearer <token-admin>" -H "Content-Type: application/json" \
+  -d '{"items":{"forceReturn":0,"universalShield":0},"coins":0}' \
+  https://domain/api/admin/users/<username>/items
+```
+
+Akses: admin aplikasi, yaitu akun dengan role `admin` di tabel `users` atau username di `ADMIN_USERNAMES` (default `admin`). Untuk Diamonds gunakan `/api/admin/economy/wallets/adjust` (tercatat di riwayat transaksi).
+
 ### D. Aktifkan TRUST_PROXY
 Karena semua request kini datang dari Nginx, set `TRUST_PROXY=1` agar batas percobaan login dihitung per IP pemain (bukan IP Nginx). Buat file `.env` di folder proyek:
 ```bash

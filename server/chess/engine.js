@@ -9,9 +9,9 @@ const {
   isBotUserId,
   getBotProfile,
   buildQuickMatchBotForRating,
-  evaluateBoard,
-  chooseBotMove
+  evaluateBoard
 } = require('./bot');
+const { chooseBotMoveAsync } = require('./botPool');
 
 const DISCONNECT_GRACE_MS = Number(process.env.CHESS_DISCONNECT_GRACE_MS || 60_000);
 const LOBBY_EXPIRE_MS = Number(process.env.CHESS_LOBBY_EXPIRE_MS || 5 * 60 * 1000);
@@ -135,6 +135,24 @@ function computeLiveClocks(room, now = Date.now()) {
   };
 }
 
+// Status skak & skakmat dihitung sekali per versi langkah lalu dipakai ulang untuk semua penerima
+// (sebelumnya dihitung ulang per pemain & per callback; chess.js lumayan mahal untuk ini).
+// Daftar langkah legal tidak dikirim: klien menghitungnya sendiri dengan chess.js di ChessBoard.
+const derivedByMatch = new WeakMap();
+function derivedPosition(m) {
+  const cached = derivedByMatch.get(m);
+  if (cached && cached.moveVersion === m.moveVersion && cached.status === m.status) return cached;
+  const inCheck = m.chess.inCheck();
+  const derived = {
+    moveVersion: m.moveVersion,
+    status: m.status,
+    inCheck,
+    isCheckmate: inCheck && m.chess.isCheckmate()
+  };
+  derivedByMatch.set(m, derived);
+  return derived;
+}
+
 function serializeRoomForUser(room, viewerUserId = null) {
   if (!room) return null;
   const now = Date.now();
@@ -164,26 +182,8 @@ function serializeRoomForUser(room, viewerUserId = null) {
     };
   });
 
-  let legalMoves = [];
-  let inCheck = false;
-  if (m && m.chess) {
-    inCheck = m.chess.inCheck();
-    if (m.status === 'active') {
-      try {
-        legalMoves = m.chess.moves({ verbose: true }).map(mv => ({
-          from: mv.from,
-          to: mv.to,
-          promotion: mv.promotion || null,
-          san: mv.san,
-          flags: mv.flags,
-          piece: mv.piece,
-          captured: mv.captured || null
-        }));
-      } catch {
-        legalMoves = [];
-      }
-    }
-  }
+  const derived = m && m.chess ? derivedPosition(m) : null;
+  const inCheck = derived ? derived.inCheck : false;
 
   const myPlayer = viewerUserId ? players.find(p => p.userId === viewerUserId) : null;
   const whitePlayerObj = m ? players.find(p => p.userId === m.whitePlayerId) || null : null;
@@ -216,7 +216,7 @@ function serializeRoomForUser(room, viewerUserId = null) {
           currentTurn: m.currentTurn,
           turn: m.currentTurn,
           inCheck,
-          isCheckmate: Boolean(m.chess && m.chess.isCheckmate()),
+          isCheckmate: Boolean(derived?.isCheckmate),
           whitePlayerId: m.whitePlayerId,
           blackPlayerId: m.blackPlayerId,
           whitePlayer: whitePlayerObj,
@@ -244,7 +244,6 @@ function serializeRoomForUser(room, viewerUserId = null) {
           blackRatingChange: m.blackRatingChange || 0,
           moves: m.moves || [],
           lastMove: m.moves && m.moves.length > 0 ? m.moves[m.moves.length - 1] : null,
-          legalMoves,
           drawOffer: m.drawOffer
             ? {
                 fromUserId: m.drawOffer.fromUserId,
@@ -1248,14 +1247,21 @@ function scheduleBotMoveIfNeeded(room) {
   const expectedMatchId = m.id;
   const expectedMoveVersion = m.moveVersion;
 
-  room.botMoveTimer = setTimeout(() => {
-    room.botMoveTimer = null;
-    if (!room.match || room.match.id !== expectedMatchId || room.match.status !== 'active') return;
-    if (room.match.moveVersion !== expectedMoveVersion) return;
-    if (room.match.chess.turn() !== activePlayer.color) return;
+  const stillBotTurn = () =>
+    room.match &&
+    room.match.id === expectedMatchId &&
+    room.match.status === 'active' &&
+    room.match.moveVersion === expectedMoveVersion &&
+    room.match.chess.turn() === activePlayer.color;
 
-    const chosen = chooseBotMove(room.match.currentFen, activePlayer.difficulty || 'medium');
-    if (!chosen) return;
+  room.botMoveTimer = setTimeout(async () => {
+    room.botMoveTimer = null;
+    if (!stillBotTurn()) return;
+
+    // Pencarian di worker thread agar server tidak membeku (lihat botPool.js)
+    const chosen = await chooseBotMoveAsync(room.match.currentFen, activePlayer.difficulty || 'medium');
+    // Keadaan bisa berubah selama bot berpikir (lawan menyerah, waktu habis, room ditutup)
+    if (!chosen || !stillBotTurn()) return;
 
     executeMoveForPlayer(room, activePlayer, {
       from: chosen.from,
@@ -1451,8 +1457,8 @@ function executeMoveForPlayer(room, player, payload = {}) {
     moveVersion: nextMoveVersion,
     status: m.status,
     result: m.result,
-    terminationReason: m.terminationReason,
-    room: serializeRoomForUser(room, player.userId)
+    terminationReason: m.terminationReason
+    // State room lengkap tidak ikut di balasan langkah: klien sudah menerima ChessMoveMade & chess:room:state
   };
 }
 
@@ -1471,6 +1477,44 @@ function submitMove(socket, payload = {}) {
   }
 
   return executeMoveForPlayer(room, player, payload);
+}
+
+// Item "Hint Langkah": analisis posisi saat ini di worker thread lalu kirim langkah terbaik.
+// Item baru dipotong setelah analisis selesai dan posisi belum berubah, jadi pemain tidak rugi
+// bila analisis gagal atau lawan/waktu mengubah keadaan selama menunggu.
+async function useHint(socket, payload = {}) {
+  const user = resolveUser(socket, payload);
+  if (!user) return { ok: false, error: 'Silakan login terlebih dahulu.' };
+
+  const room = resolveRoomForAction(user, payload);
+  const m = room?.match;
+  if (!m || m.status !== 'active') return { ok: false, error: 'Hint hanya bisa dipakai saat pertandingan berjalan.' };
+
+  const player = room.players.find(p => p.userId === user.id);
+  if (!player) return { ok: false, error: 'Akses ditolak: kamu bukan peserta dalam pertandingan ini.' };
+  if (m.chess.turn() !== player.color) return { ok: false, error: 'Hint hanya bisa dipakai saat giliranmu.' };
+  if ((db.getUserItems(user.id).chessHint || 0) <= 0) {
+    return { ok: false, error: 'Kamu tidak memiliki item Hint Langkah. Beli dulu di Toko Item!' };
+  }
+
+  const matchId = m.id;
+  const moveVersion = m.moveVersion;
+  const best = await chooseBotMoveAsync(m.currentFen, 'analysis');
+  if (!best) return { ok: false, error: 'Tidak ada langkah yang bisa direkomendasikan.' };
+  if (room.match?.id !== matchId || room.match.moveVersion !== moveVersion || room.match.status !== 'active') {
+    return { ok: false, error: 'Posisi papan sudah berubah, hint tidak terpakai.' };
+  }
+  if (!db.consumeUserItem({ userId: user.id, itemId: 'chessHint' })) {
+    return { ok: false, error: 'Kamu tidak memiliki item Hint Langkah. Beli dulu di Toko Item!' };
+  }
+
+  const updatedUser = db.sanitizeUser(db.getUserById(user.id));
+  return {
+    ok: true,
+    hint: { from: best.from, to: best.to, promotion: best.promotion || null, san: best.san, moveVersion },
+    remainingHints: Number(updatedUser?.inventory?.chessHint || 0),
+    user: updatedUser
+  };
 }
 
 // ==========================================
@@ -1965,6 +2009,7 @@ module.exports = {
   configureRoom,
   setPlayerReady,
   submitMove,
+  useHint,
   offerDraw,
   acceptDraw,
   declineDraw,

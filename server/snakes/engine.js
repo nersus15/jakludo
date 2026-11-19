@@ -166,6 +166,25 @@ function serializePlayer(p) {
   };
 }
 
+// Log langkah dikirim di setiap state room; hanya field yang dirender panel log yang ikut
+// (stepPath dkk. tetap tersimpan di server). Memangkas sekitar 60% ukuran state saat log penuh.
+function logEntryForClient(e) {
+  return {
+    id: e.id,
+    displayName: e.displayName,
+    color: e.color,
+    dice: e.dice,
+    from: e.from,
+    stepTo: e.stepTo,
+    to: e.to,
+    ladder: e.ladder || null,
+    snake: e.snake || null,
+    overshoot: Boolean(e.overshoot),
+    extraTurn: Boolean(e.extraTurn),
+    threeSixesSkip: Boolean(e.threeSixesSkip)
+  };
+}
+
 function serializeRoomForUser(room, viewerUserId = null) {
   if (!room) return null;
   const now = Date.now();
@@ -213,7 +232,7 @@ function serializeRoomForUser(room, viewerUserId = null) {
         }
       : null,
     lastRoll: room.lastRoll || null,
-    moveLog: (room.moveLog || []).slice(-25),
+    moveLog: (room.moveLog || []).slice(-25).map(logEntryForClient),
     players,
     myPlayerId: myPlayer?.id || null,
     myColor: myPlayer?.color || null,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../storage';
+import { getJsonCached } from '../apiCache';
 import { sound } from '../sound';
 import { triggerConfetti } from '../confetti';
 
@@ -24,6 +25,9 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Rekomendasi item Hint Langkah: { from, to, san, moveVersion }. Hanya berlaku untuk posisi saat dipakai.
+  const [hint, setHint] = useState(null);
+  const [hintLoading, setHintLoading] = useState(false);
   const [matchResult, setMatchResult] = useState(null);
 
   // Jam berjalan realtime yang disinkronkan dari timestamp server
@@ -100,20 +104,15 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     [showError]
   );
 
-  const fetchChessMeta = useCallback(async (page = 1) => {
+  // fresh: lewati cache (dipakai setelah pertandingan selesai / keluar room, saat datanya berubah)
+  const fetchChessMeta = useCallback(async (page = 1, { fresh = false } = {}) => {
     const token = authToken || storage.get('token');
+    const maxAgeMs = fresh ? 0 : 5000;
     setLoadingMeta(true);
     try {
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [lbRes, profRes] = await Promise.all([
-        fetch(`/api/chess/leaderboard?page=${page}&limit=20`, { headers })
-          .then(r => (r.ok ? r.json() : null))
-          .catch(() => null),
-        token
-          ? fetch('/api/chess/profile', { headers })
-              .then(r => (r.ok ? r.json() : null))
-              .catch(() => null)
-          : Promise.resolve(null)
+        getJsonCached(`/api/chess/leaderboard?page=${page}&limit=20`, { token, maxAgeMs }),
+        token ? getJsonCached('/api/chess/profile', { token, maxAgeMs }) : Promise.resolve(null)
       ]);
       if (lbRes?.success) {
         setLeaderboard(Array.isArray(lbRes.entries) ? lbRes.entries : []);
@@ -181,6 +180,13 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
       return undefined;
     }
 
+    // Hook ini dipasang di App: tiap perubahan state me-render ulang seluruh aplikasi. Nilai jam
+    // dibulatkan ke resolusi tampilan formatChessClock (detik; persepuluhan di bawah 10 detik) supaya
+    // render hanya terjadi saat angka di layar benar-benar berubah, bukan 10x per detik.
+    const toDisplay = ms => {
+      const v = Math.max(0, ms);
+      return v >= 10000 ? Math.floor(v / 1000) * 1000 : Math.floor(v / 100) * 100;
+    };
     const updateClocks = () => {
       const m = room.match;
       if (room.phase !== 'playing') {
@@ -191,11 +197,11 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
       const nowServer = Date.now() + serverOffsetRef.current;
       const elapsed = m.turnStartedAt ? Math.max(0, nowServer - m.turnStartedAt) : 0;
       if (m.turn === 'w') {
-        setWhiteTimeMs(Math.max(0, (m.whiteTimeMs ?? 0) - elapsed));
-        setBlackTimeMs(Math.max(0, m.blackTimeMs ?? 0));
+        setWhiteTimeMs(toDisplay((m.whiteTimeMs ?? 0) - elapsed));
+        setBlackTimeMs(toDisplay(m.blackTimeMs ?? 0));
       } else {
-        setWhiteTimeMs(Math.max(0, m.whiteTimeMs ?? 0));
-        setBlackTimeMs(Math.max(0, (m.blackTimeMs ?? 0) - elapsed));
+        setWhiteTimeMs(toDisplay(m.whiteTimeMs ?? 0));
+        setBlackTimeMs(toDisplay((m.blackTimeMs ?? 0) - elapsed));
       }
     };
 
@@ -254,8 +260,11 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     const onMoveMade = payload => {
       syncServerClock(payload?.serverNow);
       const mv = payload?.move;
+      // Status skak ada di payload (bukan di objek langkah); notasi SAN '+'/'#' sebagai cadangan
+      const isCheck = Boolean(payload?.inCheck) || /[+#]$/.test(mv?.san || '');
+      const isCheckmate = /#$/.test(mv?.san || '');
       if (mv) {
-        if (mv.isCheckmate || mv.isCheck) {
+        if (isCheckmate || isCheck) {
           sound.playMonsterAttack?.();
         } else if (mv.captured) {
           sound.playMonsterHurt?.();
@@ -276,8 +285,8 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
             whiteTimeMs: payload.whiteTimeMs,
             blackTimeMs: payload.blackTimeMs,
             turnStartedAt: payload.serverNow,
-            inCheck: Boolean(mv?.isCheck),
-            isCheckmate: Boolean(mv?.isCheckmate),
+            inCheck: isCheck,
+            isCheckmate,
             lastMove: mv ? { from: mv.from, to: mv.to, san: mv.san, color: mv.color } : prev.match.lastMove,
             drawOffer: null,
             moves: [...(prev.match.moves || []), mv].filter(Boolean)
@@ -351,7 +360,7 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
         sound.playClick();
       }
 
-      fetchChessMeta(1);
+      fetchChessMeta(1, { fresh: true });
     };
 
     const onRematchRequested = payload => {
@@ -608,6 +617,33 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     [ensureAuth, socket, room, showError]
   );
 
+  const useHint = useCallback(() => {
+    const token = ensureAuth();
+    if (!token || !socket || !room || room.phase !== 'playing' || hintLoading) return;
+    sound.playClick();
+    setHintLoading(true);
+    socket.emit('chess:hint:use', { code: room.code, matchId: room.match?.id, token }, res => {
+      setHintLoading(false);
+      if (!res?.ok) {
+        showError(res?.error || 'Hint gagal dipakai.');
+        return;
+      }
+      setHint(res.hint);
+      if (res.user) onUpdateUser?.(res.user);
+      sound.playJoinNotification();
+    });
+  }, [ensureAuth, socket, room, hintLoading, showError, onUpdateUser]);
+
+  // Hint kedaluwarsa begitu posisi berubah (ada langkah baru) atau pertandingan berganti
+  const currentMoveVersion = room?.match?.moveVersion;
+  const currentMatchId = room?.match?.id;
+  useEffect(() => {
+    setHint(prev => (prev && prev.moveVersion !== currentMoveVersion ? null : prev));
+  }, [currentMoveVersion]);
+  useEffect(() => {
+    setHint(null);
+  }, [currentMatchId]);
+
   const offerDraw = useCallback(() => {
     const token = ensureAuth();
     if (!token || !socket || !room || room.phase !== 'playing') return;
@@ -669,7 +705,7 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     setChatToast(null);
     setChatOpenState(false);
     chatOpenRef.current = false;
-    fetchChessMeta(1);
+    fetchChessMeta(1, { fresh: true });
   }, [socket, room?.code, authToken, fetchChessMeta]);
 
   const sendReaction = useCallback(
@@ -777,6 +813,8 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     unreadChats,
     chatToast,
     chatOpen,
+    hint,
+    hintLoading,
     actions: {
       startMatchmaking,
       cancelMatchmaking,
@@ -786,6 +824,7 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
       updateRoomConfig,
       toggleReady,
       submitMove,
+      useHint,
       offerDraw,
       acceptDraw,
       declineDraw,

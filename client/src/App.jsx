@@ -11,9 +11,6 @@ import AvatarCropModal from './components/AvatarCropModal';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
-import MonsterQuizScreen from './screens/MonsterQuizScreen';
-import ChessMasterScreen from './screens/ChessMasterScreen';
-import SnakesLaddersScreen from './screens/SnakesLaddersScreen';
 import AudioSettingsModal from './AudioSettingsModal';
 import PlayerProfileModal from './social/PlayerProfileModal';
 import ReferralPromptModal from './components/ReferralPromptModal';
@@ -46,8 +43,25 @@ const ShopModal = lazy(loadShop);
 const FriendsModal = lazy(loadFriends);
 const GroupsScreen = lazy(loadGroups);
 
+// Layar game selain Ludo (beserta chess.js) juga dipisah dari bundle awal
+const loadQuiz = () => import('./screens/MonsterQuizScreen');
+const loadChess = () => import('./screens/ChessMasterScreen');
+const loadSnakes = () => import('./screens/SnakesLaddersScreen');
+const MonsterQuizScreen = lazy(loadQuiz);
+const ChessMasterScreen = lazy(loadChess);
+const SnakesLaddersScreen = lazy(loadSnakes);
+
+const gameScreenFallback = (
+  <main className="loading-screen" id="main" role="status">
+    <span className="spinner" aria-hidden="true" /> Memuat game...
+  </main>
+);
+
 function preloadDialogs() {
-  const run = () => [loadAuth, loadLeaderboard, loadShop, loadFriends, loadGroups].forEach(load => load().catch(() => {}));
+  const run = () =>
+    [loadAuth, loadLeaderboard, loadShop, loadFriends, loadGroups, loadQuiz, loadChess, loadSnakes].forEach(load =>
+      load().catch(() => {})
+    );
   if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 4000 });
   else setTimeout(run, 2000);
 }
@@ -455,7 +469,7 @@ export default function App() {
             currentUser={auth.currentUser}
             onUpdateUser={auth.setCurrentUser}
             authToken={auth.authToken}
-            initialGame={gameMode === 'quiz' ? 'quiz' : 'all'}
+            initialGame={gameMode === 'quiz' || gameMode === 'chess' ? gameMode : 'all'}
             onOpenAuth={open('auth')}
           />
         </Suspense>
@@ -515,6 +529,7 @@ export default function App() {
           <span className="spinner" aria-hidden="true" /> Masuk ke room...
         </main>
       ) : gameMode === 'quiz' ? (
+        <Suspense fallback={gameScreenFallback}>
         <MonsterQuizScreen
           quiz={quiz}
           currentUser={auth.currentUser}
@@ -527,7 +542,9 @@ export default function App() {
           onOpenAudio={openAudio}
           onViewProfile={openProfile}
         />
+        </Suspense>
       ) : gameMode === 'chess' ? (
+        <Suspense fallback={gameScreenFallback}>
         <ChessMasterScreen
           chess={chess}
           currentUser={auth.currentUser}
@@ -540,7 +557,9 @@ export default function App() {
           onOpenAudio={openAudio}
           onViewProfile={openProfile}
         />
+        </Suspense>
       ) : gameMode === 'snakes' ? (
+        <Suspense fallback={gameScreenFallback}>
         <SnakesLaddersScreen
           snakes={snakes}
           currentUser={auth.currentUser}
@@ -553,6 +572,7 @@ export default function App() {
           onOpenAudio={openAudio}
           onViewProfile={openProfile}
         />
+        </Suspense>
       ) : (
         <HomeScreen
           user={auth.currentUser}

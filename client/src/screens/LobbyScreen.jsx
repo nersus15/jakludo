@@ -3,38 +3,12 @@ import Icon from '../components/Icon';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { isAvatarUrl } from '../social/media';
 import { sound } from '../sound';
-
-function shareInvite(room) {
-  const url = `${location.origin}${location.pathname}?room=${room.code}`;
-  return { url, text: `Ayo main JakLudo! Kode room: ${room.code}` };
-}
+import { copyOrShareRoom } from '../utils/shareRoom';
 
 // Di HP pakai menu bagikan bawaan; selain itu salin ke clipboard (dengan cadangan untuk http/in-app browser)
 async function copyOrShare(room) {
-  const { url, text } = shareInvite(room);
-  if (navigator.share && /android|iphone|ipad|ipod/i.test(navigator.userAgent)) {
-    try {
-      await navigator.share({ title: 'JakLudo', text, url });
-      return 'shared';
-    } catch (err) {
-      if (err?.name === 'AbortError') return 'cancelled';
-    }
-  }
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(url);
-    return 'copied';
-  }
-  const input = document.createElement('textarea');
-  input.value = url;
-  input.setAttribute('readonly', '');
-  input.style.position = 'fixed';
-  input.style.opacity = '0';
-  document.body.appendChild(input);
-  input.select();
-  const ok = document.execCommand('copy');
-  input.remove();
-  if (!ok) throw new Error('copy failed');
-  return 'copied';
+  const res = await copyOrShareRoom({ game: 'ludo', roomCode: room.code });
+  return res.status;
 }
 
 function PlayerSlot({ player, index, playerId, onViewProfile }) {

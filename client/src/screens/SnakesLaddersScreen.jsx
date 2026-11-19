@@ -8,6 +8,7 @@ import ChatPanel from '../components/game/ChatPanel';
 import { DEFAULT_LADDERS, DEFAULT_SNAKES } from '../hooks/useSnakesLadders';
 import snakesLogo from '../assets/snakes-ladders-logo.webp';
 import { sound } from '../sound';
+import { copyOrShareRoom } from '../utils/shareRoom';
 
 const REACTIONS = ['🎲', '🔥', '👏', '😂', '😭', '👑'];
 const SNAKES_QUICK_CHATS = [
@@ -451,6 +452,8 @@ export default function SnakesLaddersScreen({
   const ladders = room?.boardConfig?.ladders || DEFAULT_LADDERS;
   const snakesMap = room?.boardConfig?.snakes || DEFAULT_SNAKES;
 
+  const [shareFeedback, setShareFeedback] = useState('');
+
   const copyRoomCode = code => {
     if (!code) return;
     sound.playClick?.();
@@ -459,14 +462,16 @@ export default function SnakesLaddersScreen({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const shareRoomCode = code => {
+  const shareRoomCode = async code => {
     if (!code) return;
     sound.playClick?.();
-    const shareText = `Ayo main Ular Tangga (Snakes and Ladders) bareng aku di PlayGo! Masukkan kode room: ${code}`;
-    if (navigator.share) {
-      navigator.share({ title: 'PlayGo · Ular Tangga', text: shareText, url: window.location.origin + '/?game=snakes-and-ladders' }).catch(() => {});
-    } else {
-      copyRoomCode(code);
+    const res = await copyOrShareRoom({ game: 'snakes', roomCode: code });
+    if (res.status === 'copied') {
+      setShareFeedback('Link room tersalin!');
+      setTimeout(() => setShareFeedback(''), 2500);
+    } else if (res.status === 'shared') {
+      setShareFeedback('Link dibagikan!');
+      setTimeout(() => setShareFeedback(''), 2500);
     }
   };
 
@@ -498,11 +503,11 @@ export default function SnakesLaddersScreen({
               Bagikan kode room ini kepada temanmu. Permainan dimulai segera setelah minimal 2 pemain bergabung.
             </p>
             <div className="snk-waiting-card__code-actions">
-              <button type="button" className="btn btn--secondary" onClick={() => copyRoomCode(room.code)}>
-                {copiedCode ? '✓ Kode Disalin!' : '📋 Salin Kode Room'}
+              <button type="button" className="btn btn--primary" onClick={() => shareRoomCode(room.code)}>
+                🔗 {shareFeedback ? `✓ ${shareFeedback}` : 'Bagikan Link Room'}
               </button>
-              <button type="button" className="btn btn--secondary" onClick={() => shareRoomCode(room.code)}>
-                🔗 Bagikan Kode
+              <button type="button" className="btn btn--secondary" onClick={() => copyRoomCode(room.code)}>
+                {copiedCode ? '✓ Kode Disalin!' : '📋 Salin Kode'}
               </button>
             </div>
           </div>
@@ -525,6 +530,9 @@ export default function SnakesLaddersScreen({
                 <div key={`empty-${i}`} className="snk-waiting-slot snk-waiting-slot--empty card">
                   <span className="spinner" aria-hidden="true" />
                   <span className="muted">Menunggu teman bergabung dengan kode <strong>{room.code}</strong>...</span>
+                  <button type="button" className="btn btn--secondary btn--xs" style={{ marginTop: '8px' }} onClick={() => shareRoomCode(room.code)}>
+                    🔗 {shareFeedback ? `✓ ${shareFeedback}` : 'Bagikan Link Room'}
+                  </button>
                 </div>
               ))}
             </div>

@@ -118,8 +118,18 @@ export function applySeo({ gameMode = 'hub', modal = null, roomCode = null }) {
     const currentParams = new URLSearchParams(window.location.search || '');
     const hlParam = (currentParams.get('hl') || currentParams.get('lang') || '').toLowerCase();
     const validHl = hlParam === 'en' || hlParam === 'id' ? hlParam : '';
+    const roomParam = currentParams.get('room');
+    const refParam = currentParams.get('ref');
     const sep = baseSearch ? '&' : '?';
-    const targetSearch = validHl ? `${baseSearch}${sep}hl=${validHl}` : baseSearch;
+    let targetSearch = validHl ? `${baseSearch}${sep}hl=${validHl}` : baseSearch;
+    if (roomParam) {
+      const roomSep = targetSearch ? '&' : '?';
+      targetSearch = `${targetSearch}${roomSep}room=${encodeURIComponent(roomParam)}`;
+    }
+    if (refParam) {
+      const refSep = targetSearch ? '&' : '?';
+      targetSearch = `${targetSearch}${refSep}ref=${encodeURIComponent(refParam)}`;
+    }
     const currentSearch = window.location.search || '';
     if (
       (currentSearch === '' || currentSearch.startsWith('?game=') || currentSearch.startsWith('?hl=')) &&

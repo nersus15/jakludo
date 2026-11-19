@@ -6,6 +6,7 @@ import ChatPanel from '../components/game/ChatPanel';
 import ChessBoard from '../components/chess/ChessBoard';
 import { CHESS_TIME_CONTROLS } from '../hooks/useChessMaster';
 import { sound } from '../sound';
+import { copyOrShareRoom } from '../utils/shareRoom';
 import chessMasterLogo from '../assets/chess-master-logo.webp';
 
 const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -263,12 +264,27 @@ export default function ChessMasterScreen({
     }
   }, [room?.phase, room?.match?.id]);
 
+  const [shareFeedback, setShareFeedback] = useState('');
+
   const handleCopyCode = () => {
     if (!room?.code) return;
     navigator.clipboard?.writeText(room.code);
     setCopied(true);
     sound.playClick();
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleShareRoom = async () => {
+    if (!room?.code) return;
+    sound.playClick();
+    const res = await copyOrShareRoom({ game: 'chess', roomCode: room.code });
+    if (res.status === 'copied') {
+      setShareFeedback('Link room tersalin!');
+      setTimeout(() => setShareFeedback(''), 2500);
+    } else if (res.status === 'shared') {
+      setShareFeedback('Link dibagikan!');
+      setTimeout(() => setShareFeedback(''), 2500);
+    }
   };
 
   // Identifikasi posisi pemain di dalam match
@@ -1381,11 +1397,16 @@ export default function ChessMasterScreen({
             <span className="cm-room-code-box__label">Kode Private Room</span>
             <strong className="cm-room-code-box__code">{room.code}</strong>
             <p className="cm-room-code-box__hint">
-              Bagikan kode ini kepada temanmu untuk berduel catur secara langsung.
+              Bagikan link atau kode ini kepada temanmu untuk berduel catur secara langsung.
             </p>
-            <button type="button" className="btn btn--primary btn--sm" onClick={handleCopyCode}>
-              {copied ? '✓ Kode Tersalin!' : '📋 Salin Kode Room'}
-            </button>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', marginTop: '8px' }}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={handleShareRoom}>
+                {shareFeedback ? `✓ ${shareFeedback}` : '🔗 Bagikan Link Room'}
+              </button>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={handleCopyCode}>
+                {copied ? '✓ Kode Tersalin!' : '📋 Salin Kode'}
+              </button>
+            </div>
           </div>
 
           {/* Pengaturan Room (Host) */}
@@ -1461,6 +1482,9 @@ export default function ChessMasterScreen({
               ) : (
                 <div className="cm-lobby-slot__empty">
                   <span>Menunggu pemain kedua bergabung dengan kode <strong>{room.code}</strong>...</span>
+                  <button type="button" className="btn btn--secondary btn--xs" style={{ marginTop: '8px' }} onClick={handleShareRoom}>
+                    🔗 {shareFeedback ? `✓ ${shareFeedback}` : 'Bagikan Link Room'}
+                  </button>
                 </div>
               )}
             </div>

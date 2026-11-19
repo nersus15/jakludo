@@ -443,6 +443,7 @@ async function hydrateFromPostgres() {
         vaNumber: rawCreate.vaNumber || null,
         qrString: rawCreate.qrString || null,
         qrCodeUrl: rawCreate.qrCodeUrl || null,
+        deeplinkUrl: rawCreate.deeplinkUrl || null,
         gateway: r.gateway || 'duitku',
         gatewayReference: r.gateway_reference || null,
         paymentUrl: r.payment_url || null,
@@ -649,7 +650,8 @@ function enrichOrderFields(order) {
     bank: order.bank || raw.bank || null,
     vaNumber: order.vaNumber || raw.vaNumber || null,
     qrString: order.qrString || raw.qrString || null,
-    qrCodeUrl: order.qrCodeUrl || raw.qrCodeUrl || null
+    qrCodeUrl: order.qrCodeUrl || raw.qrCodeUrl || null,
+    deeplinkUrl: order.deeplinkUrl || raw.deeplinkUrl || null
   };
 }
 
@@ -1085,6 +1087,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
       vaNumber: invoice.vaNumber || null,
       qrString: invoice.qrString || null,
       qrCodeUrl: invoice.qrCodeUrl || null,
+      deeplinkUrl: invoice.deeplinkUrl || null,
       gateway: orderGateway,
       gatewayReference: invoice.reference || null,
       paymentUrl: invoice.paymentUrl || null,
@@ -1137,6 +1140,7 @@ async function createDiamondTopupOrder({ userId, packageId, paymentMethod = 'SP'
         vaNumber: order.vaNumber,
         qrString: order.qrString,
         qrCodeUrl: order.qrCodeUrl,
+        deeplinkUrl: order.deeplinkUrl || invoice.deeplinkUrl || null,
         paymentMethod: order.paymentMethod,
         paymentMethodName: order.paymentMethodName,
         paymentCategory: order.paymentCategory,

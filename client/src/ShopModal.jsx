@@ -62,56 +62,74 @@ function methodCategoryLabel(category) {
   return 'Virtual Account';
 }
 
-const DEFAULT_DUITKU_METHODS = [
+const DEFAULT_MIDTRANS_METHODS = [
   {
-    code: 'SP',
-    label: 'QRIS (All E-Wallet & M-Banking)',
-    category: 'qris',
-    bank: 'QRIS',
-    badge: 'Instan',
-    description: 'Scan QR dari GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin, Wondr.'
-  },
-  {
-    code: 'M2',
-    label: 'Mandiri Virtual Account',
-    category: 'va',
-    bank: 'Mandiri',
-    badge: 'VA',
-    description: 'Transfer via Livin by Mandiri atau ATM Mandiri.'
-  },
-  {
-    code: 'BC',
+    code: 'bca_va',
     label: 'BCA Virtual Account',
     category: 'va',
     bank: 'BCA',
     badge: 'Populer',
-    description: 'Bayar lewat myBCA, BCA Mobile, KlikBCA, atau ATM BCA.'
+    description: 'Transfer via myBCA, BCA Mobile, KlikBCA, atau ATM BCA.'
   },
   {
-    code: 'I1',
+    code: 'bni_va',
     label: 'BNI Virtual Account',
     category: 'va',
     bank: 'BNI',
     badge: 'VA',
-    description: 'Transfer via Wondr / BNI Mobile Banking atau ATM BNI.'
+    description: 'Transfer via Wondr by BNI, BNI Mobile, atau ATM BNI.'
   },
   {
-    code: 'SA',
+    code: 'bri_va',
+    label: 'BRI Virtual Account (BRIVA)',
+    category: 'va',
+    bank: 'BRI',
+    badge: 'VA',
+    description: 'Transfer via BRImo, Internet Banking BRI, atau ATM BRI.'
+  },
+  {
+    code: 'qris',
+    label: 'QRIS (Semua E-Wallet & Bank)',
+    category: 'qris',
+    bank: 'QRIS',
+    badge: 'Instan',
+    description: 'Scan QR dari GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin, dll.'
+  },
+  {
+    code: 'gopay',
+    label: 'GoPay E-Wallet',
+    category: 'ewallet',
+    bank: 'GoPay',
+    badge: 'Instan',
+    description: 'Bayar instan via aplikasi GoPay atau scan kode QR.'
+  },
+  {
+    code: 'shopeepay',
     label: 'ShopeePay E-Wallet',
     category: 'ewallet',
     bank: 'ShopeePay',
-    badge: 'E-Wallet',
-    description: 'Bayar instan melalui aplikasi ShopeePay.'
+    badge: 'Instan',
+    description: 'Bayar langsung melalui aplikasi Shopee / ShopeePay.'
   },
   {
-    code: 'DA',
+    code: 'dana',
     label: 'DANA E-Wallet',
     category: 'ewallet',
     bank: 'DANA',
     badge: 'E-Wallet',
-    description: 'Bayar langsung lewat aplikasi DANA di ponselmu.'
+    description: 'Scan QRIS resmi PlayGo langsung dari aplikasi DANA kamu.'
+  },
+  {
+    code: 'ovo',
+    label: 'OVO E-Wallet',
+    category: 'ewallet',
+    bank: 'OVO',
+    badge: 'E-Wallet',
+    description: 'Scan QRIS resmi PlayGo langsung dari aplikasi OVO kamu.'
   }
 ];
+
+const DEFAULT_DUITKU_METHODS = DEFAULT_MIDTRANS_METHODS;
 
 function openDokuCheckout(paymentUrl) {
   if (!paymentUrl) return false;
@@ -193,15 +211,51 @@ function DuitkuPaymentPanel({
       </div>
 
       <div className="mp-payment-screen">
+        {payment.deeplinkUrl && (
+          <div className="mp-payment-block mp-deeplink-block">
+            <h4>Buka Aplikasi {payment.bank || payment.paymentMethodName || 'E-Wallet'}</h4>
+            <p className="muted mp-payment-hint">
+              Ketuk tombol di bawah untuk membuka aplikasi <strong>{payment.bank || 'E-Wallet'}</strong> di ponsel atau simulator pembayaran Midtrans Sandbox.
+            </p>
+            <div className="mp-payment-actions" style={{ marginBottom: 'var(--space-2)' }}>
+              <a
+                href={payment.deeplinkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn--primary"
+                style={{ textDecoration: 'none' }}
+              >
+                Buka Aplikasi {payment.bank || 'E-Wallet'} ↗
+              </a>
+            </div>
+          </div>
+        )}
+
         {qrSrc && (
           <div className="mp-payment-block">
-            <h4>Scan QRIS untuk Menyelesaikan Pembayaran</h4>
+            <h4>
+              {payment.bank === 'DANA'
+                ? 'Scan QRIS via Aplikasi DANA'
+                : payment.bank === 'OVO'
+                ? 'Scan QRIS via Aplikasi OVO'
+                : 'Scan QRIS untuk Menyelesaikan Pembayaran'}
+            </h4>
             <div className="topup-qr-container">
               <img src={qrSrc} alt="Kode QRIS PlayGo" className="topup-qr-image" />
-              <div className="mp-qr-caption">PlayGo Indonesia · QRIS Resmi</div>
+              <div className="mp-qr-caption">
+                {payment.bank === 'DANA'
+                  ? 'DANA E-Wallet · QRIS Midtrans Resmi'
+                  : payment.bank === 'OVO'
+                  ? 'OVO E-Wallet · QRIS Midtrans Resmi'
+                  : 'PlayGo Indonesia · QRIS Midtrans Sandbox'}
+              </div>
             </div>
             <p className="muted mp-payment-hint">
-              Buka aplikasi <strong>GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin by Mandiri</strong>, atau aplikasi perbankan apa pun yang mendukung QRIS, lalu pindai kode QR di atas.
+              {payment.bank === 'DANA'
+                ? 'Buka aplikasi DANA di ponselmu, pilih icon Scan / Bayar, lalu arahkan kamera ke kode QR di atas.'
+                : payment.bank === 'OVO'
+                ? 'Buka aplikasi OVO di ponselmu, pilih icon Pay / Scan, lalu arahkan kamera ke kode QR di atas.'
+                : 'Buka aplikasi GoPay, OVO, DANA, ShopeePay, BCA Mobile, Livin by Mandiri, atau aplikasi perbankan apa pun yang mendukung QRIS, lalu pindai kode QR di atas.'}
             </p>
             {payment.qrString && (
               <button
@@ -230,16 +284,16 @@ function DuitkuPaymentPanel({
               </button>
             </div>
             <p className="muted mp-payment-hint">
-              Transfer sesuai nominal pas sebesar <strong>{formatIdr(payment.amountIdr)}</strong> lewat m-banking, internet banking, atau ATM. Saldo otomatis bertambah begitu pembayaran terkonfirmasi.
+              Transfer sesuai nominal pas sebesar <strong>{formatIdr(payment.amountIdr)}</strong> via ATM, mobile banking, atau internet banking {payment.bank || 'terkait'}. Saldo otomatis bertambah begitu pembayaran terkonfirmasi.
             </p>
           </div>
         )}
 
-        {payment.paymentUrl && (
+        {payment.gateway === 'doku' && payment.paymentUrl && (
           <div className="mp-payment-url-box">
-            <h4>Pembayaran Resmi DOKU Snap</h4>
+            <h4>Pembayaran Resmi DOKU</h4>
             <p className="muted mp-payment-hint">
-              Pop-up pembayaran DOKU Snap terbuka. Jika tertutup, klik tombol di bawah untuk membukanya kembali.
+              Klik tombol di bawah jika jendela checkout belum terbuka.
             </p>
             <div className="mp-payment-actions" style={{ marginBottom: 'var(--space-2)' }}>
               <button
@@ -247,19 +301,9 @@ function DuitkuPaymentPanel({
                 className="btn btn--primary"
                 onClick={() => openDokuCheckout(payment.paymentUrl)}
               >
-                Buka Pop-up Modal DOKU Snap ↗
+                Buka Pop-up Modal DOKU ↗
               </button>
             </div>
-            {!qrSrc && !payment.vaNumber && (
-              <div className="mp-inline-checkout-wrap">
-                <iframe
-                  src={payment.paymentUrl}
-                  title="Pembayaran Instan PlayGo"
-                  className="mp-inline-checkout-frame"
-                  allow="clipboard-read; clipboard-write; payment"
-                />
-              </div>
-            )}
           </div>
         )}
 
@@ -367,16 +411,48 @@ function UnifiedTopupSection({
   onSubmitTopup
 }) {
   const isCoins = mode === 'coins';
+  const [checkoutPkg, setCheckoutPkg] = useState(null);
+  const [activeMethod, setActiveMethod] = useState(selectedMethodCode || 'qris');
+  const [methodCategoryFilter, setMethodCategoryFilter] = useState('all');
+  const [localSubmitting, setLocalSubmitting] = useState(false);
 
-  const handleTopupClick = pkg => {
+  useEffect(() => {
+    if (selectedMethodCode) setActiveMethod(selectedMethodCode);
+  }, [selectedMethodCode]);
+
+  const handleOpenCheckout = pkg => {
     if (!currentUser) {
       onOpenAuth?.();
       return;
     }
     sound.playClick();
     onSelectPkg?.(pkg.id);
-    onSubmitTopup(pkg);
+    setCheckoutPkg(pkg);
   };
+
+  const handleConfirmCheckout = async () => {
+    if (!checkoutPkg || localSubmitting) return;
+    setLocalSubmitting(true);
+    try {
+      onSelectMethod?.(activeMethod);
+      const ok = await onSubmitTopup(checkoutPkg, activeMethod);
+      if (ok) {
+        setCheckoutPkg(null);
+      }
+    } catch {} finally {
+      setLocalSubmitting(false);
+    }
+  };
+
+  const visibleMethods = (methods || []).filter(m => {
+    if (methodCategoryFilter === 'all') return true;
+    if (methodCategoryFilter === 'qris') return m.category === 'qris';
+    if (methodCategoryFilter === 'va') return m.category === 'va';
+    if (methodCategoryFilter === 'ewallet') return m.category === 'ewallet';
+    return true;
+  });
+
+  const activeMethodObj = (methods || []).find(m => m.code === activeMethod) || selectedMethodObj || null;
 
   return (
     <section className="card mp-topup-card" aria-label={isCoins ? 'Top-Up Coins' : 'Top-Up Diamonds'}>
@@ -387,12 +463,10 @@ function UnifiedTopupSection({
             <span>{isCoins ? 'Top-Up Coins PlayGo (Reguler)' : 'Top-Up Diamonds Premium'}</span>
           </h3>
           <p className="shop__group-desc">
-            {isCoins
-              ? 'Pilih paket Coins yang kamu butuhkan, bayar instan via DOKU Snap (QRIS, VA, E-Wallet).'
-              : 'Pilih paket Diamonds yang kamu butuhkan, bayar instan via DOKU Snap (QRIS, VA, E-Wallet).'}
+            Pilih paket yang kamu butuhkan, bayar instan via Midtrans Core API (BCA VA, BNI VA, BRI VA, QRIS, GoPay, DANA, OVO, ShopeePay).
           </p>
         </div>
-        <span className="badge badge--diamond">Proses Otomatis</span>
+        <span className="badge badge--diamond">Midtrans Core API</span>
       </div>
 
       {activePayment?.mode === mode ? (
@@ -410,7 +484,7 @@ function UnifiedTopupSection({
         <div className="mp-diamond-pkg-grid" role="list" aria-label={isCoins ? 'Pilihan paket Coins' : 'Pilihan paket Diamonds'}>
           {packages.map(pkg => {
             const totalD = Number(pkg.diamonds || 0) + Number(pkg.bonusDiamonds || 0);
-            const isBusy = submitting && selectedPkg?.id === pkg.id;
+            const isBusy = (submitting && selectedPkg?.id === pkg.id) || (localSubmitting && checkoutPkg?.id === pkg.id);
             return (
               <div key={pkg.id} className="mp-diamond-pkg">
                 <div className="mp-diamond-pkg__top">
@@ -444,7 +518,7 @@ function UnifiedTopupSection({
                     type="button"
                     className="btn btn--primary btn--sm"
                     disabled={isBusy}
-                    onClick={() => handleTopupClick(pkg)}
+                    onClick={() => handleOpenCheckout(pkg)}
                   >
                     {isBusy ? 'Memproses...' : !currentUser ? 'Login' : isCoins ? 'Top Up Coin' : 'Top Up Diamond'}
                   </button>
@@ -453,6 +527,110 @@ function UnifiedTopupSection({
             );
           })}
         </div>
+      )}
+
+      {checkoutPkg && (
+        <Modal
+          isOpen={Boolean(checkoutPkg)}
+          open={Boolean(checkoutPkg)}
+          onClose={() => setCheckoutPkg(null)}
+          title={`Pilih Metode Pembayaran (${isCoins ? checkoutPkg.name : `${Number(checkoutPkg.diamonds || 0) + Number(checkoutPkg.bonusDiamonds || 0)} Diamonds`})`}
+          subtitle="Midtrans Core API Sandbox"
+          size="md"
+        >
+          <div className="mp-checkout-modal-content" style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <div className="mp-checkout-pkg-summary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--space-3)', background: 'var(--surface-2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <div>
+                <strong style={{ fontSize: 'var(--fs-md)' }}>{checkoutPkg.name}</strong>
+                <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>
+                  {isCoins ? checkoutPkg.description : `${checkoutPkg.diamonds} Diamonds ${checkoutPkg.bonusDiamonds > 0 ? `(+${checkoutPkg.bonusDiamonds} Bonus)` : ''}`}
+                </div>
+              </div>
+              <strong className="topup-price" style={{ fontSize: 'var(--fs-lg)' }}>
+                {isCoins ? (checkoutPkg.formattedPrice || formatIdr(checkoutPkg.price)) : formatIdr(checkoutPkg.priceIdr)}
+              </strong>
+            </div>
+
+            <div className="mp-method-selector-section">
+              <div className="mp-step-head mp-step-head--between" style={{ marginBottom: 'var(--space-2)' }}>
+                <h4 style={{ margin: 0, fontSize: 'var(--fs-sm)' }}>Pilih Channel Pembayaran:</h4>
+                <div className="skin-filter-pills">
+                  {[
+                    { id: 'all', label: 'Semua' },
+                    { id: 'qris', label: 'QRIS' },
+                    { id: 'va', label: 'Virtual Account' },
+                    { id: 'ewallet', label: 'E-Wallet' }
+                  ].map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      className={`btn btn--sm ${methodCategoryFilter === cat.id ? 'btn--primary' : 'btn--ghost'}`}
+                      onClick={() => setMethodCategoryFilter(cat.id)}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mp-method-grid" role="radiogroup" aria-label="Metode Pembayaran">
+                {visibleMethods.map(method => {
+                  const isSelected = activeMethod === method.code;
+                  return (
+                    <button
+                      key={method.code}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      className={`mp-method-card ${isSelected ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        sound.playClick();
+                        setActiveMethod(method.code);
+                      }}
+                    >
+                      <div className="mp-method-card__top">
+                        <span className="mp-method-tag">{methodCategoryLabel(method.category)}</span>
+                        {method.badge && (
+                          <span className={`badge ${method.badge === 'Instan' ? 'badge--success' : 'badge--popular'}`}>
+                            {method.badge}
+                          </span>
+                        )}
+                      </div>
+                      <strong className="mp-method-card__label">{method.label}</strong>
+                      <span className="muted mp-method-card__desc">{method.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mp-checkout-bar" style={{ marginTop: 'var(--space-2)' }}>
+              <div className="mp-checkout-bar__info">
+                <span>Total Pembayaran ({activeMethodObj?.label || 'Midtrans'}):</span>
+                <strong className="mp-payment-amount">
+                  {isCoins ? (checkoutPkg.formattedPrice || formatIdr(checkoutPkg.price)) : formatIdr(checkoutPkg.priceIdr)}
+                </strong>
+              </div>
+              <div className="mp-checkout-bar__cta">
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => setCheckoutPkg(null)}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  disabled={localSubmitting}
+                  onClick={handleConfirmCheckout}
+                >
+                  {localSubmitting ? 'Memproses...' : 'Bayar Sekarang ↗'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
     </section>
   );
@@ -577,8 +755,8 @@ export default function ShopModal({
   const [inspectedSkinId, setInspectedSkinId] = useState(null);
 
   // Conversion & Payment Gateway Direct API Top-Up State
-  const [duitkuMethods, setDuitkuMethods] = useState(DEFAULT_DUITKU_METHODS);
-  const [paymentMethod, setPaymentMethod] = useState('SP');
+  const [duitkuMethods, setDuitkuMethods] = useState(DEFAULT_MIDTRANS_METHODS);
+  const [paymentMethod, setPaymentMethod] = useState('qris');
   const [selectedPkgId, setSelectedPkgId] = useState('');
   const [selectedCoinPkgId, setSelectedCoinPkgId] = useState('');
   const [creatingOrderPkgId, setCreatingOrderPkgId] = useState('');
@@ -913,7 +1091,7 @@ export default function ShopModal({
       setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk top-up Diamonds.' });
       return false;
     }
-    const chosenMethod = methodOverride || 'all';
+    const chosenMethod = methodOverride || paymentMethod || 'qris';
     setCreatingOrderPkgId(pkg.id);
     setFeedback(null);
     sound.playClick();
@@ -944,11 +1122,13 @@ export default function ShopModal({
         vaNumber: inv.vaNumber || order.vaNumber || null,
         qrString: inv.qrString || order.qrString || null,
         qrCodeUrl: inv.qrCodeUrl || order.qrCodeUrl || null,
+        deeplinkUrl: inv.deeplinkUrl || order.deeplinkUrl || null,
         paymentUrl: payUrl,
+        gateway: order.gateway || inv.gateway,
         status: order.status
       });
 
-      if (payUrl) {
+      if (payUrl && (order.gateway === 'doku' || inv.gateway === 'doku')) {
         openDokuCheckout(payUrl);
       }
 
@@ -990,10 +1170,12 @@ export default function ShopModal({
       vaNumber: ord.vaNumber || raw.vaNumber || null,
       qrString: ord.qrString || raw.qrString || null,
       qrCodeUrl: ord.qrCodeUrl || raw.qrCodeUrl || null,
+      deeplinkUrl: ord.deeplinkUrl || raw.deeplinkUrl || null,
       paymentUrl: payUrl,
+      gateway: ord.gateway || raw.gateway || null,
       status: ord.status
     });
-    if (payUrl) {
+    if (payUrl && (ord.gateway === 'doku' || raw.gateway === 'doku')) {
       openDokuCheckout(payUrl);
     }
     window.scrollTo({ top: 180, behavior: 'smooth' });
@@ -1116,7 +1298,7 @@ export default function ShopModal({
       setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu.' });
       return false;
     }
-    const chosenMethod = methodOverride || 'all';
+    const chosenMethod = methodOverride || paymentMethod || 'qris';
     setTopupLegacyId(pkg.id);
     setFeedback(null);
     sound.playClick();
@@ -1145,11 +1327,13 @@ export default function ShopModal({
         vaNumber: data.vaNumber || data.payment?.vaNumber || null,
         qrString: data.qrString || data.payment?.qrString || null,
         qrCodeUrl: data.qrCodeUrl || data.payment?.qrCodeUrl || null,
+        deeplinkUrl: data.deeplinkUrl || data.payment?.deeplinkUrl || null,
         paymentUrl: payUrl,
+        gateway: data.gateway || data.payment?.gateway || null,
         status: 'PENDING'
       });
 
-      if (payUrl) {
+      if (payUrl && (data.gateway === 'doku' || data.payment?.gateway === 'doku')) {
         openDokuCheckout(payUrl);
       }
 

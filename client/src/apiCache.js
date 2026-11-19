@@ -8,9 +8,15 @@ export function getJsonCached(url, { token = '', maxAgeMs = 5000 } = {}) {
   const key = `${token}|${url}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit.promise;
-  const promise = fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const entry = { at: Date.now() };
+  entry.promise = fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
     .then(r => (r.ok ? r.json() : null))
-    .catch(() => null);
-  cache.set(key, { at: Date.now(), promise });
-  return promise;
+    .catch(() => null)
+    .then(data => {
+      // Hasil gagal tidak disimpan supaya tombol "coba lagi" langsung meminta ulang
+      if (data == null && cache.get(key) === entry) cache.delete(key);
+      return data;
+    });
+  cache.set(key, entry);
+  return entry.promise;
 }

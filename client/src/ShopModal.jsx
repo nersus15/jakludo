@@ -2097,7 +2097,11 @@ export default function ShopModal({
 
               {adminSubTab === 'config' && (
                 <form className="card admin-econ-form" onSubmit={saveAdminSettings}>
-                  <h3>Pengaturan Konversi Diamonds → Coins</h3>
+                  <h3>Pengaturan Kurs Diamonds ↔ Coins</h3>
+                  <p className="muted">
+                    Konversi Diamonds → Coins sudah ditutup untuk pemain (ditolak server). Kurs di bawah hanya
+                    berlaku untuk penukaran Coins → Diamonds lewat API.
+                  </p>
                   <div className="admin-form-grid">
                     <label>
                       <span>Coins per 1 Diamond</span>

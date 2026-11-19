@@ -184,6 +184,13 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
       return undefined;
     }
 
+    // Hook ini dipasang di App: tiap perubahan state me-render ulang seluruh aplikasi. Nilai jam
+    // dibulatkan ke resolusi tampilan formatChessClock (detik; persepuluhan di bawah 10 detik) supaya
+    // render hanya terjadi saat angka di layar benar-benar berubah, bukan 10x per detik.
+    const toDisplay = ms => {
+      const v = Math.max(0, ms);
+      return v >= 10000 ? Math.floor(v / 1000) * 1000 : Math.floor(v / 100) * 100;
+    };
     const updateClocks = () => {
       const m = room.match;
       if (room.phase !== 'playing') {
@@ -194,11 +201,11 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
       const nowServer = Date.now() + serverOffsetRef.current;
       const elapsed = m.turnStartedAt ? Math.max(0, nowServer - m.turnStartedAt) : 0;
       if (m.turn === 'w') {
-        setWhiteTimeMs(Math.max(0, (m.whiteTimeMs ?? 0) - elapsed));
-        setBlackTimeMs(Math.max(0, m.blackTimeMs ?? 0));
+        setWhiteTimeMs(toDisplay((m.whiteTimeMs ?? 0) - elapsed));
+        setBlackTimeMs(toDisplay(m.blackTimeMs ?? 0));
       } else {
-        setWhiteTimeMs(Math.max(0, m.whiteTimeMs ?? 0));
-        setBlackTimeMs(Math.max(0, (m.blackTimeMs ?? 0) - elapsed));
+        setWhiteTimeMs(toDisplay(m.whiteTimeMs ?? 0));
+        setBlackTimeMs(toDisplay((m.blackTimeMs ?? 0) - elapsed));
       }
     };
 

@@ -161,7 +161,9 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
       }
 
       if (room.phase === 'question' && room.match?.question?.deadlineAt) {
-        const rem = Math.max(0, room.match.question.deadlineAt - nowServer);
+        // Dibulatkan ke 250 ms: hook ini di App, jadi tiap perubahan me-render ulang seluruh aplikasi.
+        // Bar waktu tetap mulus lewat transisi CSS .mq-timer__fill (0.25s linear).
+        const rem = Math.ceil(Math.max(0, room.match.question.deadlineAt - nowServer) / 250) * 250;
         setRemainingMs(rem);
       } else if (room.phase !== 'question') {
         setRemainingMs(0);

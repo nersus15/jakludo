@@ -264,8 +264,11 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     const onMoveMade = payload => {
       syncServerClock(payload?.serverNow);
       const mv = payload?.move;
+      // Status skak ada di payload (bukan di objek langkah); notasi SAN '+'/'#' sebagai cadangan
+      const isCheck = Boolean(payload?.inCheck) || /[+#]$/.test(mv?.san || '');
+      const isCheckmate = /#$/.test(mv?.san || '');
       if (mv) {
-        if (mv.isCheckmate || mv.isCheck) {
+        if (isCheckmate || isCheck) {
           sound.playMonsterAttack?.();
         } else if (mv.captured) {
           sound.playMonsterHurt?.();
@@ -286,8 +289,8 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
             whiteTimeMs: payload.whiteTimeMs,
             blackTimeMs: payload.blackTimeMs,
             turnStartedAt: payload.serverNow,
-            inCheck: Boolean(mv?.isCheck),
-            isCheckmate: Boolean(mv?.isCheckmate),
+            inCheck: isCheck,
+            isCheckmate,
             lastMove: mv ? { from: mv.from, to: mv.to, san: mv.san, color: mv.color } : prev.match.lastMove,
             drawOffer: null,
             moves: [...(prev.match.moves || []), mv].filter(Boolean)

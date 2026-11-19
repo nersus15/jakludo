@@ -577,8 +577,6 @@ export default function ShopModal({
   const [inspectedSkinId, setInspectedSkinId] = useState(null);
 
   // Conversion & Payment Gateway Direct API Top-Up State
-  const [convertDiamonds, setConvertDiamonds] = useState(10);
-  const [converting, setConverting] = useState(false);
   const [duitkuMethods, setDuitkuMethods] = useState(DEFAULT_DUITKU_METHODS);
   const [paymentMethod, setPaymentMethod] = useState('SP');
   const [selectedPkgId, setSelectedPkgId] = useState('');
@@ -666,13 +664,6 @@ export default function ShopModal({
         }
         if (pkgData.settings) {
           setEconomySettings(pkgData.settings);
-          setConvertDiamonds(prev => {
-            const min = pkgData.settings.minConvertDiamonds || 10;
-            const max = pkgData.settings.maxConvertDiamonds || 50;
-            if (prev < min) return min;
-            if (prev > max) return max;
-            return prev;
-          });
         }
         if (pkgData.wallet) setWallet(pkgData.wallet);
       }
@@ -913,43 +904,6 @@ export default function ShopModal({
       setCopiedField(field);
       setTimeout(() => setCopiedField(''), 2200);
     } catch {}
-  };
-
-  // ---- CONVERSION HANDLER (DIAMONDS -> COINS) ----
-  const handleConvert = async e => {
-    e?.preventDefault?.();
-    if (!currentUser) {
-      setFeedback({ type: 'error', message: 'Silakan login terlebih dahulu untuk menukar Diamonds ke Coins.' });
-      return;
-    }
-    const qty = Number(convertDiamonds);
-    setConverting(true);
-    setFeedback(null);
-    sound.playClick();
-    try {
-      const idempotencyKey = `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const res = await fetch('/api/economy/convert', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ diamonds: qty, direction: 'diamonds_to_coins', idempotencyKey })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error || 'Konversi Diamonds gagal.');
-      sound.playShopPurchase();
-      if (data.wallet) setWallet(data.wallet);
-      if (data.user) onUpdateUser?.(data.user);
-      const spentD = data.conversion?.diamondsSpent ?? data.conversion?.diamondsReceived ?? qty;
-      const gotC = data.conversion?.coinsReceived ?? data.conversion?.coinsSpent ?? qty * Number(economySettings.coinsPerDiamond || 100);
-      setFeedback({
-        type: 'success',
-        message: `Berhasil menukar ${spentD.toLocaleString('id-ID')} Diamonds menjadi +${Number(gotC).toLocaleString('id-ID')} Coins!`
-      });
-      loadEconomyData();
-    } catch (err) {
-      setFeedback({ type: 'error', message: err.message });
-    } finally {
-      setConverting(false);
-    }
   };
 
   // ---- DUITKU DIRECT API v2 DIAMOND TOP-UP ----
@@ -1343,13 +1297,6 @@ export default function ShopModal({
     skins[0] ||
     null;
 
-  const minConv = Number(economySettings.minConvertDiamonds || 10);
-  const maxConv = Number(economySettings.maxConvertDiamonds || 50);
-  const convRate = Number(economySettings.coinsPerDiamond || 100);
-  const clampedConv = Math.max(minConv, Math.min(maxConv, Math.trunc(Number(convertDiamonds) || minConv)));
-  const diamondsNeeded = clampedConv;
-  const coinsReceived = clampedConv * convRate;
-  const canAffordConv = diamonds >= diamondsNeeded && Boolean(economySettings.conversionEnabled);
 
   const combinedPaymentOrders = [
     ...paymentOrders.map(ord => ({
@@ -1413,7 +1360,7 @@ export default function ShopModal({
 
   const navItems = [
     { id: 'skins', icon: 'pawn', label: 'Skin Bidak Ludo', count: skins.length },
-    { id: 'diamonds', icon: 'diamond', label: 'Top-Up & Konversi 💎', count: diamondPackages.length },
+    { id: 'diamonds', icon: 'diamond', label: 'Top-Up Diamonds 💎', count: diamondPackages.length },
     { id: 'items', icon: 'shop', label: 'Item Game', count: catalogItems.length },
     { id: 'coins', icon: 'coin', label: 'Coins', count: legacyPackages.length },
     { id: 'wallet', icon: 'trophy', label: 'Dompet & Riwayat', count: null },
@@ -1552,7 +1499,6 @@ export default function ShopModal({
           <div className="mp-tips card">
             <h4>Info Kurs &amp; Pembayaran</h4>
             <ul>
-              <li><strong>1 💎</strong> = {convRate} Coins</li>
               <li>Menang Match = <strong>+30 Coins</strong></li>
               <li>Bonus Harian = <strong>+5 Coins</strong></li>
               <li>Pembayaran mudah via <strong>QRIS, Virtual Account, &amp; E-Wallet</strong></li>
@@ -1822,118 +1768,9 @@ export default function ShopModal({
             </section>
           )}
 
-          {/* ================= TAB 2: TOP-UP & KONVERSI ================= */}
+          {/* ================= TAB 2: TOP-UP DIAMONDS (konversi ke Coins sudah ditutup) ================= */}
           {activeTab === 'diamonds' && (
             <div className="mp-section">
-              {/* 1. Konversi Diamonds ke Coins */}
-              <section className="mp-convert-card card" aria-label="Konversi Diamonds ke Coins">
-                <div className="mp-card-head">
-                  <div>
-                    <h3 className="shop__group-title">
-                      <Icon name="diamond" size={18} />
-                      <span>→</span>
-                      <Icon name="coin" size={18} />
-                      <span>Konversi Diamonds ke Coins</span>
-                    </h3>
-                    <p className="shop__group-desc">
-                      Tukar Diamonds milikmu menjadi Coins secara instan untuk membeli item taktik &amp; bantuan permainan.
-                    </p>
-                  </div>
-                  <div className="shop-item__badges">
-                    <span className="badge badge--info">1 💎 = {convRate} Coins</span>
-                    <span className="badge badge--brand">Batas {minConv}–{maxConv} 💎</span>
-                    {!economySettings.conversionEnabled && (
-                      <span className="badge badge--warning">Nonaktif Sementara</span>
-                    )}
-                  </div>
-                </div>
-
-                <form onSubmit={handleConvert} className="mp-convert-grid">
-                  <div className="mp-convert-inputs">
-                    <div className="conv-presets">
-                      {[minConv, Math.min(maxConv, 20), Math.min(maxConv, 30), maxConv]
-                        .filter((v, idx, arr) => arr.indexOf(v) === idx)
-                        .map(preset => (
-                          <button
-                            key={preset}
-                            type="button"
-                            className={`btn btn--sm ${Number(convertDiamonds) === preset ? 'btn--primary' : 'btn--secondary'}`}
-                            onClick={() => setConvertDiamonds(preset)}
-                          >
-                            −{preset} 💎 (+{(preset * convRate).toLocaleString('id-ID')} Coins)
-                          </button>
-                        ))}
-                    </div>
-
-                    <label className="conv-input-label">
-                      <span>Jumlah Diamonds ({minConv}–{maxConv}):</span>
-                      <div className="mp-stepper">
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--sm"
-                          disabled={clampedConv <= minConv}
-                          onClick={() => setConvertDiamonds(Math.max(minConv, clampedConv - 1))}
-                          aria-label="Kurangi jumlah Diamonds"
-                        >
-                          −
-                        </button>
-                        <input
-                          type="number"
-                          className="input"
-                          min={minConv}
-                          max={maxConv}
-                          step={1}
-                          value={convertDiamonds}
-                          onChange={e => setConvertDiamonds(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--sm"
-                          disabled={clampedConv >= maxConv}
-                          onClick={() => setConvertDiamonds(Math.min(maxConv, clampedConv + 1))}
-                          aria-label="Tambah jumlah Diamonds"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </label>
-                  </div>
-
-                  <div className="mp-convert-summary-box">
-                    <div className="conv-summary">
-                      <div>
-                        <span className="muted">Biaya Diamonds</span>
-                        <strong>{diamondsNeeded.toLocaleString('id-ID')} 💎</strong>
-                      </div>
-                      <div>
-                        <span className="muted">Sisa Diamonds</span>
-                        <strong>{Math.max(0, diamonds - diamondsNeeded).toLocaleString('id-ID')} 💎</strong>
-                      </div>
-                      <div>
-                        <span className="muted">Coins Diterima</span>
-                        <strong>+{coinsReceived.toLocaleString('id-ID')} Coins</strong>
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="btn btn--primary btn--block"
-                      disabled={!currentUser || converting || !canAffordConv}
-                    >
-                      {converting
-                        ? 'Mengonversi...'
-                        : !currentUser
-                        ? 'Login Terlebih Dahulu'
-                        : !economySettings.conversionEnabled
-                        ? 'Konversi Ditutup Admin'
-                        : diamonds < diamondsNeeded
-                        ? `Diamonds Kurang (Butuh ${diamondsNeeded.toLocaleString('id-ID')} 💎)`
-                        : `Tukar ${diamondsNeeded.toLocaleString('id-ID')} 💎 → +${coinsReceived.toLocaleString('id-ID')} Coins`}
-                    </button>
-                  </div>
-                </form>
-              </section>
-
               {/* 2. Top-Up Diamonds via Payment Gateway */}
               <UnifiedTopupSection
                 mode="diamonds"

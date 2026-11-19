@@ -422,6 +422,7 @@ export default function SnakesLaddersScreen({
     animatingMove,
     animatedPositions,
     hopCounters,
+    slidingPlayers = {},
     boardEffect,
     error,
     notice,
@@ -787,10 +788,11 @@ export default function SnakesLaddersScreen({
                     const hopClass =
                       hopCount > 0 ? (hopCount % 2 === 1 ? 'is-hopping-a' : 'is-hopping-b') : '';
                     const isTurn = currentTurnPlayer?.id === p.id;
+                    const sliding = slidingPlayers[p.id];
                     return (
                       <div
                         key={p.id}
-                        className={`snk-token color-${p.color || 'red'} ${isTurn ? 'is-turn' : ''}`}
+                        className={`snk-token color-${p.color || 'red'} ${isTurn ? 'is-turn' : ''} ${sliding ? `is-sliding is-sliding--${sliding}` : ''}`}
                         style={{
                           left: `${coords.xPercent + shiftX}%`,
                           top: `${coords.yPercent + shiftY}%`

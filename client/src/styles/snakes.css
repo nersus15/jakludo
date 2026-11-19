@@ -1277,3 +1277,49 @@
   color: var(--ink-2);
   flex-shrink: 0;
 }
+
+/* Naik tangga / turun ular: luncuran 1 detik (lebih lambat dari 1 langkah) supaya terlihat jelas.
+   Durasi sama dengan SLIDE_MS di useSnakesLadders.js. */
+.snk-token.is-sliding {
+  z-index: 6;
+}
+
+.snk-token.is-sliding--ladder {
+  /* naik: mulai pelan lalu melesat ke atas, seperti memanjat */
+  transition: left 1s cubic-bezier(0.55, 0, 0.35, 1), top 1s cubic-bezier(0.55, 0, 0.35, 1), transform 0.25s ease;
+}
+
+.snk-token.is-sliding--snake {
+  /* turun: tertarik cepat lalu melambat di ekor ular */
+  transition: left 1s cubic-bezier(0.3, 0.6, 0.35, 1), top 1s cubic-bezier(0.3, 0.6, 0.35, 1), transform 0.25s ease;
+}
+
+.snk-token.is-sliding--ladder .snk-token__pawn {
+  animation: snk-climb 1s ease-in-out;
+}
+
+.snk-token.is-sliding--snake .snk-token__pawn {
+  animation: snk-slither 1s ease-in-out;
+}
+
+@keyframes snk-climb {
+  0%, 100% { transform: none; }
+  20%, 60% { transform: translateY(-6%) rotate(-6deg); }
+  40%, 80% { transform: translateY(-6%) rotate(6deg); }
+}
+
+@keyframes snk-slither {
+  0% { transform: none; }
+  15% { transform: rotate(-14deg) scale(0.92); }
+  35% { transform: rotate(12deg) scale(0.9); }
+  55% { transform: rotate(-10deg) scale(0.92); }
+  75% { transform: rotate(8deg) scale(0.96); }
+  100% { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snk-token.is-sliding--ladder .snk-token__pawn,
+  .snk-token.is-sliding--snake .snk-token__pawn {
+    animation: none;
+  }
+}

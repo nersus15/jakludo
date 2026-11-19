@@ -2072,3 +2072,26 @@
   background: currentColor;
   flex-shrink: 0;
 }
+
+/* Gerak bidak: meluncur dari petak asal ke petak tujuan. Bidak = 86% petak, jadi 1 petak = 116.28%
+   dari ukuran bidak. z-index tinggi supaya bidak melintas di atas petak lain. */
+.cm-piece-wrap--arrive {
+  position: relative;
+  z-index: 4;
+  animation: cm-piece-slide 0.22s cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+
+@keyframes cm-piece-slide {
+  from {
+    transform: translate(calc(var(--dx, 0) * 116.28%), calc(var(--dy, 0) * 116.28%));
+  }
+  to {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-piece-wrap--arrive {
+    animation: none;
+  }
+}

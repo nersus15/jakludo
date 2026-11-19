@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../storage';
+import { getJsonCached } from '../apiCache';
 import { sound } from '../sound';
 import { triggerConfetti } from '../confetti';
 import { QUIZ_MONSTERS } from '../quiz/monsters';
@@ -81,17 +82,15 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
     }
   }, []);
 
-  const fetchQuizMeta = useCallback(async () => {
+  // fresh: lewati cache (dipakai setelah pertandingan selesai / keluar room, saat datanya berubah)
+  const fetchQuizMeta = useCallback(async ({ fresh = false } = {}) => {
     const token = authToken || storage.get('token');
+    const maxAgeMs = fresh ? 0 : 5000;
     setLoadingStats(true);
     try {
       const [lbRes, statsRes] = await Promise.all([
-        fetch('/api/quiz/leaderboard').then(r => (r.ok ? r.json() : null)).catch(() => null),
-        token
-          ? fetch('/api/quiz/stats', { headers: { Authorization: `Bearer ${token}` } })
-              .then(r => (r.ok ? r.json() : null))
-              .catch(() => null)
-          : Promise.resolve(null)
+        getJsonCached('/api/quiz/leaderboard', { maxAgeMs }),
+        token ? getJsonCached('/api/quiz/stats', { token, maxAgeMs }) : Promise.resolve(null)
       ]);
       if (lbRes?.success && Array.isArray(lbRes.leaderboard)) {
         setLeaderboard(lbRes.leaderboard);
@@ -344,7 +343,7 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
       if (currentUser?.id && payload.stats?.[currentUser.id]) {
         setStats(payload.stats[currentUser.id]);
       }
-      fetchQuizMeta();
+      fetchQuizMeta({ fresh: true });
     };
 
     const onPlayerDisconnected = payload => {
@@ -592,7 +591,7 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
     setChatOpenState(false);
     chatOpenRef.current = false;
     setSlotAnim({ 0: 'idle', 1: 'idle', 2: 'idle' });
-    fetchQuizMeta();
+    fetchQuizMeta({ fresh: true });
   }, [socket, room?.code, authToken, fetchQuizMeta]);
 
   const sendReaction = useCallback(

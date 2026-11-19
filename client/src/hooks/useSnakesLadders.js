@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../storage';
+import { getJsonCached } from '../apiCache';
 import { sound } from '../sound';
 import { triggerConfetti } from '../confetti';
 
@@ -153,20 +154,15 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     [clearAnimTimers, clearDiceTimer, showError]
   );
 
-  const fetchSnakesMeta = useCallback(async (page = 1) => {
+  // fresh: lewati cache (dipakai setelah pertandingan selesai / keluar room, saat datanya berubah)
+  const fetchSnakesMeta = useCallback(async (page = 1, { fresh = false } = {}) => {
     const token = authToken || storage.get('token');
+    const maxAgeMs = fresh ? 0 : 5000;
     setLoadingMeta(true);
     try {
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [lbRes, profRes] = await Promise.all([
-        fetch(`/api/games/snakes-and-ladders/leaderboard?page=${page}&limit=20`, { headers })
-          .then(r => (r.ok ? r.json() : null))
-          .catch(() => null),
-        token
-          ? fetch('/api/games/snakes-and-ladders/history?limit=15', { headers })
-              .then(r => (r.ok ? r.json() : null))
-              .catch(() => null)
-          : Promise.resolve(null)
+        getJsonCached(`/api/games/snakes-and-ladders/leaderboard?page=${page}&limit=20`, { token, maxAgeMs }),
+        token ? getJsonCached('/api/games/snakes-and-ladders/history?limit=15', { token, maxAgeMs }) : Promise.resolve(null)
       ]);
       if (lbRes?.success) {
         setLeaderboard(Array.isArray(lbRes.entries) ? lbRes.entries : []);
@@ -499,7 +495,7 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
         } else {
           sound.playMonsterDefeat?.() || sound.playClick?.();
         }
-        fetchSnakesMeta(1);
+        fetchSnakesMeta(1, { fresh: true });
       }, finishDelay);
       animTimersRef.current.push(t);
     };
@@ -796,7 +792,7 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     if (socket && code) {
       socket.emit('snakes:room:leave', { code, token });
     }
-    fetchSnakesMeta(1);
+    fetchSnakesMeta(1, { fresh: true });
   }, [authToken, room?.code, socket, clearAnimTimers, clearDiceTimer, fetchSnakesMeta]);
 
   const setChatOpen = useCallback(open => {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { getJsonCached } from '../apiCache';
 import Icon from '../components/Icon';
 import jakludoLogo from '../assets/jakludo-logo.webp';
 import monsterQuizLogo from '../assets/monster-quiz-logo.webp';
@@ -51,11 +52,13 @@ function GlobalLeaderboardSection({ onOpenLeaderboard }) {
 
   React.useEffect(() => {
     let active = true;
+    // Ringkasan peringkat di beranda dicache 30 detik: beranda dibuka berulang kali saat berpindah game
+    const opts = { maxAgeMs: 30000 };
     Promise.all([
-      fetch('/api/leaderboard').then(r => r.json()).catch(() => ({})),
-      fetch('/api/quiz/leaderboard').then(r => r.json()).catch(() => ({})),
-      fetch('/api/chess/leaderboard?page=1&limit=10').then(r => r.json()).catch(() => ({})),
-      fetch('/api/games/snakes-and-ladders/leaderboard?page=1&limit=10').then(r => r.json()).catch(() => ({}))
+      getJsonCached('/api/leaderboard', opts),
+      getJsonCached('/api/quiz/leaderboard', opts),
+      getJsonCached('/api/chess/leaderboard?page=1&limit=10', opts),
+      getJsonCached('/api/games/snakes-and-ladders/leaderboard?page=1&limit=10', opts)
     ]).then(([ludoData, quizData, chessData, snakesData]) => {
       if (!active) return;
       if (ludoData?.success) setLudoList(ludoData.leaderboard || []);

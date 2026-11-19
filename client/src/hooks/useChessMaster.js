@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../storage';
+import { getJsonCached } from '../apiCache';
 import { sound } from '../sound';
 import { triggerConfetti } from '../confetti';
 
@@ -103,20 +104,15 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     [showError]
   );
 
-  const fetchChessMeta = useCallback(async (page = 1) => {
+  // fresh: lewati cache (dipakai setelah pertandingan selesai / keluar room, saat datanya berubah)
+  const fetchChessMeta = useCallback(async (page = 1, { fresh = false } = {}) => {
     const token = authToken || storage.get('token');
+    const maxAgeMs = fresh ? 0 : 5000;
     setLoadingMeta(true);
     try {
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [lbRes, profRes] = await Promise.all([
-        fetch(`/api/chess/leaderboard?page=${page}&limit=20`, { headers })
-          .then(r => (r.ok ? r.json() : null))
-          .catch(() => null),
-        token
-          ? fetch('/api/chess/profile', { headers })
-              .then(r => (r.ok ? r.json() : null))
-              .catch(() => null)
-          : Promise.resolve(null)
+        getJsonCached(`/api/chess/leaderboard?page=${page}&limit=20`, { token, maxAgeMs }),
+        token ? getJsonCached('/api/chess/profile', { token, maxAgeMs }) : Promise.resolve(null)
       ]);
       if (lbRes?.success) {
         setLeaderboard(Array.isArray(lbRes.entries) ? lbRes.entries : []);
@@ -364,7 +360,7 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
         sound.playClick();
       }
 
-      fetchChessMeta(1);
+      fetchChessMeta(1, { fresh: true });
     };
 
     const onRematchRequested = payload => {
@@ -709,7 +705,7 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     setChatToast(null);
     setChatOpenState(false);
     chatOpenRef.current = false;
-    fetchChessMeta(1);
+    fetchChessMeta(1, { fresh: true });
   }, [socket, room?.code, authToken, fetchChessMeta]);
 
   const sendReaction = useCallback(

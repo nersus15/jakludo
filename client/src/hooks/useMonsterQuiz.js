@@ -7,10 +7,20 @@ import { QUIZ_MONSTERS } from '../quiz/monsters';
 
 const QUIZ_ROOM_KEY = 'active_quiz_room';
 
+const getQuizRoomFromUrl = () => {
+  if (typeof window === 'undefined') return '';
+  const p = new URLSearchParams(window.location.search);
+  const g = String(p.get('game') || '').toLowerCase();
+  if (g === 'quiz' || g === 'monster-quiz') {
+    return String(p.get('room') || '').trim().toUpperCase();
+  }
+  return '';
+};
+
 // Hook state & komunikasi realtime Monster Quiz Battle
 export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, onNeedLogin, active }) {
   const [room, setRoom] = useState(null);
-  const [joinCode, setJoinCode] = useState('');
+  const [joinCode, setJoinCode] = useState(() => getQuizRoomFromUrl());
   const [selectedMonsterId, setSelectedMonsterId] = useState(QUIZ_MONSTERS[0].id);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
@@ -130,6 +140,24 @@ export function useMonsterQuiz({ socket, authToken, currentUser, onUpdateUser, o
     if (socket.connected) tryRejoin();
     return () => socket.off('connect', tryRejoin);
   }, [socket, authToken, dropStaleRoom]);
+
+  // Otomatis bergabung ke room jika membuka link undangan (?game=quiz&room=CODE)
+  useEffect(() => {
+    const urlCode = getQuizRoomFromUrl();
+    if (!urlCode || !socket || !active) return;
+    const token = authToken || storage.get('token');
+    if (!token) return;
+    socket.emit('quiz:room:join', { code: urlCode, token, monsterId: selectedMonsterId }, res => {
+      if (res?.ok) {
+        if (typeof window !== 'undefined' && window.location.search.includes('room=')) {
+          const params = new URLSearchParams(window.location.search);
+          params.delete('room');
+          const next = params.toString() ? `?${params.toString()}` : window.location.pathname;
+          window.history.replaceState(window.history.state, '', next);
+        }
+      }
+    });
+  }, [active, socket, authToken, selectedMonsterId]);
 
   useEffect(() => {
     if (!socket) return undefined;

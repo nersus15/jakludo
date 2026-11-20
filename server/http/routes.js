@@ -447,6 +447,8 @@ function createApiRouter() {
         vaNumber: gwRes.vaNumber || null,
         qrString: gwRes.qrString || null,
         qrCodeUrl: gwRes.qrCodeUrl || null,
+        deeplinkUrl: gwRes.deeplinkUrl || null,
+        actions: gwRes.actions || null,
         paymentMethod: gwRes.paymentMethod || selectedMethod,
         paymentMethodName: gwRes.paymentMethodName || null,
         paymentCategory: gwRes.paymentCategory || null,

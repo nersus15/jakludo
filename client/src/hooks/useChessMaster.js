@@ -6,6 +6,16 @@ import { triggerConfetti } from '../confetti';
 
 const CHESS_ROOM_KEY = 'active_chess_room';
 
+const getChessRoomFromUrl = () => {
+  if (typeof window === 'undefined') return '';
+  const p = new URLSearchParams(window.location.search);
+  const g = String(p.get('game') || '').toLowerCase();
+  if (g === 'chess' || g === 'chess-master') {
+    return String(p.get('room') || '').trim().toUpperCase();
+  }
+  return '';
+};
+
 export const CHESS_TIME_CONTROLS = [
   { id: '5+0', label: '5+0', category: 'blitz', initialMs: 300000, incrementMs: 0, featured: true, desc: '5 Menit Blitz' },
   { id: '10+0', label: '10+0', category: 'rapid', initialMs: 600000, incrementMs: 0, featured: true, desc: '10 Menit Rapid' },
@@ -18,7 +28,7 @@ export const CHESS_TIME_CONTROLS = [
 
 export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, onNeedLogin, active }) {
   const [room, setRoom] = useState(null);
-  const [joinCode, setJoinCode] = useState('');
+  const [joinCode, setJoinCode] = useState(() => getChessRoomFromUrl());
   const [timeControl, setTimeControl] = useState('5+0');
   const [preferredSide, setPreferredSide] = useState('random');
   const [botDifficulty, setBotDifficulty] = useState('medium');
@@ -160,6 +170,24 @@ export function useChessMaster({ socket, authToken, currentUser, onUpdateUser, o
     if (socket.connected) tryRejoin();
     return () => socket.off('connect', tryRejoin);
   }, [socket, authToken, dropStaleRoom]);
+
+  // Otomatis bergabung ke room jika membuka link undangan (?game=chess&room=CODE)
+  useEffect(() => {
+    const urlCode = getChessRoomFromUrl();
+    if (!urlCode || !socket || !active) return;
+    const token = authToken || storage.get('token');
+    if (!token) return;
+    socket.emit('chess:room:join', { code: urlCode, token }, res => {
+      if (res?.ok) {
+        if (typeof window !== 'undefined' && window.location.search.includes('room=')) {
+          const params = new URLSearchParams(window.location.search);
+          params.delete('room');
+          const next = params.toString() ? `?${params.toString()}` : window.location.pathname;
+          window.history.replaceState(window.history.state, '', next);
+        }
+      }
+    });
+  }, [active, socket, authToken]);
 
   useEffect(() => {
     if (!socket) return undefined;

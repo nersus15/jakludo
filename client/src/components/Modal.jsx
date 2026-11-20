@@ -8,6 +8,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 // Jika asPage={true}, dirender sebagai halaman penuh (bukan popup modal) untuk navigasi mobile.
 export default function Modal({
   isOpen,
+  open,
   onClose,
   title,
   subtitle,
@@ -19,13 +20,14 @@ export default function Modal({
   children,
   footer
 }) {
+  const visible = Boolean(isOpen ?? open);
   const titleId = useId();
   const panelRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!isOpen || asPage) return undefined;
+    if (!visible || asPage) return undefined;
     const previouslyFocused = document.activeElement;
     const panel = panelRef.current;
     // Fokus ke elemen pertama di dalam dialog (lewati tombol tutup jika ada elemen lain)
@@ -62,15 +64,15 @@ export default function Modal({
       document.body.style.overflow = overflow;
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };
-  }, [isOpen, asPage]);
+  }, [visible, asPage]);
 
   useEffect(() => {
-    if (isOpen && asPage) {
+    if (visible && asPage) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [isOpen, asPage]);
+  }, [visible, asPage]);
 
-  if (!isOpen) return null;
+  if (!visible) return null;
 
   if (asPage) {
     return (

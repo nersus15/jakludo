@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'playgo-econ-test-'));
 process.env.JAKLUDO_DATA_DIR = dataDir;
@@ -505,6 +506,125 @@ test('DOKU Diamond Top-Up & Switch Gateway (.env): switch DOKU <-> Duitku, heade
 
     w = await apiJson('/api/economy/wallet', { token });
     assert.equal(w.data.wallet.diamonds, 35);
+  } finally {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('Midtrans Core API Top-Up: sandbox charge, 8 payment methods, SHA512 webhook verify, dan credit Diamonds', async () => {
+  const prevEnv = {
+    PAYMENT_GATEWAY: process.env.PAYMENT_GATEWAY,
+    MIDTRANS_SERVER_KEY: process.env.MIDTRANS_SERVER_KEY,
+    MIDTRANS_CLIENT_KEY: process.env.MIDTRANS_CLIENT_KEY
+  };
+
+  process.env.PAYMENT_GATEWAY = 'midtrans';
+  process.env.MIDTRANS_SERVER_KEY = 'SB-Mid-server-test-key-123';
+  process.env.MIDTRANS_CLIENT_KEY = 'SB-Mid-client-test-key-123';
+
+  try {
+    const playerAuth = await registerUser('midtrans_player');
+    const token = playerAuth.token;
+
+    // 1. Cek paket & katalog 8 payment methods Midtrans
+    const pkgRes = await apiJson('/api/economy/packages', { token });
+    assert.equal(pkgRes.status, 200);
+    assert.equal(pkgRes.data.gateway, 'midtrans');
+    assert.equal(pkgRes.data.paymentMethods.length, 8);
+
+    const codes = pkgRes.data.paymentMethods.map(m => m.code);
+    assert.ok(codes.includes('bca_va'));
+    assert.ok(codes.includes('bni_va'));
+    assert.ok(codes.includes('bri_va'));
+    assert.ok(codes.includes('qris'));
+    assert.ok(codes.includes('gopay'));
+    assert.ok(codes.includes('dana'));
+    assert.ok(codes.includes('ovo'));
+    assert.ok(codes.includes('shopeepay'));
+
+    // 2. Buat order BCA VA via Core API
+    const bcaOrderRes = await apiJson('/api/economy/topup/create', {
+      method: 'POST',
+      token,
+      body: { packageId: 'pkg_starter', paymentMethod: 'bca_va' }
+    });
+    assert.equal(bcaOrderRes.status, 200);
+    assert.equal(bcaOrderRes.data.success, true);
+    assert.equal(bcaOrderRes.data.order.gateway, 'midtrans');
+    assert.equal(bcaOrderRes.data.order.paymentUrl, null, 'Must NOT use Snap paymentUrl');
+    assert.ok(bcaOrderRes.data.order.vaNumber, 'Must have VA number for BCA');
+
+    // 3. Buat order GoPay via Core API
+    const gopayOrderRes = await apiJson('/api/economy/topup/create', {
+      method: 'POST',
+      token,
+      body: { packageId: 'pkg_starter', paymentMethod: 'gopay' }
+    });
+    assert.equal(gopayOrderRes.status, 200);
+    assert.ok(gopayOrderRes.data.order.deeplinkUrl, 'Must have deeplinkUrl for GoPay');
+
+    // 4. Webhook Notifikasi Midtrans: SHA512(order_id + status_code + gross_amount + server_key)
+    const orderId = bcaOrderRes.data.order.id;
+    const grossAmount = `${bcaOrderRes.data.order.amountIdr}.00`;
+    const statusCode = '200';
+    const serverKey = 'SB-Mid-server-test-key-123';
+    const validSignature = crypto
+      .createHash('sha512')
+      .update(`${orderId}${statusCode}${grossAmount}${serverKey}`)
+      .digest('hex');
+
+    // Coba kirim signature palsu -> ditolak 400
+    const badSigRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_id: orderId,
+        status_code: statusCode,
+        gross_amount: grossAmount,
+        signature_key: 'palsu_signature',
+        transaction_status: 'settlement'
+      })
+    });
+    assert.equal(badSigRes.status, 400);
+
+    // Kirim signature asli -> diterima 200 & Diamonds dikreditkan
+    const validWebhookRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_id: orderId,
+        status_code: statusCode,
+        gross_amount: grossAmount,
+        signature_key: validSignature,
+        transaction_status: 'settlement',
+        payment_type: 'bank_transfer',
+        transaction_id: 'midtrans_trans_001'
+      })
+    });
+    assert.equal(validWebhookRes.status, 200);
+
+    const walletAfter = await apiJson('/api/economy/wallet', { token });
+    assert.equal(walletAfter.data.wallet.diamonds, 10);
+
+    // Idempotency: kirim ulang webhook settlement yang sama tidak menduplikasi kredit
+    const duplicateRes = await fetch(`${url}/api/topup/notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_id: orderId,
+        status_code: statusCode,
+        gross_amount: grossAmount,
+        signature_key: validSignature,
+        transaction_status: 'settlement'
+      })
+    });
+    assert.equal(duplicateRes.status, 200);
+
+    const walletDuplicate = await apiJson('/api/economy/wallet', { token });
+    assert.equal(walletDuplicate.data.wallet.diamonds, 10);
   } finally {
     for (const [k, v] of Object.entries(prevEnv)) {
       if (v === undefined) delete process.env[k];

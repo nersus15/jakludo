@@ -6,6 +6,16 @@ import { triggerConfetti } from '../confetti';
 
 const SNAKES_ROOM_KEY = 'active_snakes_room';
 
+const getSnakesRoomFromUrl = () => {
+  if (typeof window === 'undefined') return '';
+  const p = new URLSearchParams(window.location.search);
+  const g = String(p.get('game') || '').toLowerCase();
+  if (g === 'snakes' || g === 'snakes-and-ladders' || g === 'ular-tangga') {
+    return String(p.get('room') || '').trim().toUpperCase();
+  }
+  return '';
+};
+
 export const DEFAULT_LADDERS = Object.freeze({
   4: 14,
   9: 31,
@@ -30,7 +40,7 @@ export const DEFAULT_SNAKES = Object.freeze({
 
 export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser, onNeedLogin, active }) {
   const [room, setRoom] = useState(null);
-  const [joinCode, setJoinCode] = useState('');
+  const [joinCode, setJoinCode] = useState(() => getSnakesRoomFromUrl());
   const [searching, setSearching] = useState(false);
   const [searchStartedAt, setSearchStartedAt] = useState(null);
   const [searchElapsedSec, setSearchElapsedSec] = useState(0);
@@ -238,6 +248,24 @@ export function useSnakesLadders({ socket, authToken, currentUser, onUpdateUser,
     if (socket.connected) tryRejoin();
     return () => socket.off('connect', tryRejoin);
   }, [socket, authToken, dropStaleRoom]);
+
+  // Otomatis bergabung ke room jika membuka link undangan (?game=snakes&room=CODE)
+  useEffect(() => {
+    const urlCode = getSnakesRoomFromUrl();
+    if (!urlCode || !socket || !active) return;
+    const token = authToken || storage.get('token');
+    if (!token) return;
+    socket.emit('snakes:room:join', { code: urlCode, token }, res => {
+      if (res?.ok) {
+        if (typeof window !== 'undefined' && window.location.search.includes('room=')) {
+          const params = new URLSearchParams(window.location.search);
+          params.delete('room');
+          const next = params.toString() ? `?${params.toString()}` : window.location.pathname;
+          window.history.replaceState(window.history.state, '', next);
+        }
+      }
+    });
+  }, [active, socket, authToken]);
 
   // Listener Socket.IO untuk seluruh event Snakes and Ladders
   useEffect(() => {

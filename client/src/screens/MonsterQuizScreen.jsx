@@ -7,6 +7,7 @@ import ChatPanel from '../components/game/ChatPanel';
 import MonsterSprite from '../quiz/MonsterSprite';
 import { QUIZ_MONSTERS, getClientMonster } from '../quiz/monsters';
 import { sound } from '../sound';
+import { copyOrShareRoom } from '../utils/shareRoom';
 import monsterQuizLogo from '../assets/monster-quiz-logo.webp';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
@@ -179,12 +180,27 @@ export default function MonsterQuizScreen({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [room, actions]);
 
+  const [shareFeedback, setShareFeedback] = useState('');
+
   const copyRoomCode = code => {
     if (!code) return;
     sound.playClick();
     navigator.clipboard?.writeText(code).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleShareRoom = async () => {
+    if (!room?.code) return;
+    sound.playClick();
+    const res = await copyOrShareRoom({ game: 'quiz', roomCode: room.code });
+    if (res.status === 'copied') {
+      setShareFeedback('Link room tersalin!');
+      setTimeout(() => setShareFeedback(''), 2500);
+    } else if (res.status === 'shared') {
+      setShareFeedback('Link dibagikan!');
+      setTimeout(() => setShareFeedback(''), 2500);
+    }
   };
 
   // ==========================================
@@ -512,6 +528,9 @@ export default function MonsterQuizScreen({
             <span className="badge badge--info">{room.players?.length || 1} / 3 Pemain (Maks 3)</span>
             <span className="muted">Kode Room:</span>
             <strong className="code-text mq-code-pill">{room.code}</strong>
+            <button type="button" className="btn btn--primary" onClick={handleShareRoom}>
+              {shareFeedback ? `✓ ${shareFeedback}` : '🔗 Bagikan Link Room'}
+            </button>
             <button type="button" className="btn btn--secondary" onClick={() => copyRoomCode(room.code)}>
               {copied ? 'Tersalin!' : 'Salin Kode'}
             </button>
@@ -574,7 +593,10 @@ export default function MonsterQuizScreen({
               <div className="mq-lobby-empty">
                 <span className="spinner" aria-hidden="true" />
                 <strong>Menunggu Pemain 2...</strong>
-                <p className="muted">Bagikan kode room <strong>{room.code}</strong> kepada temanmu.</p>
+                <p className="muted">Bagikan link atau kode room <strong>{room.code}</strong> kepada temanmu.</p>
+                <button type="button" className="btn btn--secondary btn--sm" style={{ marginTop: '8px' }} onClick={handleShareRoom}>
+                  🔗 {shareFeedback ? `✓ ${shareFeedback}` : 'Bagikan Link Room'}
+                </button>
               </div>
             )}
           </div>
